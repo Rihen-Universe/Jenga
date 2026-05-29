@@ -66,6 +66,25 @@ jobs:
           python scripts/build_examples_archive.py dist
           ls -lh dist/jenga-examples-* || true
 
+      - name: Extraire les notes du CHANGELOG pour cette version
+        id: notes
+        run: |
+          set -euo pipefail
+          VER="${{ steps.ver.outputs.version }}"
+          : > RELEASE_BODY.md
+          if [ -f CHANGELOG.md ]; then
+            # Extrait la section "## ...<VER>..." jusqu'au prochain titre "## ".
+            awk -v ver="$VER" '
+              /^## / { if (inblk) exit; if (index($0, ver)) { inblk=1; next } }
+              inblk { print }
+            ' CHANGELOG.md > RELEASE_BODY.md || true
+          fi
+          if [ ! -s RELEASE_BODY.md ]; then
+            echo "Voir le CHANGELOG.md pour le detail des changements." > RELEASE_BODY.md
+          fi
+          echo "----- Apercu des notes de release -----"
+          cat RELEASE_BODY.md
+
       - name: Creer / mettre a jour la release GitHub
         uses: softprops/action-gh-release@v2
         with:
@@ -73,6 +92,9 @@ jobs:
           # (workflow_dispatch) : on cree un tag base sur __version__.
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.ver.outputs.version) }}
           name: Jenga v${{ steps.ver.outputs.version }}
+          # Le body (extrait du CHANGELOG) est mis EN TETE, suivi des notes
+          # auto-generees (liste des commits/PRs).
+          body_path: RELEASE_BODY.md
           generate_release_notes: true
           fail_on_unmatched_files: true
           # Tout le contenu de dist/ : wheel + sdist du package + archives

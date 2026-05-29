@@ -22,7 +22,7 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 """
 
 # Version du produit Jenga.
-__version__ = "2.0.2"
+__version__ = "2.0.3"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

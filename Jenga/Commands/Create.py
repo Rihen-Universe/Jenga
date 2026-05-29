@@ -58,6 +58,8 @@ class CreateCommand:
                             help="Project kind (default: console)")
         parser.add_argument("--lang", default="C++", help="Programming language (default: C++)")
         parser.add_argument("--location", default=".", help="Project location relative to workspace (default: .)")
+        parser.add_argument("--separate", "--own-file", dest="separate", action="store_true",
+                            help="Put the project in its OWN .jenga file (included via include()) instead of inline in the workspace .jenga")
         parser.add_argument("--element", choices=list(CreateCommand.ELEMENT_TYPES.keys()),
                             help="Create a code element instead of a project")
         parser.add_argument("--name", help="Name of the element (class, enum, etc.)")
@@ -154,11 +156,21 @@ class CreateCommand:
         kind_enum = getattr(Api.ProjectKind, CreateCommand.PROJECT_KINDS[args.kind])
         lang_enum = getattr(Api.Language, args.lang.upper().replace('+', 'P').replace('-', ''))
 
-        # Ajouter l'entrée dans le fichier .jenga (location() = dossier du projet)
+        # Deux modes d'ajout au workspace :
+        #   - inline (defaut)  : bloc `with project(...)` ecrit dans le .jenga
+        #                        du workspace.
+        #   - separate (--separate) : le projet a son PROPRE fichier .jenga dans
+        #                        son dossier, rattache au workspace via include().
         dialect = getattr(args, 'dialect', '')
-        CreateCommand._AppendProjectToJengaFile(
-            entry_file, args.name, kind_enum, lang_enum, relative_location, dialect=dialect
-        )
+        if getattr(args, 'separate', False):
+            CreateCommand._WriteSeparateProjectJenga(
+                project_dir, args.name, kind_enum, lang_enum, dialect)
+            rel_jenga = f"{relative_location}/{args.name}.jenga"
+            CreateCommand._AppendIncludeToWorkspace(entry_file, args.name, rel_jenga)
+        else:
+            CreateCommand._AppendProjectToJengaFile(
+                entry_file, args.name, kind_enum, lang_enum, relative_location, dialect=dialect
+            )
 
         # Créer des fichiers source par défaut
         if args.kind in ('console', 'windowed', 'test'):
@@ -198,6 +210,11 @@ class CreateCommand:
         # 5. Location
         location = Display.Prompt("Location (relative to workspace)", default=".")
 
+        # 5b. Fichier .jenga separe (inclus) ou inline dans le workspace ?
+        separate = Display.PromptYesNo(
+            "Donner au projet son PROPRE fichier .jenga (inclus via include) ? "
+            "(Non = inline dans le .jenga du workspace)", default=False)
+
         # 6. Namespace
         use_namespace = Display.PromptYesNo("Use a namespace?", default=False)
         namespace = None
@@ -216,6 +233,7 @@ class CreateCommand:
         print(f"  Type:         {kind}")
         print(f"  Language:     {lang} ({std})")
         print(f"  Location:     {location}")
+        print(f"  Jenga file:   {'separate (.jenga inclus)' if separate else 'inline dans le workspace'}")
         if namespace:
             print(f"  Namespace:    {namespace}")
         print(f"  Directories:  {'Yes' if create_dirs else 'No'}")
@@ -226,6 +244,8 @@ class CreateCommand:
         project_root = Path(entry_file.parent) / relative_location
         print(f"\n  Structure:")
         print(f"  {relative_location}/")
+        if separate:
+            print(f"  +-- {name}.jenga   (projet inclus via include)")
         if create_dirs:
             print(f"  +-- src/")
             if create_files:
@@ -244,6 +264,7 @@ class CreateCommand:
             lang=lang,
             location=location,
             dialect=std,
+            separate=separate,
         )
         result = CreateCommand._CreateProjectDirect(parsed, entry_file)
         if result != 0:
@@ -494,13 +515,14 @@ public:
         }
         kind_fn = kind_to_dsl.get(kind_enum, "consoleapp")
 
-        # Determine dialect DSL call
+        # Determine dialect DSL call (indente a 8 espaces : contenu du projet,
+        # lui-meme indente a 4 dans le bloc `with workspace(...)`).
         dialect_line = ""
         if dialect:
             if lang_enum.value in ("C++", "Objective-C++"):
-                dialect_line = f'\n    cppdialect("{dialect}")'
+                dialect_line = f'\n        cppdialect("{dialect}")'
             else:
-                dialect_line = f'\n    cdialect("{dialect}")'
+                dialect_line = f'\n        cdialect("{dialect}")'
 
         # Determine file extensions based on language
         if lang_enum.value in ("C++", "Objective-C++"):
@@ -508,17 +530,74 @@ public:
         else:
             files_pattern = 'files(["src/**.c", "include/**.h"])'
 
+        # Le bloc projet est INDENTE (4 espaces) pour vivre A L'INTERIEUR du
+        # `with workspace(...):`. Pas de shebang/coding (le fichier en a deja
+        # un en tete). On ajoute une ligne vide de separation avant le bloc.
         with open(entry_file, 'a', encoding='utf-8') as f:
-            f.write(f'''#!/usr/bin/env python3
+            f.write(f'''
+    # Project: {name}
+    with project("{name}"):
+        {kind_fn}()
+        language("{lang_enum.value}"){dialect_line}
+        location("{location}")
+        {files_pattern}
+''')
+
+    @staticmethod
+    def _WriteSeparateProjectJenga(project_dir: Path, name: str, kind_enum, lang_enum,
+                                    dialect: str = ""):
+        """Ecrit un fichier .jenga DEDIE pour le projet, dans son propre dossier.
+
+        Ce fichier est destine a etre rattache au workspace via `with include()`.
+        On utilise location(".") : le mecanisme include resout "." vers le dossier
+        du fichier inclus — donc le projet vit dans le dossier de CE .jenga.
+        """
+        kind_to_dsl = {
+            Api.ProjectKind.CONSOLE_APP: "consoleapp",
+            Api.ProjectKind.WINDOWED_APP: "windowedapp",
+            Api.ProjectKind.STATIC_LIB: "staticlib",
+            Api.ProjectKind.SHARED_LIB: "sharedlib",
+            Api.ProjectKind.TEST_SUITE: "testsuite",
+        }
+        kind_fn = kind_to_dsl.get(kind_enum, "consoleapp")
+
+        dialect_line = ""
+        if dialect:
+            if lang_enum.value in ("C++", "Objective-C++"):
+                dialect_line = f'\n    cppdialect("{dialect}")'
+            else:
+                dialect_line = f'\n    cdialect("{dialect}")'
+
+        if lang_enum.value in ("C++", "Objective-C++"):
+            files_pattern = 'files(["src/**.cpp", "include/**.hpp"])'
+        else:
+            files_pattern = 'files(["src/**.c", "include/**.h"])'
+
+        content = f'''#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-                    
-# Project: {name}
+
+# {name} - Jenga Project (inclus dans le workspace via include())
+
+from Jenga import *
 
 with project("{name}"):
     {kind_fn}()
     language("{lang_enum.value}"){dialect_line}
-    location("{location}")
+    location(".")
     {files_pattern}
+'''
+        FileSystem.WriteFile(project_dir / f"{name}.jenga", content)
+
+    @staticmethod
+    def _AppendIncludeToWorkspace(entry_file: Path, name: str, rel_jenga: str):
+        """Ajoute un `with include(...)` indente DANS le `with workspace(...)`
+        pour rattacher le projet (fichier .jenga separe) au workspace."""
+        rel = rel_jenga.replace("\\", "/")
+        with open(entry_file, 'a', encoding='utf-8') as f:
+            f.write(f'''
+    # Project: {name} (fichier .jenga separe, inclus)
+    with include("{rel}"):
+        pass
 ''')
 
     @staticmethod
