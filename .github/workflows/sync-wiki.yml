@@ -64,6 +64,16 @@ jobs:
           find "$TMP" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
           cp -R "$WIKI_SRC"/. "$TMP"/
 
+          # Corrige les liens inter-pages pour le wiki GitHub : le wiki resout
+          # les pages par leur NOM, sans extension .md. On retire donc ".md" des
+          # liens markdown internes :
+          #   [Installation](Installation.md)      -> [Installation](Installation)
+          #   [X](Premier-Workspace.md#section)     -> [X](Premier-Workspace#section)
+          # Les fichiers SOURCES gardent ".md" (navigables dans le depot) ; seule
+          # la copie publiee vers le wiki est transformee.
+          find "$TMP" -name '*.md' -type f -exec \
+            sed -i -E 's/\]\(([^)#]+)\.md([)#])/](\1\2/g' {} +
+
           cd "$TMP"
           git add -A
           if git diff --cached --quiet; then
