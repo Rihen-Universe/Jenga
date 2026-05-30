@@ -1,7 +1,8 @@
 # Jenga — Roadmap du projet
 
-**Version courante :** v2.0.2 (réseau/pare-feu multi-plateforme, mai 2026)
-**Document rédigé :** 27 mai 2026
+**Version courante :** v2.0.4 (installateur self-extracting + signature + UX warnings + fixes Android, 30 mai 2026)
+**Versions précédentes :** v2.0.2 (réseau/pare-feu multi-plateforme, mai 2026) · v2.0.3 (intermédiaire)
+**Document rédigé :** 27 mai 2026, mis à jour 30 mai 2026
 **Auteur :** synthèse du code et des documents existants
 
 > **Jenga** est un système de build cross-plateforme écrit en Python pour les
@@ -401,6 +402,11 @@ externe. Code : [Jenga/Tools/Installer/](../Tools/Installer/). Spec :
 | 10 | ~~DSL `firewallrule(...)` règles personnalisées~~ | API | — | ✅ Fait |
 | 11 | Backend natif fenêtré HarmonyOS réel (exemple 27) | HarmonyOS | 2 j | ⬜ |
 | 12 | Tests unitaires HarmonyOS dédiés | Qualité | 0.5 j | ⬜ |
+| 13 | ~~Page wiki bilingue "Installation des outils" (compilateurs/SDK/NDK/JDK/emsdk)~~ | Doc | — | ✅ Fait v2.0.4 ([Installation-des-Outils.md](wiki/Installation-des-Outils.md)) |
+| 14 | ~~Sessions Windows aveugles aux `setx` (env backfill)~~ | UX/Win | — | ✅ Fait v2.0.4 ([_envbackfill.py](../_envbackfill.py)) |
+| 15 | ~~AndroidBuilder retour silencieux sur StaticLib/SharedLib~~ | Android | — | ✅ Fait v2.0.4 |
+| 16 | ~~Résumé final warnings/erreurs après BUILD COMPLETED~~ | UX | — | ✅ Fait v2.0.4 |
+| 17 | ~~Installateur self-extracting maison (`--type jng`) + signature multi-OS~~ | Packaging | — | ✅ Fait v2.0.4 (cf. §5.7) |
 
 ### 6.2 Moyen terme (v2.2 — v2.5)
 
