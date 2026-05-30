@@ -2,6 +2,7 @@
 
 - [Home](Home.md)
 - [Installation](Installation.md)
+- [Installation des outils / Tools Installation](Installation-des-Outils.md)
 - [Premier Workspace / First Workspace](Premier-Workspace.md)
 - [Commandes CLI / CLI Commands](Commandes-CLI.md)
 - [DSL Reference](DSL-Reference.md)
