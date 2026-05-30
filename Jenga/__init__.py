@@ -13,6 +13,13 @@ import types
 from ._version import __version__, __author__
 __license__ = "Proprietary"
 
+# Windows : hydrate `os.environ` depuis HKCU/HKLM Environment pour les vars
+# que Jenga lit (ANDROID_*, JAVA_HOME, EMSDK, ...). Evite que `setx` ne soit
+# invisible des sessions PowerShell ouvertes avant lui. No-op sur Unix.
+from ._envbackfill import BackfillWindowsEnv as _BackfillWindowsEnv
+_BackfillWindowsEnv()
+del _BackfillWindowsEnv
+
 # Exposer l'API publique directement depuis le package racine
 from .Core.Api import (
     # Enums

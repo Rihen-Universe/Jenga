@@ -440,6 +440,25 @@ class BuildCommand:
 
     @staticmethod
     def Execute(args: List[str]) -> int:
+        """Point d'entrée CLI. Wrap Reset + résumé warnings/erreurs en queue,
+        puis délègue le travail réel à _ExecuteCore."""
+        from ..Utils.Reporter import Reporter
+        Reporter.Reset()
+        rc = 1
+        try:
+            rc = BuildCommand._ExecuteCore(args)
+            return rc
+        finally:
+            # Résumé final (warnings critiques / errors / warnings) en encadré
+            # visible, après packaging APK/MSI/... — visible même au milieu de
+            # 1000 lignes de logs. No-op si rien à dire.
+            Reporter.PrintCollectedSummary()
+            # Politique : si des warnings critiques ont été levés et le build
+            # est resté à 0, on n'élève PAS automatiquement le code pour
+            # rester compat avec l'existant. Le résumé suffit à attirer l'œil.
+
+    @staticmethod
+    def _ExecuteCore(args: List[str]) -> int:
 
         parser = argparse.ArgumentParser(prog="jenga build", description="Build the workspace or a specific project.")
         parser.add_argument("--config", default="Debug", help="Build configuration (Debug, Release, etc.)")

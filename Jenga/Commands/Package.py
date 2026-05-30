@@ -34,9 +34,11 @@ class PackageCommand:
         'ios': {'ipa'},
         'tvos': {'ipa'},
         'watchos': {'ipa'},
-        'windows': {'msi', 'exe', 'zip'},
-        'linux': {'deb', 'rpm', 'appimage', 'snap'},
-        'macos': {'pkg', 'dmg'},
+        # 'jng' = installateur self-extracting MAISON (Jenga/Tools/Installer),
+        # sans dependance externe. C'est une option DE PLUS (msi/exe/zip restent).
+        'windows': {'msi', 'exe', 'zip', 'jng'},
+        'linux': {'deb', 'rpm', 'appimage', 'snap', 'jng'},
+        'macos': {'pkg', 'dmg', 'jng'},
         'web': {'zip'},
         'harmonyos': {'hap'},
     }
@@ -174,6 +176,11 @@ class PackageCommand:
 
         output_dir = Path(parsed.output).resolve()
         FileSystem.MakeDirectory(output_dir)
+
+        # Type 'jng' : installateur self-extracting maison (multi-plateforme,
+        # sans dependance externe). Commun a toutes les plateformes desktop.
+        if pkg_type == 'jng':
+            return PackageCommand._PackageSelfExtract(project, builder, output_dir, parsed.platform)
 
         # Dispatch selon plateforme
         if parsed.platform == 'android':
@@ -1327,6 +1334,159 @@ Description: {project.name} packaged by Jenga
             return 1
 
         return 1
+
+    # -----------------------------------------------------------------------
+    # Installateur self-extracting MAISON (type 'jng') — multi-plateforme,
+    # sans dependance externe (Jenga/Tools/Installer).
+    # -----------------------------------------------------------------------
+    @staticmethod
+    def _PackageSelfExtract(project, builder, output_dir: Path, platform: str) -> int:
+        """Construit un installateur self-extracting (stub C compile + payload).
+
+        Reutilise dependfiles(), l'icone, licensefile() et Core/FirewallSpec.
+        C'est une OPTION de plus : msi/exe/zip/deb/pkg restent disponibles.
+        """
+        try:
+            from ..Tools.Installer import BuildInstaller, BuilderError, DetectCCompiler
+        except Exception as e:
+            Colored.PrintError(f"Module Installer indisponible : {e}")
+            return 1
+        from ..Core import FirewallSpec
+
+        if DetectCCompiler() is None:
+            Colored.PrintError(
+                "Aucun compilateur C (cc/clang/gcc/cl) pour construire "
+                "l'installateur self-extracting (--type jng).")
+            return 1
+
+        if not builder.BuildProject(project):
+            Colored.PrintError("Build failed, cannot package.")
+            return 1
+        exe_path = builder.GetTargetPath(project)
+        if not exe_path.exists():
+            Colored.PrintError(f"Executable not found: {exe_path}")
+            return 1
+
+        app_name = project.targetName or project.name
+        exe_name = exe_path.name
+
+        # Fichiers embarques : exe principal + dependfiles (resources, DLLs auto).
+        files = [(exe_name, str(exe_path), 0o755)]
+        for src_abs, archive_path in PackageCommand._CollectDependFiles(project, builder):
+            files.append((archive_path.replace("\\", "/"), str(src_abs), 0o644))
+
+        # Manifeste
+        publisher = (getattr(project, "appPublisher", "") or "").strip() or DEFAULT_PUBLISHER
+        version = (getattr(project, "appVersion", "") or getattr(project, "iosVersion", "") or "1.0.0")
+        manifest = {
+            "name": app_name,
+            "version": version,
+            "publisher": publisher,
+            "exe": exe_name,
+            "default_dir_windows": rf"%LOCALAPPDATA%\Programs\{app_name}",
+            "default_dir_linux": f"~/.local/opt/{app_name}",
+            "default_dir_macos": f"/Applications/{app_name}",
+            "shortcut_menu": "1",
+        }
+        if getattr(project, "createDesktopShortcut", True):
+            manifest["shortcut_desktop"] = "1"
+
+        # Icone : on garde l'icone user CLEAN dans l'archive (raccourcis user)
+        # et on incruste un petit marquage "Jenga" UNIQUEMENT sur l'icone du
+        # stub Setup.exe (anti-faux-positifs AV + identification claire qu'il
+        # s'agit d'un installateur Jenga).
+        stub_icon_path: Optional[str] = None
+        try:
+            ico = PackageCommand._ResolveWindowsIcoForPackage(project, builder, output_dir)
+            if ico is not None and Path(ico).exists():
+                files.append((Path(ico).name, str(ico), 0o644))
+                manifest["icon"] = Path(ico).name
+                if platform == "windows":
+                    stub_icon_path = PackageCommand._ComposeStubIcon(Path(ico), output_dir, app_name)
+        except Exception:
+            pass
+
+        # Pare-feu Windows : commandes netsh avec placeholder {exe} (substitue
+        # par le stub avec le chemin reel de l'exe installe).
+        if platform == "windows":
+            add_cmds = FirewallSpec.BuildNetshAddCommands(project, "{exe}")
+            del_cmds = FirewallSpec.BuildNetshDeleteCommands(project)
+            if add_cmds:
+                manifest["firewall_add"] = " & ".join(add_cmds)
+            if del_cmds:
+                manifest["firewall_del"] = " & ".join(del_cmds)
+
+        # UAC : asInvoker par defaut (anti-faux-positifs AV). Si une regle de
+        # pare-feu netsh est embarquee, elle exige admin -> requireAdministrator.
+        # L'utilisateur peut forcer via project.signRequireAdmin.
+        require_admin_attr = getattr(project, "signRequireAdmin", None)
+        if require_admin_attr is None:
+            require_admin = bool(manifest.get("firewall_add"))
+        else:
+            require_admin = bool(require_admin_attr)
+
+        # Signature de code : options optionnelles du DSL (signingcertificate,
+        # signingidentity, signingthumbprint, signingtimestampurl, signinggpgkey).
+        sign_options = PackageCommand._CollectSignOptions(project)
+
+        # Construction de l'installateur.
+        ext = ".exe" if platform == "windows" else ".run"
+        out = output_dir / f"{project.name}-setup{ext}"
+        try:
+            BuildInstaller(files, manifest, out, verbose=False,
+                           platform=platform, require_admin=require_admin,
+                           icon_path=stub_icon_path, sign_options=sign_options)
+        except BuilderError as e:
+            Colored.PrintError(f"Echec construction de l'installateur : {e}")
+            return 1
+        Colored.PrintSuccess(f"Installateur self-extracting (jng) : {out}")
+        return 0
+
+    # -----------------------------------------------------------------------
+    # Composition de l'icone du stub Setup.exe : icone user + "Jenga" incruste.
+    # -----------------------------------------------------------------------
+    @staticmethod
+    def _ComposeStubIcon(user_ico: Path, output_dir: Path, app_name: str) -> str:
+        """Produit `<output_dir>/<app_name>-setup-icon.ico` avec l'icone user +
+        marquage "Jenga" en bas a droite. Retourne le chemin de l'icone
+        composee, ou de l'icone user d'origine en fallback (Pillow absent /
+        composition echouee)."""
+        try:
+            from ..Tools.Installer import ComposeInstallerIcon, IsBrandingAvailable
+        except Exception:
+            return str(user_ico)
+        if not IsBrandingAvailable():
+            return str(user_ico)
+        branded = output_dir / f"{app_name}-setup-icon.ico"
+        ok = ComposeInstallerIcon(user_ico, branded, brand_text="Jenga")
+        return str(branded) if ok and branded.exists() else str(user_ico)
+
+    # -----------------------------------------------------------------------
+    # Collecte des options de signature de code depuis le DSL du projet.
+    # -----------------------------------------------------------------------
+    @staticmethod
+    def _CollectSignOptions(project) -> Optional[Dict[str, str]]:
+        """Lit les attributs DSL de signature et renvoie un dict (ou None).
+
+        DSL (cf. Api.py) : signingcertificate(path), signingpassword(pwd),
+        signingthumbprint(hex), signingidentity(name), signingtimestampurl(url),
+        signinggpgkey(id), signingentitlements(path)."""
+        keys = {
+            "signCertificate":   "cert_file",
+            "signPassword":      "cert_password",
+            "signThumbprint":    "cert_thumbprint",
+            "signIdentity":      "identity",
+            "signTimestampUrl":  "timestamp_url",
+            "signGpgKey":        "gpg_key",
+            "signEntitlements":  "entitlements",
+            "signEnabled":       "enabled",
+        }
+        opts: Dict[str, str] = {}
+        for attr, key in keys.items():
+            value = getattr(project, attr, None)
+            if value:
+                opts[key] = str(value)
+        return opts or None
 
     @staticmethod
     def _BuildMacosPkgScripts(project, output_dir: Path, FirewallSpec) -> Optional[Path]:

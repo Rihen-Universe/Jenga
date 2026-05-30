@@ -336,6 +336,51 @@ D'après le `Readme.md` racine et la philosophie du projet :
 - ✅ Analyse complète du code : 3 bugs critiques corrigés et documentés
   (notes de version)
 
+### 5.7 Installateur self-extracting maison (v2.0.4, mai 2026)
+
+Alternative intégrée à Inno Setup / WiX, multi-plateforme, sans dépendance
+externe. Code : [Jenga/Tools/Installer/](../Tools/Installer/). Spec :
+[DESIGN.md](../Tools/Installer/DESIGN.md).
+
+- ✅ Format `[stub natif C] + [payload manifeste+archive] + [trailer 80 octets]`
+  avec **SHA-256 anti-tampering** vérifié AVANT extraction
+- ✅ Stub C portable (Windows / Linux / macOS) : extraction, raccourcis,
+  registre Uninstall, exécution firewall, désinstalleur
+- ✅ **Anti-faux-positifs antivirus** : VERSIONINFO (éditeur Rihen, version)
+  + manifeste UAC `asInvoker` + DPI aware + supportedOS Win7→Win11 (compilés
+  via `rc.exe` MSVC ou `windres` MinGW, best-effort)
+- ✅ **Signature de code multi-plateforme** : Authenticode `signtool` Windows
+  (SHA-256 + timestamp), `codesign` macOS (`--options runtime --timestamp`),
+  signature détachée GPG Linux. Skip propre sans certificat.
+- ✅ **Icône composée** : icône user + petit "Jenga" en pill noire
+  semi-transparente bas-droite sur le Setup.exe (les raccourcis user
+  gardent l'icône clean). Multi-tailles 16→256, Pillow soft-dep.
+- ✅ DSL signature (8 fonctions) : `signingcertificate`, `signingpassword`,
+  `signingthumbprint`, `signingidentity`, `signingtimestampurl`,
+  `signinggpgkey`, `signingentitlements`, `signingrequireadmin`
+- ✅ Intégré à `jenga package --type jng` (Windows/Linux/macOS) sans
+  remplacer msi/exe/zip/deb/pkg
+
+### 5.8 UX du build (v2.0.4)
+
+- ✅ **Résumé final warnings/erreurs** ([Reporter.py](../Utils/Reporter.py)) :
+  `Reporter.PrintCollectedSummary()` affiche un encadré rouge/jaune après
+  "BUILD COMPLETED" listant **tous** les warnings et erreurs émis pendant
+  le build (texte intégral, pas de compteurs seuls)
+- ✅ Flag `Reporter.Warning(..., critical=True)` pour les warnings bloquants
+  fonctionnellement (ex. APK non signable) — surfacé en rouge
+- ✅ Warning keystore Android escalé en `critical=True`
+- ✅ **Sessions Windows aveugles aux `setx`** ([_envbackfill.py](../_envbackfill.py)) :
+  à `import Jenga`, hydrate `os.environ` depuis HKCU/HKLM pour `ANDROID_*`,
+  `JAVA_HOME`, `EMSDK`, `OHOS_SDK`, `GameDK`, `ZIG_ROOT` — plus besoin de
+  redémarrer le terminal après configuration permanente
+- ✅ **`AndroidBuilder` compile maintenant StaticLib/SharedLib** ([Android.py:986](../Core/Builders/Android.py#L986)) :
+  cibler une lib pour Android (ex. `jenga build --platform android --target NKWindow`)
+  compile la lib + ses deps via `super().Build()`, sans packaging APK,
+  avec message clair (avant : retour 0 silencieux)
+- ✅ **`Builder.Build` clarifie target introuvable** ([Builder.py:2073](../Core/Builder.py#L2073)) :
+  attrape `ValueError` (en plus de `RuntimeError`) + liste des projets disponibles
+
 ---
 
 ## 6. Ce qui reste à faire
@@ -359,18 +404,20 @@ D'après le `Readme.md` racine et la philosophie du projet :
 
 ### 6.2 Moyen terme (v2.2 — v2.5)
 
-| # | Tâche | Domaine |
-|---|-------|---------|
-| 1 | Publication multi-registres : `vcpkg`, `Conan`, `npm`, `PyPI` (NuGet déjà fait) | Distribution |
-| 2 | Profilage complet pour toutes les plateformes (actuellement placeholder) | Outillage |
-| 3 | Code-signing automatisé Windows (signtool, certificats EV) | Sécurité |
-| 4 | Notarisation macOS automatisée (`xcrun notarytool`) | macOS |
-| 5 | Mode `jenga doctor` — diagnostic complet de l'environnement | UX |
-| 6 | Hot reload pour `jenga watch` sur exemples interactifs | DX |
-| 7 | Plugin VS Code (syntaxe `.jenga`, IntelliSense) | Outillage |
-| 8 | Intégration GitHub Actions (templates `.yml` générés) | CI/CD |
-| 9 | Cache distribué (S3, Azure Blob) pour CI/CD partagé | Performance |
-| 10 | Support **CMake → Jenga importer** (migration assistée) | Adoption |
+| # | Tâche | Domaine | Statut |
+|---|-------|---------|--------|
+| 1 | Publication multi-registres : `vcpkg`, `Conan`, `npm`, `PyPI` (NuGet déjà fait) | Distribution | ⬜ |
+| 2 | Profilage complet pour toutes les plateformes (actuellement placeholder) | Outillage | ⬜ |
+| 3 | ~~Code-signing automatisé Windows (signtool, certificats EV)~~ | Sécurité | ✅ v2.0.4 (installateur `--type jng`, DSL `signingxxx`) |
+| 4 | Notarisation macOS automatisée (`xcrun notarytool`) | macOS | 🟡 codesign fait, notarisation à câbler |
+| 5 | Mode `jenga doctor` — diagnostic complet de l'environnement | UX | ⬜ |
+| 6 | Hot reload pour `jenga watch` sur exemples interactifs | DX | ⬜ |
+| 7 | Plugin VS Code (syntaxe `.jenga`, IntelliSense) | Outillage | ⬜ |
+| 8 | Intégration GitHub Actions (templates `.yml` générés) | CI/CD | ⬜ |
+| 9 | Cache distribué (S3, Azure Blob) pour CI/CD partagé | Performance | ⬜ |
+| 10 | Support **CMake → Jenga importer** (migration assistée) | Adoption | ⬜ |
+| 11 | Installateur `--type jng` Phase 3 : GUI wizard EULA/dossier/composants + compression LZMA/zstd + hooks pré/post-install | Packaging | ⬜ |
+| 12 | Installateur `--type jng` Phase 4 : multi-langues + associations fichiers/PATH + upgrade/repair | Packaging | ⬜ |
 
 ### 6.3 Long terme (v3.x)
 

@@ -79,6 +79,9 @@ Desktop.ini
 *.swp
 *.swo
 *~
+# pyrightconfig.json est genere par IDEConfigurator au build (extraPaths
+# absolus, machine-specifique) -> jamais commit.
+pyrightconfig.json
 
 # Local env files
 .env

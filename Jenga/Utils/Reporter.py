@@ -282,9 +282,18 @@ def ExportJUnitXml(report: TestReport, path: Union[str, Path]) -> None:
 # ---------------------------------------------------------------------------
 
 class Reporter:
-    """Build reporter for logging and progress."""
+    """Build reporter for logging and progress.
+
+    Collecte aussi tous les Warning/Error de haut niveau (DSL, packaging, sign,
+    keystore...) dans des listes class-level pour les re-afficher en encadré à
+    la toute fin du build (cf. PrintCollectedSummary). Les warnings 'critical'
+    surfacent en rouge et peuvent élever le code de retour."""
     verbose = False
     start_time = None
+    # Collectes (lifetime = entre Reset() et PrintCollectedSummary())
+    _collectedWarnings: list = []         # list[str]  — warnings non critiques
+    _collectedCriticals: list = []        # list[str]  — warnings flagués critical=True
+    _collectedErrors: list = []           # list[str]  — erreurs de haut niveau
 
     @classmethod
     def Start(cls) -> None:
@@ -315,12 +324,21 @@ class Reporter:
 
     @classmethod
     def Error(cls, message: str) -> None:
-        """Print error message."""
+        """Print error message + collecte pour le résumé final."""
+        cls._collectedErrors.append(str(message))
         Display.Error(message)
 
     @classmethod
-    def Warning(cls, message: str) -> None:
-        """Print warning message."""
+    def Warning(cls, message: str, critical: bool = False) -> None:
+        """Print warning message + collecte pour le résumé final.
+
+        `critical=True` indique un warning bloquant fonctionnellement (ex. APK
+        non signable → Android refuse l'install). Surfacé en rouge dans le
+        résumé final et peut élever le code de retour selon la configuration."""
+        if critical:
+            cls._collectedCriticals.append(str(message))
+        else:
+            cls._collectedWarnings.append(str(message))
         Display.Warning(message)
 
     @classmethod
@@ -339,6 +357,76 @@ class Reporter:
         """Print debug message (only in verbose mode)."""
         if cls.verbose:
             Display.Debug(message)
+
+    # -----------------------------------------------------------------------
+    # Collecte et résumé final (anti-warning-noye-dans-1000-lignes)
+    # -----------------------------------------------------------------------
+    @classmethod
+    def Reset(cls) -> None:
+        """Vide les listes collectées. Appelé au début de chaque BuildCommand.Execute."""
+        cls._collectedWarnings = []
+        cls._collectedCriticals = []
+        cls._collectedErrors = []
+
+    @classmethod
+    def HasCriticalWarnings(cls) -> bool:
+        """Indique si au moins un warning critique a été collecté."""
+        return bool(cls._collectedCriticals)
+
+    @classmethod
+    def GetCollectedCounts(cls) -> tuple:
+        """Retourne (nbCriticals, nbWarnings, nbErrors)."""
+        return (len(cls._collectedCriticals), len(cls._collectedWarnings),
+                len(cls._collectedErrors))
+
+    @classmethod
+    def PrintCollectedSummary(cls) -> None:
+        """Imprime, en TOUTE FIN de build (après packaging APK/MSI/...), un
+        encadré listant TOUS les warnings et erreurs collectés. Visible même
+        au milieu de 1000 lignes de logs : c'est le 'dernier mot' du build.
+
+        Rien à dire → no-op silencieux. Sinon : criticals en rouge, warnings
+        en jaune, errors en rouge. Texte intégral, pas seulement des compteurs."""
+        if not (cls._collectedCriticals or cls._collectedWarnings or cls._collectedErrors):
+            return
+        w = 80
+
+        def _box(items, label, color):
+            print()
+            print(Colored.Colorize("┌" + "─" * (w - 2) + "┐", color=color, bold=True))
+            heading = f" {label} ({len(items)}) "
+            print(Colored.Colorize("│" + heading.ljust(w - 2) + "│", color=color, bold=True))
+            print(Colored.Colorize("├" + "─" * (w - 2) + "┤", color=color))
+            for index, item in enumerate(items, start=1):
+                # Wrap les longs messages sur plusieurs lignes (largeur w-6).
+                inner_width = w - 6
+                first_prefix = f"  {index:>2}. "
+                lines = _WrapLines(item, inner_width)
+                if not lines:
+                    lines = [""]
+                print(Colored.Colorize("│" + (first_prefix + lines[0]).ljust(w - 2) + "│",
+                                       color=color))
+                for sub in lines[1:]:
+                    print(Colored.Colorize("│" + ("      " + sub).ljust(w - 2) + "│",
+                                           color=color))
+            print(Colored.Colorize("└" + "─" * (w - 2) + "┘", color=color, bold=True))
+
+        if cls._collectedErrors:
+            _box(cls._collectedErrors, "ERRORS", "red")
+        if cls._collectedCriticals:
+            _box(cls._collectedCriticals, "CRITICAL WARNINGS (action requise)", "red")
+        if cls._collectedWarnings:
+            _box(cls._collectedWarnings, "WARNINGS", "yellow")
+
+
+def _WrapLines(text: str, width: int) -> list:
+    """Soft-wrap pour rester dans la largeur de l'encadré, sans casser les
+    chemins de fichier ni les commandes."""
+    import textwrap
+    if not text:
+        return []
+    return textwrap.wrap(str(text), width=max(20, width),
+                         break_long_words=False, break_on_hyphens=False) or [str(text)]
 
 
 # ---------------------------------------------------------------------------

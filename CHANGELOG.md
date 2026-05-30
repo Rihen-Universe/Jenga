@@ -3,6 +3,61 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.0.4
+
+### Ajouté
+
+- **Installateur self-extracting MAISON** (`Jenga/Tools/Installer/`) — alternative
+  intégrée à Inno Setup / WiX, sans dépendance externe :
+  - Stub C portable (`Stub/Installer.c`) + payload (manifeste + archive) + trailer
+    80 octets avec **SHA-256 anti-tampering** (vérifié AVANT extraction).
+  - Builder Python (`Builder.py`) : compile le stub, assemble le payload.
+  - **Anti-faux-positifs antivirus** (`Resource.py`) : VERSIONINFO (éditeur
+    Rihen, version, description, copyright) + **manifeste UAC `asInvoker`**
+    (compatibilité OS Win7→Win11, DPI aware) embarqués dans le PE Windows.
+  - **Signature de code multi-plateforme** (`Signing.py`) : Authenticode
+    (`signtool`) sur Windows, `codesign` sur macOS, signature détachée GPG
+    sur Linux. Skip propre sans certificat (warning, pas erreur).
+  - **Icône composée** (`Branding.py`) : icône user + petit "Jenga" incrusté
+    en bas à droite sur le stub Setup.exe (les raccourcis user gardent l'icône
+    propre). Pillow soft-dep avec dégradation gracieuse.
+  - Raccourcis Windows (`.lnk` via COM/IShellLink), Linux (`.desktop`),
+    entrée Programmes et fonctionnalités (registre Uninstall HKCU),
+    règles pare-feu via `FirewallSpec`.
+  - Intégré à `jenga package --type jng` (Windows/Linux/macOS) sans
+    remplacer msi/exe/zip/deb/pkg.
+- **DSL signature** (8 fonctions, `Jenga/Core/Api.py`) : `signingcertificate(path)`,
+  `signingpassword(pwd)`, `signingthumbprint(hex)`, `signingidentity(name)`,
+  `signingtimestampurl(url)`, `signinggpgkey(id)`, `signingentitlements(path)`,
+  `signingrequireadmin(bool)`.
+- **Résumé final des warnings/erreurs de build** (`Jenga/Utils/Reporter.py`) :
+  `Reporter.PrintCollectedSummary()` affiche un encadré rouge/jaune après
+  "BUILD COMPLETED" listant **tous** les warnings et erreurs émis pendant
+  le build — fini les warnings critiques noyés dans 1000 lignes de logs.
+  Nouveau flag `Reporter.Warning(..., critical=True)` pour les warnings
+  bloquants fonctionnellement (ex. APK non signable).
+
+### Corrigé
+
+- **Sessions Windows aveugles aux `setx`** (`Jenga/_envbackfill.py`) : à
+  `import Jenga`, hydrate `os.environ` depuis `HKCU\\Environment` puis
+  `HKLM\\…\\Environment` pour `ANDROID_*`, `JAVA_HOME`, `EMSDK`, `OHOS_SDK`,
+  `GameDK`, `ZIG_ROOT`. Plus besoin de redémarrer le terminal après un
+  `setx`/Paramètres Système. No-op sur Unix.
+- **`AndroidBuilder` retournait 0 silencieusement pour une cible lib**
+  (`Jenga/Core/Builders/Android.py`) : cibler une `StaticLib`/`SharedLib`
+  pour Android (`jenga build --platform android --target NKWindow`) ne
+  faisait rien et sortait avec succès. Le builder délègue maintenant à
+  `super().Build()` pour compiler la lib + sa chaîne de deps via
+  `DependencyResolver`, avec message clair. Idem sans target et sans app
+  déclaré dans le workspace.
+- **Target introuvable peu visible** (`Jenga/Core/Builder.py`) : `Build()`
+  attrape maintenant `ValueError` (en plus de `RuntimeError`) levé par
+  `DependencyResolver.ResolveBuildOrder` et affiche la liste des projets
+  disponibles.
+- **Warning keystore Android escalé en `critical=True`** : remonte dans le
+  résumé final en rouge (impossible à manquer même au milieu de logs).
+
 ## v2.0.3
 
 ### Corrigé

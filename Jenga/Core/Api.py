@@ -1985,6 +1985,69 @@ def appversion(version: str) -> None:
         _currentProject.appVersion = str(version or "").strip()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Signature de code de l'installateur self-extracting (--type jng).
+# Sans certificat -> l'installateur est produit mais non signe (warning).
+# Levier decisif contre les alertes SmartScreen et les faux positifs antivirus.
+# ─────────────────────────────────────────────────────────────────────────────
+def signingcertificate(path: str) -> None:
+    """Windows : certificat de signature de code (.pfx). Combine avec
+    signingpassword() si protege. Ex : signingcertificate('keys/rihen.pfx')."""
+    if _currentProject:
+        _currentProject.signCertificate = str(path or "").strip()
+
+
+def signingpassword(password: str) -> None:
+    """Mot de passe du certificat .pfx (Windows). Evite de hardcoder : lis
+    plutot une variable d'env via os.environ dans le .jenga."""
+    if _currentProject:
+        _currentProject.signPassword = str(password or "")
+
+
+def signingthumbprint(thumbprint: str) -> None:
+    """Windows : empreinte SHA-1 du certificat dans le magasin (CurrentUser\\My).
+    Alternative a signingcertificate() quand le cert est deja installe."""
+    if _currentProject:
+        _currentProject.signThumbprint = str(thumbprint or "").strip()
+
+
+def signingidentity(identity: str) -> None:
+    """macOS : identite codesign (ex : 'Developer ID Application: Rihen (TEAMID)').
+    Sans identite, l'installateur macOS reste non signe."""
+    if _currentProject:
+        _currentProject.signIdentity = str(identity or "").strip()
+
+
+def signingtimestampurl(url: str) -> None:
+    """Windows : URL du serveur de timestamp Authenticode
+    (defaut : http://timestamp.digicert.com). Le timestamp garantit la
+    validite de la signature apres expiration du certificat."""
+    if _currentProject:
+        _currentProject.signTimestampUrl = str(url or "").strip()
+
+
+def signinggpgkey(keyId: str) -> None:
+    """Linux : empreinte/ID de la cle GPG pour produire une signature detachee
+    `<installateur>.sig`. Utile pour les depots verifiables."""
+    if _currentProject:
+        _currentProject.signGpgKey = str(keyId or "").strip()
+
+
+def signingentitlements(path: str) -> None:
+    """macOS : fichier d'entitlements (.plist) passe a codesign. Necessaire pour
+    certains droits (App Sandbox, Hardened Runtime exceptions)."""
+    if _currentProject:
+        _currentProject.signEntitlements = str(path or "").strip()
+
+
+def signingrequireadmin(value: bool = True) -> None:
+    """Windows : force le manifeste UAC `requireAdministrator` au lieu du defaut
+    intelligent (asInvoker, sauf si une regle de pare-feu est embarquee).
+    Anti-faux-positifs AV : laisse `asInvoker` quand l'admin n'est pas requis."""
+    if _currentProject:
+        _currentProject.signRequireAdmin = bool(value)
+
+
 def installeroption(key: str, value) -> None:
     """
     API extensible pour les options installer avancees. Permet d'ajouter
@@ -3887,6 +3950,10 @@ __all__ = [
     # Installer packaging DSL (MSI/EXE/DEB/PKG)
     'licensefile', 'createdesktopshortcut', 'apppublisher', 'appversion',
     'installeroption',
+    # Code signing DSL (--type jng : self-extracting installer)
+    'signingcertificate', 'signingpassword', 'signingthumbprint',
+    'signingidentity', 'signingtimestampurl', 'signinggpgkey',
+    'signingentitlements', 'signingrequireadmin',
     # Network / firewall DSL (installer-time) — voir Commands/Package.py
     'networkenabled', 'firewallrule', 'networkusagedescription',
     'bonjourservices', 'iosallowarbitraryloads', 'FirewallRule',

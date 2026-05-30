@@ -2069,6 +2069,15 @@ class Builder(abc.ABC):
         # Resolve build order
         try:
             order = DependencyResolver.ResolveBuildOrder(self.workspace, targetProject)
+        except ValueError as e:
+            # Target introuvable : message actionnable listant les projets connus.
+            available = sorted(self.workspace.projects.keys())
+            Reporter.Error(str(e))
+            if available:
+                Reporter.Info("Available projects: " + ", ".join(available))
+            else:
+                Reporter.Info("This workspace declares no project.")
+            return 1
         except RuntimeError as e:
             Reporter.Error(f"Dependency resolution failed: {e}")
             return 1

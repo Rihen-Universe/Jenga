@@ -983,6 +983,33 @@ class AndroidBuilder(Builder):
             if proj.kind in (ProjectKind.CONSOLE_APP, ProjectKind.WINDOWED_APP):
                 app_projects.append(proj)
 
+        # Cas non-app : target explicite mais c'est une lib (StaticLib/SharedLib).
+        # Compiler sans packaging APK est utile pour valider qu'une lib se compile
+        # bien pour Android (ce que l'utilisateur cherche typiquement quand il
+        # cible directement une lib). Avant ce fix, ce cas retournait 0 silencieux.
+        if targetProject and not app_projects:
+            target_proj = self.workspace.projects.get(targetProject)
+            if target_proj is None:
+                Reporter.Error(f"Target project '{targetProject}' not found in workspace.")
+                return 1
+            kind_name = (target_proj.kind.name if hasattr(target_proj.kind, "name")
+                         else str(target_proj.kind))
+            Reporter.Info(
+                f"Target '{targetProject}' is a {kind_name} (not CONSOLE_APP/WINDOWED_APP) — "
+                f"compiling for Android {self.ndk_abi} without APK packaging."
+            )
+            return super().Build(targetProject)
+
+        # Cas sans target : aucun app à packager dans le workspace. Au lieu de
+        # retourner 0 silencieux (l'ancien bug), on tombe sur super().Build()
+        # pour compiler toutes les libs cibles Android, et on prévient l'utilisateur.
+        if not targetProject and not app_projects:
+            Reporter.Info(
+                f"No CONSOLE_APP/WINDOWED_APP declared for Android — "
+                f"compiling all libraries for {self.ndk_abi} (no APK packaging)."
+            )
+            return super().Build(targetProject)
+
         for proj in app_projects:
             # Pour les exécutables console, on compile une seule fois
             if proj.kind == ProjectKind.CONSOLE_APP:
@@ -1324,11 +1351,14 @@ class AndroidBuilder(Builder):
                     Reporter.Info(f"APK {self.config} signe avec debug.keystore "
                                   f"(OK testeurs internes, pas Play Store).")
             else:
+                # critical=True : surfacé en rouge dans le résumé final de
+                # build car bloquant fonctionnellement (Android refuse l'install).
                 Reporter.Warning(f"Debug keystore not found at {debug_ks} - APK ne sera "
                                  f"PAS signe ; Android refusera l'install. Generer via: "
                                  f"keytool -genkeypair -keystore ~/.android/debug.keystore "
                                  f"-alias androiddebugkey -storepass android -keypass android "
-                                 f"-keyalg RSA -validity 10000")
+                                 f"-keyalg RSA -validity 10000",
+                                 critical=True)
                 shutil.copy2(apk_unsigned_aligned, apk_signed)
 
         # Also expose final APK in target dir for package/deploy commands
@@ -1484,11 +1514,14 @@ class AndroidBuilder(Builder):
                     Reporter.Info(f"APK {self.config} signe avec debug.keystore "
                                   f"(OK testeurs internes, pas Play Store).")
             else:
+                # critical=True : surfacé en rouge dans le résumé final de
+                # build car bloquant fonctionnellement (Android refuse l'install).
                 Reporter.Warning(f"Debug keystore not found at {debug_ks} - APK ne sera "
                                  f"PAS signe ; Android refusera l'install. Generer via: "
                                  f"keytool -genkeypair -keystore ~/.android/debug.keystore "
                                  f"-alias androiddebugkey -storepass android -keypass android "
-                                 f"-keyalg RSA -validity 10000")
+                                 f"-keyalg RSA -validity 10000",
+                                 critical=True)
                 shutil.copy2(apk_unsigned_aligned, apk_signed)
 
         # Also expose final APK in target dir for package/deploy commands.
