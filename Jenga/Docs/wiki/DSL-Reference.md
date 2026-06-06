@@ -61,6 +61,46 @@ with workspace("GameWorkspace"):
 `disableunittestexecution(bool)` / `dute(bool)` · `newoption(...)` (option CLI
 custom, style Premake).
 
+### Config partagée — `useconfig` _(2.0.5+)_
+
+`useconfig(*chemins)` charge un ou plusieurs fichiers de **config partagée** (de
+simples `.jenga` ne contenant que des **définitions** : constantes, classes,
+fonctions) et **propage leurs symboles** au workspace **et à tous les `.jenga`
+inclus via `include(...)`** — sans aucun `import`, pour des `.jenga` beaucoup
+plus propres.
+
+```python
+with workspace("MyApp"):
+    useconfig("cfg/shared.jenga")     # peut vivre dans un sous-dossier ; multi-fichiers OK
+    with include("modules/logger.jenga"):
+        pass
+```
+
+```python
+# cfg/shared.jenga — QUE des définitions, AUCUN import (l'API Jenga est injectée)
+SHARED_DIALECT = "C++17"
+
+def apply_common():
+    language("C++")
+    cppdialect(SHARED_DIALECT)
+```
+
+```python
+# modules/logger.jenga — minimal : ni `from Jenga import *` ni `from config import *`
+with project("Logger"):
+    staticlib()
+    apply_common()                    # propagé depuis la config
+    files(["src/**.cpp"])
+```
+
+- Chemin relatif au dossier du `.jenga` workspace (ou absolu) ; peut pointer dans
+  un **sous-dossier**.
+- **Plusieurs** fichiers / appels : `useconfig("a.jenga", "b.jenga")` (les derniers
+  surchargent). Constantes, classes **et** fonctions sont propagées.
+- Le fichier de config n'a **pas besoin** de `from Jenga import *` (API injectée) ;
+  remplace proprement le `from config import *` répété dans chaque module.
+- Exemple : [`Exemples/12_external_includes`](https://github.com/RihenUniverse/Jenga/tree/main/Jenga/Exemples/12_external_includes).
+
 ### Type de projet
 
 `consoleapp()` · `windowedapp()` · `staticlib()` · `sharedlib()` ·
@@ -271,6 +311,45 @@ with workspace("GameWorkspace"):
 `startproject(name)` · `disableunittestcompilation(bool)` / `dutc(bool)` ·
 `disableunittestexecution(bool)` / `dute(bool)` · `newoption(...)` (custom CLI
 option, Premake-style).
+
+### Shared config — `useconfig` _(2.0.5+)_
+
+`useconfig(*paths)` loads one or more **shared config** files (plain `.jenga`
+files containing only **definitions**: constants, classes, functions) and
+**propagates their symbols** to the workspace **and to every `.jenga` included
+via `include(...)`** — with no `import` at all, for much cleaner `.jenga` files.
+
+```python
+with workspace("MyApp"):
+    useconfig("cfg/shared.jenga")     # may live in a subfolder; multiple files OK
+    with include("modules/logger.jenga"):
+        pass
+```
+
+```python
+# cfg/shared.jenga — ONLY definitions, NO import (the Jenga API is injected)
+SHARED_DIALECT = "C++17"
+
+def apply_common():
+    language("C++")
+    cppdialect(SHARED_DIALECT)
+```
+
+```python
+# modules/logger.jenga — minimal: no `from Jenga import *`, no `from config import *`
+with project("Logger"):
+    staticlib()
+    apply_common()                    # propagated from the shared config
+    files(["src/**.cpp"])
+```
+
+- Path is relative to the workspace `.jenga` directory (or absolute); it may point
+  into a **subfolder**.
+- **Multiple** files / calls: `useconfig("a.jenga", "b.jenga")` (later ones
+  override). Constants, classes **and** functions are propagated.
+- The config file needs **no** `from Jenga import *` (API is injected); it cleanly
+  replaces the `from config import *` repeated in every module.
+- Example: [`Exemples/12_external_includes`](https://github.com/RihenUniverse/Jenga/tree/main/Jenga/Exemples/12_external_includes).
 
 ### Project kind
 

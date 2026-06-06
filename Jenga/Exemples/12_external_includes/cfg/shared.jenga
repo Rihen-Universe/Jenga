@@ -1,0 +1,24 @@
+# =============================================================================
+# cfg/shared.jenga — Config partagee du workspace (DEMO useconfig).
+# -----------------------------------------------------------------------------
+# Un simple fichier .jenga utilise comme CONFIG (que des definitions : pas de
+# `with project(...)`). Charge par le workspace via :
+#       useconfig("cfg/shared.jenga")
+# AUCUN import : l'API Jenga (language, cppdialect, ...) est injectee par
+# useconfig(). Les symboles ci-dessous sont propages au workspace ET a tous les
+# .jenga inclus via include() -> fichiers inclus minimaux et propres.
+# Peut vivre dans n'importe quel sous-dossier (chemin explicite a useconfig).
+# =============================================================================
+
+# --- Constante partagee ---
+SHARED_CPP_DIALECT = "C++17"
+
+# --- Classe partagee ---
+class SharedInfo:
+    VENDOR  = "JengaTest"
+    VERSION = "1.0.0"
+
+# --- Fonction helper partagee (appelle le DSL Jenga, injecte) ---
+def apply_common():
+    language("C++")
+    cppdialect(SHARED_CPP_DIALECT)
