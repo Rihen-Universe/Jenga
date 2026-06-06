@@ -3,6 +3,26 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.0.5
+
+### Ajouté
+
+- **`useconfig(*chemins)`** — config partagée au niveau workspace. Charge un ou
+  plusieurs fichiers de config (de simples `.jenga` ne contenant que des
+  définitions : constantes, classes, fonctions) et **propage leurs symboles** au
+  workspace **et à tous les `.jenga` inclus via `include(...)`**, sans aucun
+  `import`. Permet des fichiers `.jenga` de module beaucoup plus propres (plus de
+  `from Jenga import *` ni `from config import *` répétés dans chaque module).
+  - Le fichier de config peut vivre dans un **sous-dossier** (chemin explicite) et
+    n'a **pas besoin** de `from Jenga import *` (l'API Jenga y est injectée).
+  - **Multi-fichiers** : `useconfig("a.jenga", "b.jenga")` (les derniers
+    surchargent). Constantes, classes et fonctions sont toutes propagées.
+  - Additif et rétro-compatible : l'ancien `from config import *` continue de
+    fonctionner. Implémentation : `Jenga/Core/Api.py` (`useconfig`) au-dessus de
+    la propagation `_workspaceGlobals` (`Jenga/Core/Loader.py`).
+  - Doc : [DSL-Reference](https://github.com/RihenUniverse/Jenga/wiki/DSL-Reference#config-partagée--useconfig) ·
+    exemple : `Jenga/Exemples/12_external_includes`.
+
 ## v2.0.4
 
 ### Ajouté

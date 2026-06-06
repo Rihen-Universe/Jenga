@@ -3,6 +3,12 @@ from Jenga import *
 from Jenga.GlobalToolchains import RegisterJengaGlobalToolchains
 
 with workspace("ExternalIncludesDemo"):
+    # Config partagee chargee depuis un SOUS-DOSSIER (chemin explicite), propagee
+    # a tout le workspace + a TOUS les .jenga inclus via include(), sans aucun
+    # `import`. Fichier .jenga (on reste dans le contexte Jenga). Plusieurs
+    # fichiers possibles : useconfig("cfg/a.jenga", "cfg/b.jenga").
+    useconfig("cfg/shared.jenga")
+
     RegisterJengaGlobalToolchains()
     configurations(["Debug", "Release"])
     targetoses([
@@ -26,7 +32,7 @@ with workspace("ExternalIncludesDemo"):
     with project("App"):
         consoleapp()
         language("C++")
-        cppdialect("C++17")
+        cppdialect(SHARED_CPP_DIALECT)   # <- constante de config.py (usage workspace)
         files(["src/main.cpp"])
         includedirs(["libs/logger/include", "libs/math/include"])
         links(["Logger", "MathLib"])

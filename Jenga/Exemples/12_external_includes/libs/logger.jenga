@@ -1,8 +1,17 @@
-from Jenga import *
+# DEMO propagation : AUCUN import ici.
+#  - L'API Jenga (project, staticlib, files...) est injectee par include().
+#  - La config du workspace (apply_common, SHARED_CPP_DIALECT, SharedInfo) est
+#    propagee automatiquement -> pas de `from config import *`.
+# Fichier .jenga minimal et propre.
 
 with project("Logger"):
     staticlib()
-    language("C++")
+    apply_common()                 # fonction de config.py (propagee, sans import)
     location("logger")
     files(["src/**.cpp"])
     includedirs(["include"])
+    # Preuve que constante + classe de config sont aussi visibles :
+    defines([
+        f'JENGA_VENDOR="{SharedInfo.VENDOR}"',
+        f'JENGA_DIALECT="{SHARED_CPP_DIALECT}"',
+    ])
