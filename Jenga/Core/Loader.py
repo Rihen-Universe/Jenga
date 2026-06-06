@@ -226,6 +226,14 @@ class Loader:
 
         globals_dict = self._PrepareGlobals(filePath, parentWorkspace=None)
 
+        # Exposer le namespace LIVE du workspace racine pour que `include()` propage
+        # automatiquement aux fichiers inclus tout ce que l'utilisateur definit ici
+        # (config/fonctions/classes/imports) -> plus besoin de les re-importer dans
+        # chaque .jenga inclus. Les includes s'executent inline pendant l'exec
+        # ci-dessous, donc ils voient tout ce qui est declare AU-DESSUS d'eux.
+        # cf. Api.include._CreateExecContext (lecture de Api._workspaceGlobals).
+        Api._workspaceGlobals = globals_dict
+
         # Changer de répertoire pendant l'exécution (comportement de l'API include)
         old_cwd = Path.cwd()
         os.chdir(filePath.parent)
@@ -245,6 +253,8 @@ class Loader:
             return None
         finally:
             os.chdir(old_cwd)
+            # Evite toute fuite de namespace entre deux chargements de workspace.
+            Api._workspaceGlobals = None
             # On ne reset pas l'API ici car on veut garder le workspace chargé
             # Api.resetstate() serait trop brutal; on le fait manuellement ?
 

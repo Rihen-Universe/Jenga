@@ -564,6 +564,10 @@ _currentWorkspace: Optional[Workspace] = None
 _currentProject: Optional[Project] = None
 _currentToolchain: Optional[Toolchain] = None
 _currentFilter: Optional[str] = None
+# Namespace LIVE du .jenga workspace racine (defini par Loader.LoadWorkspace).
+# Permet a `include()` de propager la config/les symboles user du workspace vers
+# les fichiers inclus sans re-import. None hors d'un chargement de workspace.
+_workspaceGlobals: Optional[Dict[str, Any]] = None
 
 
 def _NormalizeFilterExpression(expr: Any) -> str:
@@ -1109,6 +1113,22 @@ class include:
             if not name.startswith('_') and name not in exclude:
                 exec_globals[name] = getattr(current_module, name)
 
+        # --- Propagation des globals du workspace racine vers les fichiers inclus ---
+        # Tout ce que l'utilisateur definit/importe au NIVEAU du .jenga workspace
+        # (def, class, import, constantes...) devient automatiquement visible dans
+        # chaque fichier inclus via `with include(...)`, SANS avoir a le re-importer
+        # ou le re-declarer dans ces derniers (comportement « config partagee », a la
+        # Lua). On n'ecrase JAMAIS l'API Jenga, `Path`, l'etat interne `_current*` ni
+        # les dunders deja injectes -> seuls les symboles USER nouveaux sont ajoutes.
+        shared = getattr(current_module, '_workspaceGlobals', None)
+        if shared:
+            for name, val in shared.items():
+                if name.startswith('__'):
+                    continue            # __builtins__, __file__, __name__, ...
+                if name in exec_globals:
+                    continue            # API Jenga / Path / _current* deja en place
+                exec_globals[name] = val
+
         return exec_globals
 
 
@@ -1154,6 +1174,86 @@ class batchinclude:
 # ---------------------------------------------------------------------------
 
 # --- Workspace configuration ---
+def useconfig(*paths: str) -> None:
+    """Charge un ou plusieurs fichiers de configuration partagee et propage leurs
+    symboles publics (constantes, classes, fonctions) au workspace ET a TOUS les
+    fichiers `.jenga` inclus via `with include(...)` — sans aucun `import`.
+
+    A appeler dans le `.jenga` du workspace (typiquement dans le `with workspace`).
+
+    - Le fichier de config est un simple `.jenga` (on reste dans le contexte Jenga ;
+      par convention il ne contient QUE des definitions : constantes/classes/
+      fonctions, pas de `with project(...)`).
+    - Le chemin est relatif au dossier du `.jenga` workspace ; il peut pointer dans
+      un SOUS-DOSSIER (ex. `useconfig("Build/common.jenga")`) ou etre absolu.
+    - Plusieurs fichiers / plusieurs appels possibles (les derniers surchargent).
+    - Le fichier de config n'a PAS besoin de `from Jenga import *` : l'API Jenga y
+      est injectee automatiquement (les fonctions helper peuvent appeler le DSL).
+
+    Remplace le fragile `from config import *` (les imports d'un `.jenga` peuvent
+    etre neutralises au chargement d'`include()`). S'appuie sur la propagation
+    `_workspaceGlobals` deja en place.
+    """
+    import sys
+    from pathlib import Path
+
+    global _workspaceGlobals
+    current_module = sys.modules[__name__]
+
+    # Cible de propagation : le namespace live du workspace racine (pose par le
+    # Loader). Absent hors Loader -> on en cree un pour ne rien perdre.
+    if _workspaceGlobals is None:
+        _workspaceGlobals = {}
+
+    # Dossier de reference : celui du .jenga en cours (le Loader fait os.chdir
+    # vers le dossier du workspace avant exec).
+    for raw in paths:
+        cfgPath = Path(raw)
+        if not cfgPath.is_absolute():
+            cfgPath = Path.cwd() / cfgPath
+        cfgPath = cfgPath.resolve()
+        if not cfgPath.is_file():
+            raise FileNotFoundError(f"useconfig: fichier de config introuvable: {cfgPath}")
+
+        # Namespace d'exec du config : API Jenga + Path + builtins injectes
+        # (pas besoin d'`import` dans le fichier config lui-meme).
+        cfgGlobals: Dict[str, Any] = {
+            '__file__': str(cfgPath),
+            '__name__': '__jengaconfig__',
+            '__builtins__': __builtins__,
+            'Path': Path,
+        }
+        injected = set()
+        exclude = {'include', 'batchinclude', 'getcurrentworkspace', 'resetstate', 'useconfig'}
+        for name in dir(current_module):
+            if not name.startswith('_') and name not in exclude:
+                cfgGlobals[name] = getattr(current_module, name)
+                injected.add(name)
+
+        # Autoriser les imports relatifs DEPUIS le dossier du fichier config.
+        cfgDir = str(cfgPath.parent)
+        addedPath = cfgDir not in sys.path
+        if addedPath:
+            sys.path.insert(0, cfgDir)
+        try:
+            exec(cfgPath.read_text(encoding='utf-8-sig'), cfgGlobals)
+        finally:
+            if addedPath:
+                try:
+                    sys.path.remove(cfgDir)
+                except ValueError:
+                    pass
+
+        # Propager UNIQUEMENT les symboles definis par le fichier config
+        # (hors API injectee, Path et dunders) -> workspace + tous les includes.
+        for name, val in cfgGlobals.items():
+            if name.startswith('__'):
+                continue
+            if name == 'Path' or name in injected:
+                continue
+            _workspaceGlobals[name] = val
+
+
 def configurations(names: List[str]) -> None:
     if _currentWorkspace:
         _currentWorkspace.configurations = names
@@ -3921,6 +4021,7 @@ __all__ = [
     # Context managers
     'workspace', 'project', 'toolchain', 'filter', 'unitest', 'test', 'include', 'batchinclude', 'addtools',
     # User functions (lowercase)
+    'useconfig',
     'configurations', 'platforms', 'targetoses', 'targetarchs', 'targetos', 'targetarch', 'platform', 'architecture', 'startproject', 'disableunittestcompilation', 'disableunittestexecution', 'dutc', 'dute', 'newoption',
     'consoleapp', 'windowedapp', 'staticlib', 'sharedlib', 'testsuite', 'kind',
     'language', 'cppdialect', 'cdialect',
