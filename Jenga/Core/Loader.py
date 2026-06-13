@@ -238,6 +238,15 @@ class Loader:
         old_cwd = Path.cwd()
         os.chdir(filePath.parent)
 
+        # Rendre le module no-op du stub useconfig importable au runtime : permet
+        # `from jengaconfig import *` dans les .jenga (purement cosmetique pour
+        # l'editeur ; les vrais symboles viennent de la propagation useconfig).
+        import sys as _sys
+        _typings = str(filePath.parent / ".jenga-typings")
+        _typings_added = _typings not in _sys.path
+        if _typings_added:
+            _sys.path.insert(0, _typings)
+
         try:
             exec(filePath.read_text(encoding='utf-8-sig'), globals_dict)
             workspace = Api.getcurrentworkspace()
@@ -253,6 +262,11 @@ class Loader:
             return None
         finally:
             os.chdir(old_cwd)
+            if _typings_added:
+                try:
+                    _sys.path.remove(_typings)
+                except ValueError:
+                    pass
             # Evite toute fuite de namespace entre deux chargements de workspace.
             Api._workspaceGlobals = None
             # On ne reset pas l'API ici car on veut garder le workspace chargé
