@@ -28,6 +28,7 @@ from .Core.Api import (
     # Context managers
     workspace, project, toolchain, filter, unitest, test, include, batchinclude, addtools,
     # User functions (lowercase DSL)
+    useconfig,
     configurations, platforms, targetoses, targetarchs, targetos, targetarch, platform, architecture, startproject, disableunittestcompilation, disableunittestexecution, dutc, dute, newoption,
     consoleapp, windowedapp, staticlib, sharedlib, testsuite, kind, kindexport,
     language, cppdialect, cdialect,
@@ -52,7 +53,7 @@ from .Core.Api import (
     appicon, androidappicon, windowsicon, macosicon, webfavicon,
     # Installer packaging DSL (MSI/EXE/DEB/PKG)
     licensefile, createdesktopshortcut, apppublisher, appversion, installeroption,
-    harmonyminsdk, harmonysdk, harmonybundlename, harmonyversioncode, harmonyversionname, harmonytargetapi, harmonysign, harmonycertfile, harmonyprofile,
+    harmonyminsdk, harmonysdk, harmonybundlename, harmonyversioncode, harmonyversionname, harmonytargetapi, harmonysign, harmonycertfile, harmonyprofile, harmonypermissions, harmonyassets,
 
     gdkpath, xboxmode, xboxplatform, xboxsigningmode, xboxpackagename, xboxpublisher, xboxversion, xboxlekbpath, xboxassetchunks,
     emscriptenshellfile, emscriptenfullscreenshell, emscriptencanvasid, emscripteninitialmemory,
@@ -90,6 +91,7 @@ __all__ = [
     'TargetOS', 'TargetArch', 'TargetEnv', 'CompilerFamily',
     'workspace', 'project', 'toolchain', 'filter', 'unitest', 'test',
     'include', 'batchinclude', 'addtools',
+    'useconfig',
     'configurations', 'platforms', 'targetoses', 'targetarchs', 'targetos', 'targetarch', 'platform', 'architecture', 'startproject', 'disableunittestcompilation', 'disableunittestexecution', 'dutc', 'dute', 'newoption',
     'consoleapp', 'windowedapp', 'staticlib', 'sharedlib', 'testsuite', 'kind', 'kindexport',
     'language', 'cppdialect', 'cdialect',
@@ -115,7 +117,7 @@ __all__ = [
     # Installer packaging DSL (MSI/EXE/DEB/PKG)
     'licensefile', 'createdesktopshortcut', 'apppublisher', 'appversion',
     'installeroption',
-    'harmonyminsdk', 'harmonysdk', 'harmonybundlename', 'harmonyversioncode', 'harmonyversionname', 'harmonytargetapi', 'harmonysign', 'harmonycertfile', 'harmonyprofile',
+    'harmonyminsdk', 'harmonysdk', 'harmonybundlename', 'harmonyversioncode', 'harmonyversionname', 'harmonytargetapi', 'harmonysign', 'harmonycertfile', 'harmonyprofile', 'harmonypermissions', 'harmonyassets',
     'gdkpath', 'xboxmode', 'xboxplatform', 'xboxsigningmode', 'xboxpackagename', 'xboxpublisher', 'xboxversion', 'xboxlekbpath', 'xboxassetchunks',
     'emscriptenshellfile', 'emscriptenfullscreenshell', 'emscriptencanvasid', 'emscripteninitialmemory',
     'emscriptenstacksize', 'emscriptenexportname', 'emscriptenextraflags',
