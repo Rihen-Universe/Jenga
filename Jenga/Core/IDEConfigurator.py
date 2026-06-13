@@ -97,10 +97,24 @@ def _LoadJsonFile(path: Path) -> Optional[Dict[str, Any]]:
     if not path.exists():
         return {}
     try:
-        text = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except Exception:
         return None
-    if not text.strip():
+    # Corruption frequente sur Windows : write interrompu -> fichier rempli de
+    # NULs, ou reecriture PowerShell -> UTF-16. On strip les NULs de tete + BOM
+    # et on essaie plusieurs encodages. Si vide/illisible -> {} (REGENERER) ;
+    # si du vrai JSON invalide (contenu user) -> None (ne pas clobber).
+    stripped = raw.lstrip(b"\x00")
+    if not stripped.strip():
+        return {}
+    text: Optional[str] = None
+    for enc in ("utf-8-sig", "utf-16", "utf-8"):
+        try:
+            text = stripped.decode(enc)
+            break
+        except Exception:
+            text = None
+    if text is None or not text.strip():
         return {}
     try:
         return _ParseJsonc(text)
@@ -127,6 +141,176 @@ def _Fingerprint(data: Dict[str, Any]) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Stubs des symboles de config (useconfig) — coloration + go-to-def cote editeur
+# ─────────────────────────────────────────────────────────────────────────────
+# Les symboles definis dans les fichiers charges via useconfig("...") (helpers,
+# classes, constantes) sont injectes au RUNTIME (propagation) -> l'editeur ne les
+# voit pas statiquement. On genere donc un stub `.pyi` qui les DECLARE, ajoute au
+# `extraPaths`. L'editeur peut alors les resoudre (un `from jengaconfig import *`
+# optionnel donne go-to-def + autocomplete ; sinon la coloration reste).
+_STUB_DIR_NAME = ".jenga-typings"
+_STUB_MODULE   = "jengaconfig"
+
+
+def _FindRootJenga(workspace_root: Path) -> Optional[Path]:
+    """Le .jenga racine = le 1er (a la racine) qui declare un `with workspace(`."""
+    try:
+        candidates = sorted(workspace_root.glob("*.jenga"))
+    except Exception:
+        return None
+    for f in candidates:
+        try:
+            if "with workspace(" in f.read_text(encoding="utf-8-sig"):
+                return f
+        except Exception:
+            continue
+    return candidates[0] if candidates else None
+
+
+def _ExtractUseconfigSymbols(workspace_root: Path) -> Dict[str, str]:
+    """
+    Charge chaque fichier reference par useconfig("...") dans le .jenga racine et
+    retourne {symbole_public: categorie} (func | class | const). Best-effort : ne
+    leve jamais (la generation de stub ne doit jamais casser un build).
+    """
+    # Collecter les fichiers references par useconfig(...) dans N'IMPORTE QUEL
+    # .jenga du workspace (racine OU module) : le stub capture ainsi tous les
+    # symboles, quel que soit l'endroit ou la config est chargee. Les chemins
+    # useconfig sont relatifs a la racine du workspace (cwd au runtime).
+    _SKIP = ("Build", "Externals", _STUB_DIR_NAME, ".git", "__pycache__", "node_modules")
+    cfg_paths: List[str] = []
+    seen: set = set()
+    try:
+        jenga_files = workspace_root.rglob("*.jenga")
+    except Exception:
+        return {}
+    for jf in jenga_files:
+        if any(part in _SKIP for part in jf.parts):
+            continue
+        try:
+            text = jf.read_text(encoding="utf-8-sig")
+        except Exception:
+            continue
+        if "useconfig" not in text:
+            continue
+        for call in re.findall(r"useconfig\(([^)]*)\)", text):
+            for m in re.findall(r"[\"']([^\"']+)[\"']", call):
+                if m not in seen:
+                    seen.add(m)
+                    cfg_paths.append(m)
+    if not cfg_paths:
+        return {}
+    import types as _types
+    try:
+        import Jenga.Core.Api as _Api
+        import Jenga as _J
+    except Exception:
+        return {}
+    # Exclure tout ce qui vient de Jenga (API + GlobalToolchains + sous-packages),
+    # importe dans les configs via `from Jenga import *` : ce n'est PAS un symbole
+    # de config, c'est deja resolu par l'editeur via le package Jenga.
+    api_names = {n for n in dir(_Api) if not n.startswith("_")}  # injectes dans l'exec
+    excluded = set(api_names)                                    # + filtre de sortie
+    excluded |= set(getattr(_J, "__all__", []))
+    excluded |= {n for n in dir(_J) if not n.startswith("_")}
+    out: Dict[str, str] = {}
+    for rel in cfg_paths:
+        cfg = workspace_root / rel
+        if not cfg.is_file():
+            continue
+        g: Dict[str, Any] = {
+            "__file__": str(cfg), "__name__": "__jengaconfig__",
+            "__builtins__": __builtins__, "Path": Path,
+        }
+        for n in api_names:
+            try:
+                g[n] = getattr(_Api, n)
+            except Exception:
+                pass
+        try:
+            cfgText = cfg.read_text(encoding="utf-8-sig")
+            # Retire les `from jengaconfig import ...` : ce module-stub n'est pas
+            # importable au moment de la generation (c'est justement ce qu'on cree
+            # -> chicken-egg). Les symboles viennent de l'exec direct du fichier.
+            cfgText = re.sub(r"(?m)^[ \t]*from[ \t]+jengaconfig[ \t]+import.*$", "", cfgText)
+            exec(compile(cfgText, str(cfg), "exec"), g)
+        except Exception:
+            continue
+        for name, val in list(g.items()):
+            if name.startswith("_") or name in excluded or name == "Path":
+                continue
+            if name in out or isinstance(val, _types.ModuleType):
+                continue
+            if isinstance(val, type):
+                out[name] = "class"
+            elif callable(val):
+                out[name] = "func"
+            else:
+                out[name] = "const"
+    return out
+
+
+def _RenderConfigStub(symbols: Dict[str, str]) -> str:
+    lines = [
+        "# =============================================================================",
+        "# jengaconfig.pyi — STUB GENERE par Jenga (au build / `jenga ide`). NE PAS EDITER.",
+        "# Declare les symboles des fichiers de config charges via useconfig(), pour que",
+        "# l'editeur (Pyright/Pylance) les COLORE et donne go-to-def / autocomplete.",
+        "# =============================================================================",
+        "from typing import Any",
+        "",
+    ]
+    for name in sorted(symbols):
+        cat = symbols[name]
+        if cat == "func":
+            lines.append(f"def {name}(*args: Any, **kwargs: Any) -> Any: ...")
+        elif cat == "class":
+            lines.append(f"class {name}:")
+            lines.append("    def __init__(self, *args: Any, **kwargs: Any) -> None: ...")
+            lines.append("    def __getattr__(self, name: str) -> Any: ...")
+        else:
+            lines.append(f"{name}: Any")
+    return "\n".join(lines) + "\n"
+
+
+def GenerateConfigStubs(workspace_root: Path, verbose: bool = False) -> bool:
+    """
+    Genere <workspace>/.jenga-typings/jengaconfig.pyi a partir des symboles des
+    fichiers useconfig(). Retourne True si ecrit/mis a jour. Best-effort.
+    """
+    workspace_root = Path(workspace_root)
+    symbols = _ExtractUseconfigSymbols(workspace_root)
+    if not symbols:
+        return False
+    content = _RenderConfigStub(symbols)
+    stub_dir  = workspace_root / _STUB_DIR_NAME
+    stub_path = stub_dir / f"{_STUB_MODULE}.pyi"
+    # Module no-op runtime : `from jengaconfig import *` doit etre importable au
+    # runtime SANS rien faire (les vrais symboles viennent de la propagation
+    # useconfig). Le Loader ajoute .jenga-typings au sys.path -> l'import marche
+    # et reste cosmetique (purement pour l'editeur, via le .pyi).
+    noop_path = stub_dir / f"{_STUB_MODULE}.py"
+    noop_body = (
+        "# Module no-op genere par Jenga. `from jengaconfig import *` est resolu\n"
+        "# par jengaconfig.pyi cote editeur ; au runtime les symboles viennent de\n"
+        "# la propagation useconfig(). Ne rien mettre ici.\n"
+    )
+    try:
+        if stub_path.exists() and stub_path.read_text(encoding="utf-8") == content \
+           and noop_path.exists():
+            return False
+        stub_dir.mkdir(parents=True, exist_ok=True)
+        stub_path.write_text(content, encoding="utf-8")
+        if not noop_path.exists() or noop_path.read_text(encoding="utf-8") != noop_body:
+            noop_path.write_text(noop_body, encoding="utf-8")
+        if verbose:
+            print(f"[ide-setup] stub config : {stub_path} ({len(symbols)} symboles)")
+        return True
+    except Exception:
+        return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Editeur : VSCode (et compatibles Cursor / Windsurf qui lisent .vscode/)
 # ─────────────────────────────────────────────────────────────────────────────
 def _GetVSCodeJengaConfig(jenga_home: Optional[str]) -> Dict[str, Any]:
@@ -149,9 +333,13 @@ def _GetVSCodeJengaConfig(jenga_home: Optional[str]) -> Dict[str, Any]:
             "reportUndefinedVariable": "warning",
         },
     }
-    # 4. Ajouter Jenga aux extraPaths pour resolution des imports
+    # 4. extraPaths : Jenga (resolution de l'API) + dossier de stubs des symboles
+    #    charges via useconfig() (.jenga-typings).
+    extra: List[str] = []
     if jenga_home:
-        cfg["python.analysis.extraPaths"] = [jenga_home]
+        extra.append(jenga_home)
+    extra.append(_STUB_DIR_NAME)
+    cfg["python.analysis.extraPaths"] = extra
     return cfg
 
 
@@ -260,8 +448,11 @@ def _GetPyrightJengaConfig(jenga_home: Optional[str]) -> Dict[str, Any]:
         "reportUndefinedVariable": "warning",
         "reportWildcardImportFromLibrary": "none",
     }
+    extra: List[str] = []
     if jenga_home:
-        cfg["extraPaths"] = [jenga_home]
+        extra.append(jenga_home)
+    extra.append(_STUB_DIR_NAME)
+    cfg["extraPaths"] = extra
     return cfg
 
 
@@ -364,6 +555,10 @@ def AutoConfigure(workspace_root: Path, force: bool = False,
 
     editors = DetectEditors(workspace_root)
     written: List[str] = []
+
+    # Stub des symboles charges via useconfig() (coloration + go-to-def editeur).
+    if GenerateConfigStubs(workspace_root, verbose=verbose):
+        written.append("config-stubs")
 
     if "vscode" in editors:
         if ConfigureVSCode(workspace_root, force=force, verbose=verbose):
