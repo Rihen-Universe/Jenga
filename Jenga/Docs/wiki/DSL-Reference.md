@@ -156,7 +156,7 @@ packaging) · `embedresources(resources)`.
 `androidtargetsdk` · `androidcompilesdk` · `androidabis` · `androidproguard` ·
 `androidproguardrules` · `androidassets` · `androidisgame` ·
 `androidpermissions` · `androidstl` · `androidnativeactivity` ·
-`androidallowrotation` · `androidscreenorientation` · `ndkversion` ·
+`androidallowrotation` · `androidlargeheap` · `androidscreenorientation` · `ndkversion` ·
 `androidsign` · `androidkeystore` · `androidkeystorepass` · `androidkeyalias` ·
 `androidjavafiles` · `androidjavalibs`.
 

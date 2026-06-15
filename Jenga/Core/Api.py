@@ -1862,6 +1862,15 @@ def androidallowrotation(enable: bool = True) -> None:
     if _currentProject:
         _currentProject.androidAllowRotation = enable
 
+def androidlargeheap(enable: bool = True) -> None:
+    """Active android:largeHeap dans le manifeste : demande un heap Java/ART
+    plus grand. N'affecte QUE la mémoire Java/Kotlin (objets Java, bitmaps) ;
+    la mémoire native (NDK/C++, NKMemory) est hors du heap ART et n'est pas
+    concernée. À n'utiliser que si la couche Java retient beaucoup de mémoire
+    (déconseillé sinon : GC plus lents, empreinte plus grosse). Défaut : off."""
+    if _currentProject:
+        _currentProject.androidLargeHeap = enable
+
 def androidscreenorientation(value: str) -> None:
     if not _currentProject:
         return
@@ -4038,7 +4047,7 @@ __all__ = [
     'androidminsdk', 'androidtargetsdk', 'androidcompilesdk',
     'androidabis', 'androidproguard', 'androidproguardrules',
     'androidassets', 'androidisgame', 'androidpermissions', 'androidnativeactivity',
-    'androidstl', 'androidallowrotation', 'androidscreenorientation',
+    'androidstl', 'androidallowrotation', 'androidlargeheap', 'androidscreenorientation',
     'androidjavafiles', 'androidjavalibs',
     'ndkversion', 'androidsign', 'androidkeystore', 'androidkeystorepass', 'androidkeyalias',
     'emscriptenshellfile', 'emscriptenfullscreenshell', 'emscriptencanvasid', 'emscripteninitialmemory',
