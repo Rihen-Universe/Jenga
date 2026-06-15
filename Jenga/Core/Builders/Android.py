@@ -1906,6 +1906,11 @@ class AndroidBuilder(Builder):
             # android:appCategory="game" (API 26+, valeur officielle)
             application.set(f"{{{android_ns}}}appCategory", "game")
 
+        # android:largeHeap — heap Java/ART agrandi (n'affecte PAS la memoire
+        # native NDK/C++). Active uniquement via androidlargeheap(True).
+        if getattr(project, 'androidLargeHeap', False):
+            application.set(f"{{{android_ns}}}largeHeap", "true")
+
         if project.androidNativeActivity and not has_java:
             # NativeActivity sans code Java
             activity = ET.SubElement(application, "activity")
