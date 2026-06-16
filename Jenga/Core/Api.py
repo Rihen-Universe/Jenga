@@ -2937,6 +2937,21 @@ def cxxflags(flags: List[str]) -> None:
     elif _currentToolchain:
         _currentToolchain.cxxflags.extend(flags)
 
+def flags(flags: List[str]) -> None:
+    """Flags de compilation communs à C ET C++ (commodité = cflags()+cxxflags()).
+
+    Pour les flags AGNOSTIQUES du langage qu'on ne veut pas dupliquer : architecture/
+    SIMD (`-march=native`, `/arch:AVX2`), LTO (`-flto`, `/GL`), `-fno-exceptions`/
+    `-fno-rtti`, `-ffast-math`/`/fp:fast`, `-fvisibility=hidden`, etc.
+
+    ÉCHAPPATOIRE NON PORTABLE : un flag brut est spécifique au compilateur — à placer
+    sous `filter("toolset:msvc"|"toolset:gcc"|...)`. Pour les réglages portables,
+    préférer `optimize()`, `warnings()`, `symbols()`, `runtime()`, `sanitize()`.
+    Pour l'assembleur, utiliser `asmflags()` ; pour l'éditeur de liens, `ldflags()`.
+    """
+    cflags(flags)
+    cxxflags(flags)
+
 def ldflags(flags: List[str]) -> None:
     if _currentProject:
         if _currentFilter:
@@ -4075,7 +4090,7 @@ __all__ = [
     'testoptions', 'testfiles', 'testmainfile', 'testmaintemplate',
     'settarget', 'sysroot', 'targettriple', 'ccompiler', 'cppcompiler',
     'linker', 'archiver', 'addcflag', 'addcxxflag', 'addldflag',
-    'cflags', 'cxxflags', 'ldflags', 'asmflags', 'arflags',
+    'flags', 'cflags', 'cxxflags', 'ldflags', 'asmflags', 'arflags',
     'framework', 'frameworks', 'frameworkpath', 'librarypath', 'library', 'rpath',
     'sanitize', 'nostdlib', 'nostdinc', 'pic', 'pie',
     'buildoption', 'buildoptions', 'linkoptions',
