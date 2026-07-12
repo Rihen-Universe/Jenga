@@ -128,7 +128,15 @@ class Builder(abc.ABC):
         self._ValidateHostTarget()
         self._ResolveToolchain()
 
+    # Les builders qui cross-compilent depuis un hote non-natif (ex.
+    # MacosZigBuilder : macOS depuis Windows/Linux via Zig) mettent cet attribut
+    # a True pour lever les gardes host->target ci-dessous. Defaut False : aucun
+    # builder existant n'est affecte.
+    allowsCrossCompileFromNonHost = False
+
     def _ValidateHostTarget(self):
+        if getattr(self, "allowsCrossCompileFromNonHost", False):
+            return
         host_os = Platform.GetHostOS()
         if self.targetOs == TargetOS.MACOS and host_os != TargetOS.MACOS:
             raise RuntimeError(f"Cannot build for macOS from {host_os.value}. macOS builds require macOS with Apple toolchain.")
@@ -143,7 +151,42 @@ class Builder(abc.ABC):
         if self.targetOs == TargetOS.VISIONOS and host_os != TargetOS.MACOS:
             raise RuntimeError("visionOS builds require macOS with Xcode 15+.")
 
+    def _ForcedToolchainName(self) -> Optional[str]:
+        """Nom de toolchain imposé via `--toolchain` (token `toolchain:<name>` dans
+        les options). None si absent. Comparaison insensible à la casse en aval."""
+        for opt in (getattr(self, "options", None) or []):
+            o = str(opt).strip()
+            if o.lower().startswith("toolchain:"):
+                name = o.split(":", 1)[1].strip()
+                if name:
+                    return name
+        return None
+
     def _ResolveToolchain(self) -> None:
+        # Override explicite (CLI `--toolchain`) : priorité sur defaultToolchain et
+        # sur la résolution automatique. Cherche parmi les toolchains DÉTECTÉES et
+        # ENREGISTRÉES (insensible à la casse). Introuvable -> repli automatique.
+        forced = self._ForcedToolchainName()
+        if forced:
+            self.toolchainManager.DetectAll(self.workspace)
+            for _tc_name, _tc in self.workspace.toolchains.items():
+                if _tc_name not in self.toolchainManager._detected:
+                    self.toolchainManager.AddToolchain(_tc)
+            chosen = self.toolchainManager.GetToolchain(forced)
+            if chosen is None:
+                low = forced.lower()
+                for _name, _tc in self.toolchainManager._detected.items():
+                    if str(_name).lower() == low:
+                        chosen = _tc
+                        break
+            if chosen is not None:
+                self.toolchain = chosen
+                self._DetectCompilerCache()
+                return
+            Colored.PrintWarning(
+                f"Toolchain '{forced}' demandée introuvable — résolution automatique."
+            )
+
         if self.workspace.defaultToolchain:
             tc_name = self.workspace.defaultToolchain
             tc = self.workspace.toolchains.get(tc_name)
@@ -545,6 +588,16 @@ class Builder(abc.ABC):
                 base = base / self.platform
             return (base / project.name).resolve()
 
+    def GetBinDir(self, project: Project) -> Path:
+        """Repertoire des binaires finaux. Vide => identique a GetTargetDir."""
+        binDir = getattr(project, "binDir", "")
+        if binDir:
+            if self._expander:
+                self._expander.SetProject(project)
+                return Path(self._expander.Expand(binDir, recursive=True)).resolve()
+            return Path(binDir).resolve()
+        return self.GetTargetDir(project)
+
     def GetTargetPath(self, project: Project) -> Path:
         target_dir = self.GetTargetDir(project)
         target_name = project.targetName or project.name
@@ -879,6 +932,7 @@ class Builder(abc.ABC):
                 "postLinkCommands": list(project.postLinkCommands),
                 "objDir": project.objDir,
                 "targetDir": project.targetDir,
+                "binDir": getattr(project, "binDir", ""),
                 "targetName": project.targetName,
                 "pchHeader": project.pchHeader,
                 "pchSource": project.pchSource,
@@ -907,6 +961,7 @@ class Builder(abc.ABC):
         project.postLinkCommands = list(base["postLinkCommands"])
         project.objDir = base["objDir"]
         project.targetDir = base["targetDir"]
+        project.binDir = base.get("binDir", "")
         project.targetName = base["targetName"]
         project.pchHeader = base["pchHeader"]
         project.pchSource = base["pchSource"]
@@ -982,6 +1037,9 @@ class Builder(abc.ABC):
         for filter_name, target_dir in getattr(project, "_filteredTargetDir", {}).items():
             if self._FilterMatches(filter_name, project):
                 project.targetDir = target_dir
+        for filter_name, bin_dir in getattr(project, "_filteredBinDir", {}).items():
+            if self._FilterMatches(filter_name, project):
+                project.binDir = bin_dir
         for filter_name, target_name in getattr(project, "_filteredTargetName", {}).items():
             if self._FilterMatches(filter_name, project):
                 project.targetName = target_name

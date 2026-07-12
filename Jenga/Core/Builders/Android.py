@@ -1530,17 +1530,35 @@ class AndroidBuilder(Builder):
         Reporter.Success(f"APK generated: {apk_signed}")
         return True
 
+    def _ResolveGlobPattern(self, project: Project, pattern: str) -> str:
+        """Expanse les variables %{Module.location}, rend le chemin absolu et
+        normalise "**.<ext>" en "**/*.<ext>" (glob recursif Python)."""
+        pat = pattern
+        # 1) Expanser les variables Jenga (%{NKWindow.location}, %{wks.location}...).
+        if getattr(self, "_expander", None):
+            self._expander.SetProject(project)
+            pat = self._expander.Expand(pat, recursive=True)
+        pat = str(pat).replace("\\", "/")
+        # 2) Rendre absolu : relatif au projet, sinon au workspace.
+        p = Path(pat)
+        if not p.is_absolute():
+            proj_root = Path(self.ResolveProjectPath(project, "."))
+            cand = (proj_root / pat)
+            if not glob.glob(str(cand).replace("**.", "**/*."), recursive=True) and \
+               self.workspace and self.workspace.location:
+                cand = Path(self.workspace.location).resolve() / pat
+            pat = str(cand)
+        # 3) "**.java" (suffixe colle) -> "**/*.java" pour un vrai glob recursif.
+        return pat.replace("\\", "/").replace("**.", "**/*.")
+
     def _CollectJavaSourceFiles(self, project: Project) -> List[Path]:
         """Collecte tous les fichiers .java via les patterns dans androidJavaFiles."""
         if not hasattr(project, 'androidJavaFiles'):
             return []
-        patterns = project.androidJavaFiles
-        proj_root = Path(self.ResolveProjectPath(project, "."))
         files = []
-        for pattern in patterns:
-            full_pattern = proj_root / pattern
-            matches = glob.glob(str(full_pattern), recursive=True)
-            for m in matches:
+        for pattern in project.androidJavaFiles:
+            normalized = self._ResolveGlobPattern(project, pattern)
+            for m in glob.glob(normalized, recursive=True):
                 p = Path(m)
                 if p.is_file() and p.suffix == '.java':
                     files.append(p)
@@ -1551,10 +1569,9 @@ class AndroidBuilder(Builder):
         if not hasattr(project, 'androidJavaLibs'):
             return []
         patterns = project.androidJavaLibs
-        proj_root = Path(self.ResolveProjectPath(project, "."))
         libs = []
         for pattern in patterns:
-            full_pattern = proj_root / pattern
+            full_pattern = self._ResolveGlobPattern(project, pattern)
             matches = glob.glob(str(full_pattern), recursive=True)
             for m in matches:
                 p = Path(m)
@@ -1911,10 +1928,17 @@ class AndroidBuilder(Builder):
         if getattr(project, 'androidLargeHeap', False):
             application.set(f"{{{android_ns}}}largeHeap", "true")
 
+        activity_name = None
         if project.androidNativeActivity and not has_java:
-            # NativeActivity sans code Java
+            activity_name = "android.app.NativeActivity"
+        elif project.androidNativeActivity and has_java and getattr(project, "androidActivityClass", ""):
+            # Activity Java custom = sous-classe de NativeActivity (IME complet, etc.)
+            activity_name = project.androidActivityClass
+
+        if activity_name:
+            # NativeActivity standard OU sous-classe Java custom.
             activity = ET.SubElement(application, "activity")
-            activity.set(f"{{{android_ns}}}name", "android.app.NativeActivity")
+            activity.set(f"{{{android_ns}}}name", activity_name)
             activity.set(f"{{{android_ns}}}exported", "true")
             activity.set(
                 f"{{{android_ns}}}configChanges",
@@ -1945,9 +1969,8 @@ class AndroidBuilder(Builder):
             category = ET.SubElement(intent_filter, "category")
             category.set(f"{{{android_ns}}}name", "android.intent.category.LAUNCHER")
         elif has_java:
-            # Si présence de code Java, on suppose que l'utilisateur a sa propre activité
-            # On peut ajouter une activité par défaut si aucune n'est déclarée ?
-            # Pour l'instant, on ne fait rien, l'utilisateur doit fournir son manifeste.
+            # Java présent mais aucun androidactivityclass() défini : on suppose
+            # que l'utilisateur fournit son propre <activity> via un manifeste custom.
             pass
 
         # Ajouter les permissions.
