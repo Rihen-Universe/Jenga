@@ -133,7 +133,19 @@ packaging) · `embedresources(resources)`.
 `defines(defs)` · `removedefines(d)` / `undefines(d)` ·
 `optimize(level)` (`OFF`/`SIZE`/`SPEED`/`FULL`) · `symbols(bool)` ·
 `warnings(level)` (`NONE`/`DEFAULT`/`ALL`/`EXTRA`/`PEDANTIC`/`EVERYTHING`/`ERROR`) ·
-`runtime(lib)` (MSVC : `MD`/`MDd`/`MT`/`MTd`) · `pchheader(h)` · `pchsource(s)`.
+`runtime(lib)` (MSVC : `MD`/`MDd`/`MT`/`MTd`) ·
+`staticruntime([enabled])` (GCC/Clang : lie `libstdc++`/`libgcc` en statique →
+exe autonome sans DLL runtime ; défaut projet = dynamique) ·
+`pchheader(h)` · `pchsource(s)`.
+
+> **`staticruntime()`** — sur les toolchains GCC/Clang (dont **clang-mingw** et
+> **gcc-mingw** sous Windows, et GCC/Clang sous Linux) ajoute
+> `-static-libstdc++ -static-libgcc` à l'édition de liens. L'exécutable embarque le
+> runtime C++/GCC au lieu d'en dépendre en DLL : il **démarre quel que soit le PATH**,
+> sans copier `libstdc++-6.dll`/`libgcc_s_seh-1.dll` à côté (et sans risquer de charger
+> le mauvais `libstdc++` d'un autre msys → crash `0xC0000139` avant `main`). Coût :
+> +~2 Mo/exe. Sans effet sur MSVC (y utiliser `runtime("MT")`) ni macOS (libc++).
+> Exemple : `with project("App"): consoleapp(); staticruntime()`.
 
 ### Hooks de build
 
@@ -383,7 +395,16 @@ packaging) · `embedresources(resources)`.
 `defines(defs)` · `removedefines(d)` / `undefines(d)` ·
 `optimize(level)` (`OFF`/`SIZE`/`SPEED`/`FULL`) · `symbols(bool)` ·
 `warnings(level)` (`NONE`/`DEFAULT`/`ALL`/`EXTRA`/`PEDANTIC`/`EVERYTHING`/`ERROR`) ·
-`runtime(lib)` (MSVC: `MD`/`MDd`/`MT`/`MTd`) · `pchheader(h)` · `pchsource(s)`.
+`runtime(lib)` (MSVC: `MD`/`MDd`/`MT`/`MTd`) ·
+`staticruntime([enabled])` (GCC/Clang: static-link `libstdc++`/`libgcc` → standalone
+exe, no runtime DLL; project default = dynamic) · `pchheader(h)` · `pchsource(s)`.
+
+> **`staticruntime()`** — on GCC/Clang toolchains (incl. **clang-mingw** & **gcc-mingw**
+> on Windows, GCC/Clang on Linux) appends `-static-libstdc++ -static-libgcc` at link time,
+> so the executable embeds the C++/GCC runtime instead of depending on DLLs: it **starts
+> regardless of PATH**, no need to ship `libstdc++-6.dll`/`libgcc_s_seh-1.dll` next to it
+> (and no risk of loading the wrong `libstdc++` from another msys → `0xC0000139` crash
+> before `main`). Cost: +~2 MB/exe. No effect on MSVC (use `runtime("MT")`) or macOS (libc++).
 
 ### Build hooks
 
