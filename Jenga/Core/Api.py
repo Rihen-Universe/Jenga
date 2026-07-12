@@ -267,6 +267,7 @@ class Project:
     # Output
     objDir: str = ""
     targetDir: str = ""
+    binDir: str = ""          # repertoire des binaires finaux ; vide => identique a targetDir
     targetName: str = ""
 
     # Dependencies
@@ -349,6 +350,10 @@ class Project:
     symbols: bool = True
     warnings: WarningLevel = WarningLevel.DEFAULT
     runtime: Optional[str] = None  # MSVC runtime library: "Debug"/"Release" or "MD"/"MDd"/"MT"/"MTd"
+    # Lie le runtime C++/GCC EN STATIQUE (GCC/Clang, dont clang-mingw) -> exe autonome
+    # sans DLL libstdc++/libgcc a cote. Opt-in par projet (defaut False = dynamique).
+    # Voir DSL staticruntime(). Sur mingw, evite le piege du mauvais libstdc++-6.dll du PATH.
+    staticRuntime: bool = False
 
     # Toolchain
     toolchain: Optional[str] = None
@@ -387,6 +392,10 @@ class Project:
     androidKeyAlias: str = ""
     androidJavaFiles: List[str] = field(default_factory=list)
     androidJavaLibs: List[str] = field(default_factory=list)
+    # Nom pleinement qualifie d'une Activity Java custom (ex.
+    # "com.nkentseu.window.NkNativeActivity"). Si defini avec des sources Java,
+    # le manifeste genere pointe cette Activity au lieu de android.app.NativeActivity.
+    androidActivityClass: str = ""
 
     # iOS specifics (extended)
     iosBundleId: str = ""
@@ -474,6 +483,7 @@ class Project:
     _filteredLibDirs: Dict[str, List[str]] = field(default_factory=dict)
     _filteredObjDir: Dict[str, str] = field(default_factory=dict)
     _filteredTargetDir: Dict[str, str] = field(default_factory=dict)
+    _filteredBinDir: Dict[str, str] = field(default_factory=dict)
     _filteredTargetName: Dict[str, str] = field(default_factory=dict)
     _filteredPchHeader: Dict[str, str] = field(default_factory=dict)
     _filteredPchSource: Dict[str, str] = field(default_factory=dict)
@@ -534,6 +544,15 @@ class Workspace:
     androidSdkPath: str = ""
     androidNdkPath: str = ""
     javaJdkPath: str = ""
+    # SDK macOS (sysroot) pour la cross-compilation via Zig (macos-backend=zig).
+    # Alternative a la variable d'env MACOS_SDK. Voir Core/Builders/MacosZig.py.
+    macosSdkPath: str = ""
+    # SDK Apple mobile COMPLETS (Xcode) pour la cross-compilation via Zig+ld64
+    # (ios-backend=zig). Alternatives aux env IOS_SDK/TVOS_SDK/WATCHOS_SDK.
+    # Voir Core/Builders/IosZig.py.
+    iosSdkPath: str = ""
+    tvosSdkPath: str = ""
+    watchosSdkPath: str = ""
 
     # Emscripten workspace defaults
     # Enabled by default for a cleaner fullscreen Web shell.
@@ -1575,6 +1594,14 @@ def targetdir(path: str) -> None:
         else:
             _currentProject.targetDir = path
 
+def bindir(path: str) -> None:
+    """Repertoire des binaires finaux. Par defaut identique a targetdir."""
+    if _currentProject:
+        if _currentFilter:
+            _currentProject._filteredBinDir[_currentFilter] = path
+        else:
+            _currentProject.binDir = path
+
 def targetname(name: str) -> None:
     if _currentProject:
         if _currentFilter:
@@ -1688,6 +1715,26 @@ def runtime(lib: str) -> None:
         else:
             _currentProject.runtime = lib
 
+def staticruntime(enabled: bool = True) -> None:
+    """
+    Lie le runtime C++/GCC EN STATIQUE dans l'executable (opt-in, defaut projet = dynamique).
+
+    Sur les toolchains GCC/Clang (dont **clang-mingw** utilise sur Windows), ajoute
+    `-static-libstdc++ -static-libgcc` a l'edition de liens : l'exe embarque libstdc++/
+    libgcc au lieu d'en dependre en DLL. Resultat : **executable autonome** qui demarre
+    quel que soit le PATH, sans copier libstdc++-6.dll/libgcc_s_seh-1.dll a cote (et sans
+    risquer de charger le mauvais libstdc++ mingw64 du PATH -> 0xC0000139).
+
+    Cout : +~2 Mo/exe (runtime embarque au lieu de partage). Sans effet sur MSVC (utiliser
+    runtime("MT") pour le runtime statique MSVC) ni la ou le static libstdc++ n'existe pas.
+
+    Exemple (dans un with project(...)):
+        consoleapp()
+        staticruntime()          # -> exe autonome sur clang-mingw
+    """
+    if _currentProject:
+        _currentProject.staticRuntime = bool(enabled)
+
 def warnings(level: Union[str, WarningLevel]) -> None:
     if _currentToolchain:
         _warningsTc(level)
@@ -1779,6 +1826,30 @@ def androidndkpath(path: str) -> None:
 def javajdkpath(path: str) -> None:
     if _currentWorkspace:
         _currentWorkspace.javaJdkPath = path
+
+def macossdkpath(path: str) -> None:
+    """Chemin du SDK macOS (sysroot) pour la cross-compilation via Zig
+    (option de build `macos-backend=zig`). Alternative a l'env MACOS_SDK.
+    Ex : macossdkpath("C:/apple-sdks/MacOSX11.3.sdk")."""
+    if _currentWorkspace:
+        _currentWorkspace.macosSdkPath = path
+
+def iossdkpath(path: str) -> None:
+    """Chemin d'un SDK iOS COMPLET (Xcode) pour la cross-compilation via Zig+ld64
+    (option `ios-backend=zig`). Alternative a l'env IOS_SDK.
+    Ex : iossdkpath("C:/apple-sdks/iPhoneOS12.2.sdk")."""
+    if _currentWorkspace:
+        _currentWorkspace.iosSdkPath = path
+
+def tvossdkpath(path: str) -> None:
+    """Chemin d'un SDK tvOS COMPLET (Xcode). Alternative a l'env TVOS_SDK."""
+    if _currentWorkspace:
+        _currentWorkspace.tvosSdkPath = path
+
+def watchossdkpath(path: str) -> None:
+    """Chemin d'un SDK watchOS COMPLET (Xcode). Alternative a l'env WATCHOS_SDK."""
+    if _currentWorkspace:
+        _currentWorkspace.watchosSdkPath = path
 
 def androidapplicationid(appid: str) -> None:
     if _currentProject:
@@ -1934,6 +2005,14 @@ def androidjavalibs(patterns: List[str]) -> None:
         if not hasattr(_currentProject, 'androidJavaLibs'):
             _currentProject.androidJavaLibs = []
         _currentProject.androidJavaLibs.extend(patterns)
+
+def androidactivityclass(name: str) -> None:
+    """Nom pleinement qualifie d'une Activity Java custom (sous-classe de
+    NativeActivity) a declarer dans le manifeste a la place de
+    android.app.NativeActivity. Requiert des sources Java via androidjavafiles().
+    Ex : androidactivityclass("com.nkentseu.window.NkNativeActivity")."""
+    if _currentProject:
+        _currentProject.androidActivityClass = name
 
 # --- Emscripten specific ---
 def emscriptenshellfile(path: str) -> None:
@@ -3159,6 +3238,7 @@ def getprojectproperties(projectname: Optional[str] = None) -> Optional[Dict[str
         'libdirs': list(proj.libDirs),
         'objdir': proj.objDir,
         'targetdir': proj.targetDir,
+        'bindir': proj.binDir or proj.targetDir,
         'targetname': proj.targetName,
         'defines': list(proj.defines),
         'optimize': proj.optimize.value,
@@ -4053,17 +4133,17 @@ __all__ = [
     'includedirs', 'externalincludedirs', 'sysincludedirs', 'removeincludedirs',
     'libdirs', 'syslibdirs', 'removelibdirs', 'objdir', 'targetdir', 'targetname',
     'links', 'removelinks', 'dependson', 'removedependson', 'dependfiles', 'embedresources',
-    'defines', 'removedefines', 'undefines', 'optimize', 'symbols', 'warnings', 'runtime',
+    'defines', 'removedefines', 'undefines', 'optimize', 'symbols', 'warnings', 'runtime', 'staticruntime',
     'pchheader', 'pchsource',
     'prebuild', 'postbuild', 'prelink', 'postlink',
     'usetoolchain',
-    'androidsdkpath', 'androidndkpath', 'javajdkpath',
+    'androidsdkpath', 'androidndkpath', 'javajdkpath', 'macossdkpath', 'iossdkpath', 'tvossdkpath', 'watchossdkpath',
     'androidapplicationid', 'androidversioncode', 'androidversionname',
     'androidminsdk', 'androidtargetsdk', 'androidcompilesdk',
     'androidabis', 'androidproguard', 'androidproguardrules',
     'androidassets', 'androidisgame', 'androidpermissions', 'androidnativeactivity',
     'androidstl', 'androidallowrotation', 'androidlargeheap', 'androidscreenorientation',
-    'androidjavafiles', 'androidjavalibs',
+    'androidjavafiles', 'androidjavalibs', 'androidactivityclass',
     'ndkversion', 'androidsign', 'androidkeystore', 'androidkeystorepass', 'androidkeyalias',
     'emscriptenshellfile', 'emscriptenfullscreenshell', 'emscriptencanvasid', 'emscripteninitialmemory',
     'emscriptenstacksize', 'emscriptenexportname', 'emscriptenextraflags',
