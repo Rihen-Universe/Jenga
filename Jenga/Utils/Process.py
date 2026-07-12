@@ -86,6 +86,13 @@ class Process:
         """
         cmd_str = _FormatCommand(args)
 
+        # Windows : un .cmd/.bat n'est PAS un exécutable natif — CreateProcess ne sait
+        # pas le lancer directement (subprocess sans shell échoue). On le route via
+        # `cmd /c`. Utilisé notamment par les shims zig (zig-cc.cmd -> `zig cc %*`).
+        if (sys.platform == "win32" and not shell and isinstance(args, list) and args
+                and str(args[0]).lower().endswith((".cmd", ".bat"))):
+            args = ["cmd", "/c"] + [str(a) for a in args]
+
         env_dict = os.environ.copy()
         if env:
             env_dict.update(env)

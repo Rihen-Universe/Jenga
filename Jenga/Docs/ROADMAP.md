@@ -448,6 +448,22 @@ externe. Code : [Jenga/Tools/Installer/](../Tools/Installer/). Spec :
 - ⚠️ Convention `.jenga` vs `.py` — clarifier dans la doc pourquoi
   l'extension custom (parsing, IDE support).
 
+### 6.5 Zéro-dépendance Python — embarquer l'interpréteur (stratégique)
+
+> **Objectif :** supprimer l'obligation pour l'utilisateur d'installer Python,
+> **tout en conservant le DSL Python** (boucles, conditions, fonctions, imports —
+> sa vraie force). On n'écrit **pas** un DSL C++ (perte d'expressivité + langage à
+> réapprendre) : on **embarque l'interpréteur**.
+
+| # | Chantier | Détail |
+|---|----------|--------|
+| 1 | **Embarquer CPython avec Jenga** | Bundler le *CPython embeddable* (~10–15 Mo) dans la distribution → **zéro install côté user**, plus de conflits de version, DSL Python inchangé. |
+| 2 | **Embarquer libpython dans NKCode (in-process)** | Jenga s'exécute **dans** l'IDE via `libpython`/`pybind`, **sans spawn de `jenga.exe`** → intégration « totale et fiable », plus rapide (pas de process externe), remontée directe des erreurs/logs. |
+| 3 | **(Optionnel) Cœur natif C++** | Graphe de build + cache incrémental en C++ natif ; le `.jenga` reste le **frontend Python** exécuté par l'interpréteur embarqué. Découple la performance du langage utilisateur. |
+
+**Bénéfices :** distribution auto-suffisante, démarrage plus rapide, intégration
+IDE fiable, aucune régression du DSL. **À planifier** (lié à l'intégration NKCode).
+
 ---
 
 ## 7. Récapitulatif visuel — réponse à la question

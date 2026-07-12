@@ -34,9 +34,11 @@ from .Bench import BenchCommand
 from .Config import ConfigCommand
 from .Examples import ExamplesCommand
 from .IdeSetup import IdeSetupCommand
+from .CompileFlags import CompileFlagsCommand
 
 # Enregistrement des commandes
 COMMANDS.update({
+    'compile-flags': CompileFlagsCommand,   # flags de compilation (JSON) pour diagnostics IDE
     'build': BuildCommand,
     'run': RunCommand,
     'gdb': GdbCommand,

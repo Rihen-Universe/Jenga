@@ -289,7 +289,39 @@ class BuildCommand:
         # Utiliser le système de résolution des builders
         from ..Core.Builders import get_builder_class
         apple_mode = BuildCommand.ResolveAppleMobileBuilderMode(workspace, target, options)
-        builder_class = get_builder_class(target_os.value, apple_mobile_mode=apple_mode)
+
+        # Opt-in ADDITIF : cross-compilation Apple via Zig (macOS + iOS/tvOS/watchOS).
+        # N'affecte QUE les cibles Apple demandées et ne remplace jamais les builders
+        # natifs (MacOSBuilder / Ios.py). Voir Core/Builders/MacosZig.py + IosZig.py.
+        def _wants_zig(keys):
+            for _tok in (options or []):
+                _o = str(_tok or "").strip().lower()
+                if _o in tuple(f"{k}=zig" for k in keys) + tuple(f"{k}:zig" for k in keys):
+                    return True
+                if "=" in _o:
+                    _k, _v = _o.split("=", 1)
+                    if _k.strip() in keys and _v.strip() == "zig":
+                        return True
+            return False
+
+        _wants_zig_macos = _wants_zig(("macos-backend", "macos-build"))
+        _wants_zig_ios = _wants_zig(("ios-backend", "apple-backend", " apple-mobile-backend"))
+
+        builder_class = None
+        if target_os.value in ("macOS", "Macos") and _wants_zig_macos:
+            try:
+                from ..Core.Builders.MacosZig import MacosZigBuilder
+                builder_class = MacosZigBuilder
+            except Exception:
+                builder_class = None
+        elif target_os.value in ("iOS", "IOS", "tvOS", "TVOS", "watchOS", "WATCHOS", "iPadOS") and _wants_zig_ios:
+            try:
+                from ..Core.Builders.IosZig import IosZigBuilder
+                builder_class = IosZigBuilder
+            except Exception:
+                builder_class = None
+        if builder_class is None:
+            builder_class = get_builder_class(target_os.value, apple_mobile_mode=apple_mode)
         if not builder_class:
             raise RuntimeError(f"Unsupported target platform: {target_os.value}")
 
@@ -329,6 +361,16 @@ class BuildCommand:
                 cfg["action"] = builder.action
                 cfg["options"] = " ".join(builder.options)
                 builder._expander.SetConfig(cfg)
+            # Les builders à ancienne signature ont vu _ResolveToolchain() tourner dans
+            # __init__ AVANT que `options` soit posé -> un `--toolchain` (token
+            # `toolchain:<name>` dans options) aurait été ignoré. On re-résout ici,
+            # maintenant que les options sont connues, si un override est présent.
+            try:
+                if any(str(o).lower().startswith("toolchain:") for o in builder.options) \
+                   and hasattr(builder, "_ResolveToolchain"):
+                    builder._ResolveToolchain()
+            except Exception:
+                pass
             return builder
 
     @staticmethod
@@ -479,6 +521,9 @@ class BuildCommand:
         parser.add_argument("--jobs", "-j", type=int, default=0,
                             help="Number of parallel compilation jobs (0 = auto-detect CPU cores, 1 = sequential)")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
+        parser.add_argument("--toolchain", default=None,
+                            help="Force a specific detected toolchain by name (e.g. msvc, clang-cl, mingw). "
+                                 "Optional: omit to auto-resolve the best matching toolchain.")
         parsed, unknown_args = parser.parse_known_args(args)
         try:
             cli_custom_options = BuildCommand.ParseCustomOptionArgs(unknown_args)
@@ -618,6 +663,9 @@ class BuildCommand:
                     + ", ".join(f"--{name}" for name in undeclared)
                 )
 
+        _extra_opts = [f"action:{parsed.action}"]
+        if getattr(parsed, "toolchain", None):
+            _extra_opts.append(f"toolchain:{str(parsed.toolchain).strip()}")
         filter_options = BuildCommand.CollectFilterOptions(
             config=parsed.config,
             platform=parsed.platform,
@@ -625,7 +673,7 @@ class BuildCommand:
             verbose=parsed.verbose,
             no_cache=parsed.no_cache,
             no_daemon=parsed.no_daemon,
-            extra=[f"action:{parsed.action}"],
+            extra=_extra_opts,
             custom_option_values=custom_option_values
         )
 

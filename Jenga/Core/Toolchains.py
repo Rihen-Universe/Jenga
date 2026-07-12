@@ -597,16 +597,44 @@ class ToolchainManager:
                 pass
         return None
     @staticmethod
+    def _EnsureZigShims() -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """Retourne (zig_cc, zig_cxx, zig_ar). Priorité aux shims déjà présents sur le
+        PATH ; sinon, si `zig` natif est trouvé, génère des shims dans ~/.jenga/bin
+        (zig-cc -> `zig cc`, etc.) et les renvoie. (None, None, None) si zig absent.
+        Rend zig détectable SANS installation manuelle de wrappers."""
+        cc = ToolchainManager._FirstRunnable(["zig-cc"])
+        cxx = ToolchainManager._FirstRunnable(["zig-c++"])
+        if cc and cxx:
+            ar = ToolchainManager._FirstRunnable(["zig-ar"]) or Process.Which("llvm-ar") or Process.Which("ar")
+            return cc, cxx, ar
+        zig = Process.Which("zig")
+        if not zig:
+            return None, None, None
+        try:
+            bindir = Path.home() / ".jenga" / "bin"
+            bindir.mkdir(parents=True, exist_ok=True)
+            is_win = sys.platform == "win32"
+            made: Dict[str, str] = {}
+            for name, sub in (("zig-cc", "cc"), ("zig-c++", "c++"), ("zig-ar", "ar")):
+                if is_win:
+                    p = bindir / f"{name}.cmd"
+                    p.write_text(f'@echo off\r\n"{zig}" {sub} %*\r\n', encoding="ascii")
+                else:
+                    p = bindir / name
+                    p.write_text(f'#!/bin/sh\nexec "{zig}" {sub} "$@"\n', encoding="ascii")
+                    p.chmod(0o755)
+                made[name] = str(p)
+            return made["zig-cc"], made["zig-c++"], made["zig-ar"]
+        except Exception:
+            return None, None, None
+
+    @staticmethod
     def DetectZigToolchains() -> Dict[str, Toolchain]:
-        """Detect Zig wrapper toolchains (zig-cc/zig-c++/zig-ar)."""
-        zig_cc = ToolchainManager._FirstRunnable(["zig-cc"])
-        zig_cxx = ToolchainManager._FirstRunnable(["zig-c++"])
+        """Detect Zig wrapper toolchains (zig-cc/zig-c++/zig-ar).
+        Auto-génère les shims depuis `zig` natif si les wrappers sont absents."""
+        zig_cc, zig_cxx, zig_ar = ToolchainManager._EnsureZigShims()
         if not zig_cc or not zig_cxx:
             return {}
-
-        zig_ar = ToolchainManager._FirstRunnable(["zig-ar"])
-        if not zig_ar:
-            zig_ar = Process.Which("llvm-ar") or Process.Which("ar")
 
         detected: Dict[str, Toolchain] = {}
 
@@ -639,6 +667,12 @@ class ToolchainManager:
         _register("zig-windows-x64", TargetOS.WINDOWS, TargetArch.X86_64, TargetEnv.MINGW, "x86_64-windows-gnu")
         _register("zig-macos-x86_64", TargetOS.MACOS, TargetArch.X86_64, TargetEnv.GNU, "x86_64-macos")
         _register("zig-macos-arm64", TargetOS.MACOS, TargetArch.ARM64, TargetEnv.GNU, "aarch64-macos")
+        # Apple mobile (compile via zig ; link via ld.lld -flavor darwin — voir
+        # Core/Builders/IosZig.py). Enregistrees pour que la resolution reussisse
+        # sur un hote non-macOS ; le IosZigBuilder ignore le compilateur ci-dessus.
+        _register("zig-ios-arm64", TargetOS.IOS, TargetArch.ARM64, None, "aarch64-ios")
+        _register("zig-tvos-arm64", TargetOS.TVOS, TargetArch.ARM64, None, "aarch64-tvos")
+        _register("zig-watchos-arm64", TargetOS.WATCHOS, TargetArch.ARM64, None, "aarch64-watchos")
         _register("zig-android-arm64", TargetOS.ANDROID, TargetArch.ARM64, TargetEnv.ANDROID, "aarch64-linux-android21")
         _register("zig-web-wasm32", TargetOS.WEB, TargetArch.WASM32, None, "wasm32-wasi")
 
