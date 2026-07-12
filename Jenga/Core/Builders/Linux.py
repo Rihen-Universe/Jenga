@@ -137,6 +137,10 @@ class LinuxBuilder(Builder):
             # Object files first.
             args.extend(objectFiles)
 
+            # Runtime C++/GCC statique (staticruntime()) -> binaire autonome (GCC/Clang+libstdc++).
+            if getattr(project, "staticRuntime", False):
+                args.extend(["-static-libstdc++", "-static-libgcc"])
+
             # Linker flags before libraries.
             args.extend(self.toolchain.ldflags)
             args.extend(project.ldflags)

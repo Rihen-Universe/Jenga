@@ -540,6 +540,7 @@ class WindowsBuilder(Builder):
                     args.append(f"-l{lib}")
             if project.links:
                 args.append("-Wl,--end-group")
+            args.extend(self._StaticRuntimeFlags(project))  # staticruntime() -> exe autonome (clang-mingw)
             args.extend(self.toolchain.ldflags)
             args.extend(project.ldflags)
         if self.verbose and project.kind != ProjectKind.STATIC_LIB:
@@ -570,6 +571,14 @@ class WindowsBuilder(Builder):
         self._lastResult = result
         return result
 
+    def _StaticRuntimeFlags(self, project: Project) -> List[str]:
+        """Flags de lien du runtime C++/GCC statique si staticruntime() est actif sur le
+        projet (GCC/Clang GNU-style seulement). Rend l'exe autonome (pas de libstdc++/
+        libgcc en DLL). Ne PAS ajouter `-static` seul (casse la selection lld)."""
+        if getattr(project, "staticRuntime", False):
+            return ["-static-libstdc++", "-static-libgcc"]
+        return []
+
     def _LinkMinGW(self, project: Project, objectFiles: List[str], output: Path) -> bool:
         if project.kind == ProjectKind.STATIC_LIB:
             return self._CreateStaticLibGCC(project, objectFiles, output)
@@ -584,6 +593,7 @@ class WindowsBuilder(Builder):
                 args.append(lib)
             else:
                 args.append(f"-l{lib}")
+        args.extend(self._StaticRuntimeFlags(project))
         args.extend(project.ldflags)
         if self.verbose:
             Colored.PrintInfo(f"[Link:MinGW:{project.name}] {' '.join(str(a) for a in args)}")
