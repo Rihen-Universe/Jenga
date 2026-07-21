@@ -19,6 +19,49 @@ from .Display import Display
 from .Process import ProcessResult
 
 # ---------------------------------------------------------------------------
+# Sink de progression STRUCTUREE (embarquement in-process, Core/Embed.py) —
+# objet duck-type enregistre par l'hote (ex. NKCode via pybind11) recevant les
+# MEMES evenements que ceux imprimes sur stdout par BuildLogger/BuildCoordinator,
+# mais sous forme structuree (plus de scraping de texte cote IDE). None par
+# defaut : le comportement CLI (stdout) est strictement inchange sans sink.
+# Methodes attendues (toutes optionnelles, PascalCase) :
+#   OnProjectTotal(total)                    # en-tete "Build Order (N projects)"
+#   OnProjectDone(success)                   # un projet fini (succes/echec)
+#   OnFileTotal(project, total)              # "Found N source file(s)"
+#   OnFileDone(project, index, total, file, ok, warned)   # "[k/n] Compiled..."
+#   OnCompileError(project, file, message)   # "Compilation failed: ..."
+#   OnLinkError(project, file, message)      # "Link failed: ..."
+# ---------------------------------------------------------------------------
+
+_buildSink = None
+
+
+def SetBuildSink(sink) -> None:
+    """Enregistre (ou retire avec None) le sink de progression structuree."""
+    global _buildSink
+    _buildSink = sink
+
+
+def GetBuildSink():
+    return _buildSink
+
+
+def _SinkCall(method: str, *args) -> None:
+    """Appelle sink.<method>(*args) si un sink est pose ET expose la methode.
+    JAMAIS d'exception propagee : un sink defaillant ne casse pas le build."""
+    s = _buildSink
+    if s is None:
+        return
+    fn = getattr(s, method, None)
+    if fn is None:
+        return
+    try:
+        fn(*args)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Data classes – camelCase fields (conteneurs)
 # ---------------------------------------------------------------------------
 
@@ -475,6 +518,7 @@ class BuildLogger:
         """Set total number of files to compile."""
         self.total_files = total
         Display.Info(f"Found {total} source file(s)")
+        _SinkCall("OnFileTotal", self.project_name, total)
 
     def LogCompile(self, source_file: str, result: Optional[ProcessResult]) -> None:
         """
@@ -491,6 +535,8 @@ class BuildLogger:
             if result is None:
                 status = Colored.Colorize(progress, color='green')
                 print(f"{Colored.Colorize('✓', color='green')}   {status} Compiled module: {filename}")
+                _SinkCall("OnFileDone", self.project_name, self.compiled, self.total_files,
+                          source_file, True, False)
                 return
 
             # Fusionner stdout et stderr pour avoir tout le message
@@ -507,6 +553,8 @@ class BuildLogger:
                 else:
                     status = Colored.Colorize(progress, color='green')
                     print(f"{Colored.Colorize('✓', color='green')}   {status} Compiled: {filename}")
+                _SinkCall("OnFileDone", self.project_name, self.compiled, self.total_files,
+                          source_file, True, bool(has_warnings))
             else:
                 # Échec de compilation
                 self.failed += 1
@@ -519,6 +567,9 @@ class BuildLogger:
                 self._PrintErrorBox(filename, output)
                 # Récapitulatif de l'échec
                 print(f"\n{Colored.Colorize('✗', color='red')} {Colored.Colorize('✗', color='red')} Compilation failed: {source_file}")
+                _SinkCall("OnFileDone", self.project_name, self.compiled, self.total_files,
+                          source_file, False, False)
+                _SinkCall("OnCompileError", self.project_name, source_file, output)
             
     # def LogCompile(self, source_file: str, result=None) -> None:
     #     """Log a file compilation with optional captured output."""
@@ -579,11 +630,12 @@ class BuildLogger:
                 self.failed += 1
                 output = (result.stderr or "") + (result.stdout or "")
                 self.errors_count += max(1, self._CountPattern(output, r'\bError\b|\bunresolved\b|\bundefined reference\b'))
-                
+
                 Display.Info("Linking...")
                 if output.strip():
                     self._PrintErrorBox("Link Failed", output)
                 Display.Error(f"Link failed: {display_path}")
+                _SinkCall("OnLinkError", self.project_name, output_file, output)
 
     def PrintProjectHeader(self) -> None:
         """Print a beautiful project header box with double borders."""
@@ -915,6 +967,7 @@ class BuildCoordinator:
         # Build order visualization
         self._projects_total = len(build_order)
         print(Colored.Colorize(f"Build Order ({self._projects_total} projects):", color='yellow', bold=True))
+        _SinkCall("OnProjectTotal", self._projects_total)
 
         for idx, (proj_name, proj_kind, deps) in enumerate(build_order, 1):
             kind_colored = Colored.Colorize(f"[{proj_kind}]", color='green')
@@ -979,6 +1032,7 @@ class BuildCoordinator:
         self._projects_built += 1
         if not success:
             self._projects_failed += 1
+        _SinkCall("OnProjectDone", success)
 
     def AccumulateStats(self, errors: int, warnings: int) -> None:
         """Accumulate error/warning counts from a project build."""
