@@ -68,11 +68,24 @@ class ProjectInfo:
 
 
 @dataclass
+class ToolchainInfo:
+    """Toolchain DETECTEE (equivalent de la table « Available Toolchains » de
+    `jenga info`). Necessaire a un IDE embarque : sans elle, le sélecteur de
+    compilateur reste vide alors qu'aucun `jenga` externe n'est disponible."""
+    name: str = ""
+    family: str = ""
+    targetOs: str = ""
+    arch: str = ""
+    env: str = ""
+
+
+@dataclass
 class WorkspaceInfo:
     name: str = ""
     startProject: str = ""
     configurations: List[str] = field(default_factory=list)
     projects: List[ProjectInfo] = field(default_factory=list)
+    toolchains: List[ToolchainInfo] = field(default_factory=list)
     errorMessage: str = ""
 
 
@@ -267,6 +280,138 @@ def Rebuild(jenga_file: Optional[str] = None, target: Optional[str] = None,
                              jobs, verbose, "rebuild", sink)
 
 
+# Commandes qui ACCEPTENT `--no-daemon` (verifie dans Jenga/Commands/*.py).
+# Le daemon est un RPC socket : aucun sens quand on tourne deja in-process. On
+# n'ajoute le drapeau QU'a celles-ci, sinon argparse refuserait l'argument.
+_NO_DAEMON_COMMANDS = frozenset({
+    "build", "rebuild", "clean", "test", "run", "info", "package", "deploy",
+    "gdb", "watch", "sign", "bench", "profile",
+})
+
+
+def RunCommand(argv: List[str], sink=None) -> BuildResult:
+    """N'IMPORTE QUELLE commande Jenga, IN-PROCESS — equivalent de `jenga <argv>`.
+
+    `argv[0]` est le nom de la commande (« info », « run », « package »,
+    « examples », « config », « compile-flags », « gdb »...), le reste ses
+    arguments. Passe par le MEME dispatcher que la CLI
+    (`Jenga.Commands.execute_command`) : aucune commande n'est laissee de cote et
+    il n'y a pas de liste a maintenir en double.
+
+    Raison d'etre : un IDE qui embarque Jenga ne peut PAS retomber sur un
+    `jenga` externe pour les commandes non couvertes — sur une machine sans
+    Python, elles echoueraient toutes. Avec ceci, tout passe par l'interpreteur
+    embarque.
+
+    - stdout/stderr sont rediriges vers `sink.OnLogLine` (transcript identique a
+      celui d'un sous-processus, panneau Sortie inchange).
+    - `SetBuildSink` est arme aussi : les commandes qui construisent emettent en
+      plus leurs evenements de progression structures.
+    - `--no-daemon` est ajoute si la commande l'accepte : le daemon (RPC socket)
+      n'a aucun sens in-process.
+    - `SystemExit` est intercepte : une commande qui appelle `sys.exit()` ne doit
+      pas tuer l'IDE hote.
+    """
+    res = BuildResult()
+    if not argv:
+        res.errorMessage = "commande vide"
+        res.exitCode = 2
+        return res
+    from ..Commands import execute_command  # import tardif : evite un cycle
+
+    name = str(argv[0])
+    args = [str(a) for a in argv[1:]]
+    if "--no-daemon" not in args and name in _NO_DAEMON_COMMANDS:
+        args.append("--no-daemon")
+
+    collector = _CollectingSink(sink)
+    tee = _SinkWriter(collector)
+    old_out, old_err = sys.stdout, sys.stderr
+    sys.stdout = sys.stderr = tee
+    SetBuildSink(collector)
+    ResetState()
+    try:
+        res.exitCode = int(execute_command(name, args) or 0)
+    except SystemExit as e:  # une commande peut appeler sys.exit()
+        code = e.code
+        res.exitCode = int(code) if isinstance(code, int) else (0 if code is None else 1)
+    except Exception as e:  # noqa: BLE001
+        res.errorMessage = f"{name}: {e}"
+        res.exitCode = 1
+    finally:
+        tee.flush()
+        sys.stdout, sys.stderr = old_out, old_err
+        SetBuildSink(None)
+        ResetState()
+    res.errorFiles = list(collector.errorFiles)
+    res.hadLinkFailure = collector.hadLinkFailure
+    res.hadWarnings = collector.hadWarnings
+    return res
+
+
+def Clean(jenga_file: Optional[str] = None, target: Optional[str] = None,
+          config: str = "Debug", platform: Optional[str] = None,
+          toolchain: Optional[str] = None, verbose: bool = False,
+          sink=None) -> BuildResult:
+    """`jenga clean` in-process (_RunBuilderAction gere deja action="clean")."""
+    return _RunBuilderAction(jenga_file, target, config, platform, toolchain,
+                             0, verbose, "clean", sink)
+
+
+def Test(jenga_file: Optional[str] = None, target: Optional[str] = None,
+         config: str = "Debug", platform: Optional[str] = None,
+         toolchain: Optional[str] = None, jobs: int = 0,
+         verbose: bool = False, sink=None) -> BuildResult:
+    """`jenga test` in-process. Le builder construit puis execute les suites de
+    tests ; on passe donc par l'action « build » avec la cible de test."""
+    return _RunBuilderAction(jenga_file, target, config, platform, toolchain,
+                             jobs, verbose, "test", sink)
+
+
+def ExecutablePath(jenga_file: Optional[str] = None, target: Optional[str] = None,
+                   config: str = "Debug", platform: Optional[str] = None,
+                   toolchain: Optional[str] = None) -> str:
+    """Chemin du BINAIRE produit pour `target`, SANS rien construire ni lancer.
+
+    Permet a un IDE de faire lui-meme le lancement : `jenga run` est un processus
+    LONG (l'application de l'utilisateur, eventuellement plusieurs instances en
+    parallele) et ne peut donc pas occuper l'interpreteur embarque, qui est
+    unique et partage avec les builds. Avec ce chemin, l'hote construit via
+    l'API embarquee puis lance l'executable NATIVEMENT — aucun `jenga` externe,
+    donc aucun besoin de Python installe.
+
+    Renvoie "" si le projet ou le chemin ne peut pas etre resolu.
+    """
+    from ..Commands.Build import BuildCommand  # meme import tardif que _RunBuilderAction
+
+    ResetState()
+    try:
+        entry = _ResolveEntry(jenga_file)
+        if not entry or not target:
+            return ""
+        try:
+            loader = Loader()
+            workspace = loader.LoadWorkspace(str(entry))
+            extra = [f"toolchain:{toolchain}"] if toolchain else None
+            options = BuildCommand.CollectFilterOptions(
+                config=config, platform=platform, target=target,
+                verbose=False, no_cache=False, no_daemon=True, extra=extra)
+            builder = BuildCommand.CreateBuilder(
+                workspace, config=config, platform=platform, target=target,
+                verbose=False, action="build", options=options, jobs=0)
+            # GetTargetPath attend l'OBJET projet (il lit project.targetDir), pas
+            # son nom : le passer en chaine leve AttributeError.
+            proj = (getattr(workspace, "projects", {}) or {}).get(target)
+            if proj is None:
+                return ""
+            p = builder.GetTargetPath(proj)
+            return str(p) if p else ""
+        except Exception:  # noqa: BLE001
+            return ""
+    finally:
+        ResetState()
+
+
 def Info(jenga_file: Optional[str] = None) -> WorkspaceInfo:
     """Remplacement structure de `jenga info` (plus de table texte a parser)."""
     out = WorkspaceInfo()
@@ -290,6 +435,22 @@ def Info(jenga_file: Optional[str] = None) -> WorkspaceInfo:
             kind_str = kind.name if hasattr(kind, "name") else str(kind)
             deps = [d for d in (getattr(proj, "dependsOn", []) or [])]
             out.projects.append(ProjectInfo(name=name, kind=kind_str, dependsOn=deps))
+        # Toolchains detectees — meme source que la table « Available Toolchains »
+        # de `jenga info` (ToolchainManager.DetectAll). Une detection qui echoue ne
+        # doit PAS faire echouer tout Info() : le workspace reste exploitable.
+        try:
+            from .Toolchains import ToolchainManager
+            for tcName, tc in (ToolchainManager(workspace).DetectAll() or {}).items():
+                def _v(x):
+                    return x.value if hasattr(x, "value") else (str(x) if x else "")
+                out.toolchains.append(ToolchainInfo(
+                    name=tcName,
+                    family=_v(getattr(tc, "compilerFamily", None)),
+                    targetOs=_v(getattr(tc, "targetOs", None)),
+                    arch=_v(getattr(tc, "targetArch", None)),
+                    env=_v(getattr(tc, "targetEnv", None))))
+        except Exception:  # noqa: BLE001
+            pass
         return out
     finally:
         ResetState()
