@@ -185,7 +185,14 @@ class ConfigCommand:
                 return 1
 
             try:
-                with open(toolchain_file, 'r') as f:
+                # 'utf-8-sig' et non le codec par défaut de la plateforme :
+                #  - sans `encoding`, Windows lit en cp1252 -> un chemin de
+                #    compilateur accentué (« C:/Users/José/... ») échouait ;
+                #  - '-sig' avale un éventuel BOM UTF-8, que produisent Notepad
+                #    et `Out-File -Encoding utf8` (PowerShell 5.1). Un JSON écrit
+                #    à la main sous Windows partait sinon en
+                #    « Expecting value: line 1 column 1 (char 0) ».
+                with open(toolchain_file, 'r', encoding='utf-8-sig') as f:
                     toolchain_data = json.load(f)
 
                 if config.RegisterToolchain(parsed.name, toolchain_data):
@@ -194,8 +201,13 @@ class ConfigCommand:
                 else:
                     Colored.PrintError(f"Erreur lors de l'enregistrement du toolchain")
                     return 1
+            except json.JSONDecodeError as e:
+                # Message ACTIONNABLE : l'ancien « Erreur : Expecting value... »
+                # ne disait ni quel fichier ni quoi corriger.
+                Colored.PrintError(f"JSON invalide dans {toolchain_file} (ligne {e.lineno}, colonne {e.colno}) : {e.msg}")
+                return 1
             except Exception as e:
-                Colored.PrintError(f"Erreur : {e}")
+                Colored.PrintError(f"Erreur en lisant {toolchain_file} : {e}")
                 return 1
 
         elif parsed.toolchain_cmd == 'list':
