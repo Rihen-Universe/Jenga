@@ -58,7 +58,9 @@ class JengaConfig:
         """Charge la configuration depuis config.json."""
         if self._config_file.exists():
             try:
-                with open(self._config_file, 'r', encoding='utf-8') as f:
+                # 'utf-8-sig' : tolere un BOM UTF-8 (Notepad, PowerShell 5.1)
+                # sur un fichier que l'utilisateur peut editer a la main.
+                with open(self._config_file, 'r', encoding='utf-8-sig') as f:
                     return json.load(f)
             except Exception as e:
                 print(f"Warning: Failed to load config: {e}")
@@ -146,7 +148,8 @@ class JengaConfig:
         toolchain_file = self._config_dir / "toolchains" / f"{name}.json"
         if toolchain_file.exists():
             try:
-                with open(toolchain_file, 'r', encoding='utf-8') as f:
+                # 'utf-8-sig' : le fichier peut avoir ete depose/edite a la main.
+                with open(toolchain_file, 'r', encoding='utf-8-sig') as f:
                     return json.load(f)
             except Exception as e:
                 print(f"Error loading toolchain {name}: {e}")
@@ -219,7 +222,8 @@ class JengaConfig:
         sysroot_file = self._config_dir / "sysroots" / f"{name}.json"
         if sysroot_file.exists():
             try:
-                with open(sysroot_file, 'r', encoding='utf-8') as f:
+                # 'utf-8-sig' : idem toolchains, fichier editable a la main.
+                with open(sysroot_file, 'r', encoding='utf-8-sig') as f:
                     return json.load(f)
             except Exception as e:
                 print(f"Error loading sysroot {name}: {e}")
