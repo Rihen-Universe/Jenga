@@ -37,7 +37,11 @@ class PackageCommand:
         # 'jng' = installateur self-extracting MAISON (Jenga/Tools/Installer),
         # sans dependance externe. C'est une option DE PLUS (msi/exe/zip restent).
         'windows': {'msi', 'exe', 'zip', 'jng'},
-        'linux': {'deb', 'rpm', 'appimage', 'snap', 'jng'},
+        # 'targz' = archive relogeable, SANS aucun outil externe (tarfile est
+        # dans la bibliotheque standard). C'est le repli quand dpkg-deb,
+        # rpmbuild ou appimagetool sont absents — cas frequent lorsqu'on
+        # fabrique pour Linux depuis Windows ou macOS.
+        'linux': {'deb', 'rpm', 'appimage', 'snap', 'targz', 'jng'},
         'macos': {'pkg', 'dmg', 'jng'},
         'web': {'zip'},
         'harmonyos': {'hap'},
@@ -69,6 +73,15 @@ class PackageCommand:
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
+        # Sans cette option, `package` empaquetait TOUJOURS le backend par
+        # defaut (xlib) : impossible de livrer une variante XCB ou Wayland,
+        # alors que `build` sait les produire depuis toujours. Meme nom que
+        # dans `build`, pour qu'une commande se transpose sans surprise.
+        parser.add_argument("--linux-backend", choices=["xlib", "xcb", "wayland", "headless"],
+                            default=None,
+                            help="Linux windowing backend to package (default: workspace default)")
+        parser.add_argument("--options", nargs="*", default=None,
+                            help="Custom workspace options (KEY=VALUE), as in `build`")
         parsed = parser.parse_args(args)
 
         # Déterminer le répertoire de travail (workspace root)
@@ -166,7 +179,12 @@ class PackageCommand:
                     no_daemon=parsed.no_daemon,
                     extra=(
                         ["action:package", f"package:{pkg_type}"] +
-                        ([f"ios-builder={parsed.ios_builder}"] if parsed.ios_builder else [])
+                        ([f"ios-builder={parsed.ios_builder}"] if parsed.ios_builder else []) +
+                        # Le backend doit atteindre les FILTRES du .jenga, sinon
+                        # les objets/artefacts vises seraient ceux d'un autre
+                        # backend que celui demande.
+                        ([f"linux-backend={parsed.linux_backend}"] if getattr(parsed, "linux_backend", None) else []) +
+                        list(getattr(parsed, "options", None) or [])
                     )
                 )
             )
@@ -339,19 +357,50 @@ class PackageCommand:
 
         collected: List[tuple] = []
         for dep in project.dependFiles:
+            # DESTINATION EXPLICITE : « source => destination ».
+            #
+            # Sans cela, le chemin dans le paquet est toujours relatif au
+            # WORKSPACE : `dependfiles(["data"])` depuis Applications/NKCode
+            # donnait « Applications/NKCode/data/... ». Or beaucoup
+            # d'applications — NKCode compris — resolvent leurs ressources
+            # RELATIVEMENT A L'EXECUTABLE et cherchent simplement « data/ ».
+            # Le paquet s'installait donc sans que l'application retrouve ses
+            # polices, textures, logos ni traductions.
+            #
+            # `dependfiles(["data => data"])` place le dossier exactement ou
+            # l'application l'attend. La forme sans « => » garde le
+            # comportement d'origine : rien de ce qui existe ne change.
+            dest_override = None
+            spec = str(dep)
+            if "=>" in spec:
+                src_part, dst_part = spec.split("=>", 1)
+                spec = src_part.strip()
+                dest_override = dst_part.strip().strip("/").replace("\\", "/")
+
             # Resolve via builder pour gerer correctement les chemins
             # relatifs au project.location (ex: "../../Resources/Pong").
             try:
-                resolved = Path(builder.ResolveProjectPath(project, dep)).resolve()
+                resolved = Path(builder.ResolveProjectPath(project, spec)).resolve()
             except Exception:
-                resolved = Path(dep).resolve()
+                resolved = Path(spec).resolve()
 
             if not resolved.exists():
                 Colored.PrintWarning(f"[package] dependfile introuvable : {dep}")
                 continue
 
-            def _archive_path_for(file_abs: Path) -> str:
+            root_for_rel = resolved if resolved.is_dir() else resolved.parent
+
+            def _archive_path_for(file_abs: Path, _dest=dest_override, _root=root_for_rel) -> str:
                 """Calcule le chemin relatif dans l'archive pour un fichier source."""
+                if _dest is not None:
+                    # Destination imposee : on reconstruit l'arborescence SOUS
+                    # elle, en repartant du dossier declare.
+                    try:
+                        rel = file_abs.relative_to(_root)
+                        sub = str(rel).replace("\\", "/")
+                    except ValueError:
+                        sub = file_abs.name
+                    return f"{_dest}/{sub}" if _dest else sub
                 if workspace_root is not None:
                     try:
                         rel = file_abs.relative_to(workspace_root)
@@ -1184,6 +1233,9 @@ Filename: "{{app}}\\{exe_path.name}"; Description: "Lancer {app_name}"; Flags: n
             return PackageCommand._CreateAppImage(project, builder, exe_path, output_dir)
         elif pkg_type == 'snap':
             return PackageCommand._CreateSnap(project, builder, exe_path, output_dir)
+        elif pkg_type in ('targz', 'tar.gz', 'tgz'):
+            return PackageCommand._CreateTarGz(project, builder, exe_path, output_dir)
+        Colored.PrintError(f"Unknown Linux package type: {pkg_type}")
         return 1
 
     @staticmethod
@@ -1197,32 +1249,42 @@ Filename: "{{app}}\\{exe_path.name}"; Description: "Lancer {app_name}"; Flags: n
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
-            # Créer la structure de dossier
             deb_root = tmp / "deb"
-            usr_bin = deb_root / "usr" / "bin"
-            usr_bin.mkdir(parents=True)
-            shutil.copy2(exe_path, usr_bin / exe_path.name)
+            # Arborescence FHS commune a tous les formats Linux : binaire
+            # executable, donnees, .desktop (menu + « Ouvrir avec » sur un
+            # dossier) et icone. Voir _StageLinuxTree.
+            app_name_lower = PackageCommand._StageLinuxTree(
+                project, builder, exe_path, deb_root)
 
-            # Embarquer les dependfiles dans /usr/share/<app>/ en preservant
-            # la hierarchie. Convention Linux pour les data files.
-            app_name_lower = (project.targetName or project.name).lower()
-            share_dir = deb_root / "usr" / "share" / app_name_lower
-            for src_abs, archive_path in PackageCommand._CollectDependFiles(project, builder):
-                dst = share_dir / archive_path
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_abs, dst)
+            # Dependances ELF reelles. Un .deb sans Depends: s'installe partout
+            # et echoue au LANCEMENT chez qui n'a pas les bibliotheques —
+            # l'echec tombe alors chez l'utilisateur, pas a l'installation.
+            depends = PackageCommand._DetectLinuxDepends(exe_path)
+            if not depends:
+                Colored.PrintWarning(
+                    "dpkg-shlibdeps indisponible : le .deb n'aura PAS de champ "
+                    "Depends. Il s'installera meme sans les bibliotheques "
+                    "requises, et l'echec se produira au lancement.")
 
-            # Créer le fichier DEBIAN/control
+            # Taille installee (en Kio) : sans elle, les gestionnaires de
+            # paquets affichent « 0 octet » avant installation.
+            total = sum(p.stat().st_size for p in deb_root.rglob("*") if p.is_file())
+
             control_dir = deb_root / "DEBIAN"
-            control_dir.mkdir()
-            control = f"""Package: {project.targetName or project.name}
-Version: {project.appVersion or project.iosVersion or '1.0.0'}
-Section: utils
-Priority: optional
-Architecture: amd64
-Maintainer: {project.appPublisher or DEFAULT_PUBLISHER} <{DEFAULT_EMAIL}>
-Description: {project.name} packaged by Jenga
-"""
+            control_dir.mkdir(parents=True, exist_ok=True)
+            version = project.appVersion or getattr(project, 'iosVersion', '') or '1.0.0'
+            arch = PackageCommand._LinuxArch(builder)
+            control = (
+                f"Package: {app_name_lower}\n"
+                f"Version: {version}\n"
+                "Section: devel\n"
+                "Priority: optional\n"
+                f"Architecture: {arch}\n"
+                f"Installed-Size: {max(1, total // 1024)}\n"
+                + (f"Depends: {depends}\n" if depends else "")
+                + f"Maintainer: {project.appPublisher or DEFAULT_PUBLISHER} <{DEFAULT_EMAIL}>\n"
+                f"Description: {project.name} packaged by Jenga\n"
+            )
             (control_dir / "control").write_text(control, encoding='utf-8')
 
             # Hooks postinst / postrm : ouvre/retire les ports firewall si
@@ -1243,29 +1305,442 @@ Description: {project.name} packaged by Jenga
                 import stat as _stat
                 postrm.chmod(postrm.stat().st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
 
-            # Construire le .deb
-            deb_path = output_dir / f"{project.name}.deb"
+            # Nom conforme a la convention Debian : <paquet>_<version>_<arch>.deb
+            # (l'ancien « <Nom>.deb » ecrasait les variantes d'architecture
+            # entre elles dans un meme dossier de sortie).
+            output_dir.mkdir(parents=True, exist_ok=True)
+            deb_path = output_dir / f"{app_name_lower}_{version}_{arch}.deb"
             subprocess.run(["dpkg-deb", "--build", str(deb_root), str(deb_path)], check=True)
             Colored.PrintSuccess(f"DEB package: {deb_path}")
+            return 0
+
+    # -----------------------------------------------------------------------
+    # Linux : briques communes aux formats (desktop, icone, dependances)
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _LinuxAppName(project) -> str:
+        """Nom court, en minuscules, utilise pour les chemins et l'ID desktop."""
+        return (project.targetName or project.name).lower()
+
+    @staticmethod
+    def _LinuxArch(builder) -> str:
+        """Architecture au format dpkg (amd64/arm64/i386), deduite de la cible.
+
+        Etait CODEE EN DUR a 'amd64' : un paquet construit pour arm64 s'annoncait
+        amd64 et refusait de s'installer sur la machine visee.
+        """
+        arch = str(getattr(getattr(builder, 'config', None), 'architecture', '') or '').lower()
+        return {
+            'x86_64': 'amd64', 'x64': 'amd64', 'amd64': 'amd64',
+            'aarch64': 'arm64', 'arm64': 'arm64',
+            'x86': 'i386', 'i386': 'i386',
+        }.get(arch, 'amd64')
+
+    @staticmethod
+    def _LinuxRpmArch(builder) -> str:
+        """Meme chose, au format RPM (x86_64/aarch64/i686)."""
+        return {
+            'amd64': 'x86_64', 'arm64': 'aarch64', 'i386': 'i686',
+        }[PackageCommand._LinuxArch(builder)]
+
+    @staticmethod
+    def _BuildDesktopEntry(project, exec_cmd: str, icon_name: str) -> str:
+        """Genere le contenu d'un fichier .desktop.
+
+        Sans ce fichier, une application installee n'apparait NI dans le menu,
+        NI dans le gestionnaire de fichiers : l'utilisateur doit la lancer au
+        terminal. C'est l'equivalent Linux des raccourcis et de l'entree de
+        registre poses par l'installeur Windows.
+
+        MimeType=inode/directory + %f : le gestionnaire de fichiers propose
+        alors « Ouvrir avec <app> » sur un DOSSIER — l'equivalent du menu
+        contextuel Windows. L'application recoit le dossier en argument.
+        """
+        name = project.targetName or project.name
+        desc = f"{name} packaged by Jenga"
+        return (
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            f"Name={name}\n"
+            f"Comment={desc}\n"
+            f"Exec={exec_cmd} %f\n"
+            f"Icon={icon_name}\n"
+            "Terminal=false\n"
+            "Categories=Development;IDE;\n"
+            "MimeType=inode/directory;\n"
+            "StartupNotify=true\n"
+        )
+
+    @staticmethod
+    def _FindLinuxIcon(project) -> Optional[Path]:
+        """Icone PNG a installer, si appicon() en designe une."""
+        icon = getattr(project, 'appIcon', '') or ''
+        if not icon:
+            return None
+        p = Path(icon)
+        if not p.is_absolute():
+            p = Path(getattr(project, 'location', '.')) / icon
+        return p if p.exists() and p.suffix.lower() == '.png' else None
+
+    @staticmethod
+    def _StageLinuxTree(project, builder, exe_path: Path, root: Path,
+                        prefix: str = "usr") -> str:
+        """Depose l'arborescence FHS commune sous `root` et renvoie le nom court.
+
+        Partage par DEB, RPM, AppImage et tar.gz : binaire dans bin/, donnees
+        dans share/<app>/, entree .desktop et icone dans share/applications et
+        share/icons. Ecrire cela une seule fois evite que les formats divergent.
+        """
+        import stat as _stat
+        app = PackageCommand._LinuxAppName(project)
+        base = root / prefix if prefix else root
+
+        # ── OU VONT LE BINAIRE ET LES DONNEES ───────────────────────────────
+        #
+        # Le binaire ET ses donnees vont ENSEMBLE dans lib/<app>/, et bin/<app>
+        # n'est qu'un lanceur. Ce detour est NECESSAIRE : la plupart des
+        # applications — NKCode compris — resolvent leurs ressources
+        # RELATIVEMENT A L'EXECUTABLE et cherchent « data/… » a cote de lui.
+        # Poser l'executable dans bin/ et les donnees dans share/<app>/ aurait
+        # respecté la lettre du FHS tout en produisant une application qui ne
+        # retrouve ni ses polices, ni ses textures, ni ses traductions.
+        #
+        # C'est aussi ce que fait la distribution Windows (data/ a cote de
+        # l'exe) : les deux plateformes gardent ainsi la meme disposition.
+        libdir = base / "lib" / app
+        libdir.mkdir(parents=True, exist_ok=True)
+        dst_exe = libdir / exe_path.name
+        shutil.copy2(exe_path, dst_exe)
+        # Sans le bit d'execution, le paquet s'installe et l'application ne
+        # demarre pas. shutil.copy2 preserve les droits de la source, qui peut
+        # venir d'un systeme de fichiers sans notion d'executable (montage
+        # Windows) : on le repose explicitement.
+        dst_exe.chmod(dst_exe.stat().st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
+
+        # Donnees A COTE de l'executable, en respectant la destination declaree
+        # dans le .jenga (« data => data » -> lib/<app>/data/...).
+        for src_abs, archive_path in PackageCommand._CollectDependFiles(project, builder):
+            dst = libdir / archive_path
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_abs, dst)
+
+        # Lanceur : seul element expose dans le PATH. Il se place dans le
+        # dossier de l'application avant de l'executer, pour que toute
+        # resolution relative au repertoire courant fonctionne aussi.
+        bindir = base / "bin"
+        bindir.mkdir(parents=True, exist_ok=True)
+        launcher = bindir / app
+        rel_lib = f"../lib/{app}"
+        launcher.write_text(
+            "#!/bin/sh\n"
+            "# Lanceur genere par Jenga : place l'application dans son propre\n"
+            "# dossier (donnees a cote du binaire) avant de l'executer.\n"
+            'SELF="$(readlink -f "$0")"\n'
+            'HERE="$(dirname "$SELF")"\n'
+            f'APPDIR="$HERE/{rel_lib}"\n'
+            'cd "$APPDIR" || exit 1\n'
+            f'exec "$APPDIR/{exe_path.name}" "$@"\n',
+            encoding="utf-8")
+        launcher.chmod(launcher.stat().st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
+
+        apps_dir = base / "share" / "applications"
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        # Exec = le LANCEUR (pas le binaire) : lui seul garantit le bon
+        # repertoire de travail.
+        (apps_dir / f"{app}.desktop").write_text(
+            PackageCommand._BuildDesktopEntry(project, app, app),
+            encoding="utf-8")
+
+        icon = PackageCommand._FindLinuxIcon(project)
+        if icon:
+            icon_dir = base / "share" / "icons" / "hicolor" / "256x256" / "apps"
+            icon_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(icon, icon_dir / f"{app}.png")
+        return app
+
+    @staticmethod
+    def _DetectLinuxDepends(exe_path: Path) -> str:
+        """Deduit le champ Depends: du .deb en lisant les besoins reels du binaire.
+
+        Un .deb sans Depends s'installe partout et echoue au lancement chez
+        quiconque n'a pas deja les bonnes bibliotheques — l'echec se produit
+        alors chez l'utilisateur, pas a l'installation. On interroge donc
+        `dpkg-shlibdeps`, qui lit les dependances ELF et rend les paquets
+        correspondants. S'il est absent, on n'invente RIEN : mieux vaut un
+        champ vide qu'une liste devinee et fausse.
+        """
+        import subprocess
+        if not FileSystem.FindExecutable("dpkg-shlibdeps"):
+            return ""
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                debian = Path(td) / "debian"
+                debian.mkdir()
+                (debian / "control").write_text(
+                    "Source: probe\nSection: utils\nPriority: optional\n"
+                    "Maintainer: probe <probe@localhost>\n\n"
+                    "Package: probe\nArchitecture: any\nDescription: probe\n",
+                    encoding="utf-8")
+                res = subprocess.run(
+                    ["dpkg-shlibdeps", "-O", "--ignore-missing-info", str(exe_path)],
+                    cwd=td, capture_output=True, text=True, timeout=120)
+                for line in (res.stdout or "").splitlines():
+                    if line.startswith("shlibs:Depends="):
+                        return line.split("=", 1)[1].strip()
+        except Exception:
+            # Outil present mais en echec : on prefere un paquet sans Depends a
+            # un echec d'empaquetage. Le defaut est signale a l'appelant.
+            pass
+        return ""
+
+    # -----------------------------------------------------------------------
+    # Linux : formats
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _CreateTarGz(project, builder, exe_path: Path, output_dir: Path) -> int:
+        """Archive .tar.gz relogeable — AUCUN outil externe requis.
+
+        C'est le format de repli universel : dpkg-deb, rpmbuild et appimagetool
+        n'existent pas partout (ni sous Windows ou macOS quand on fabrique pour
+        Linux), alors que tarfile fait partie de la bibliotheque standard.
+        L'archive contient un install.sh optionnel qui pose les fichiers dans
+        ~/.local (aucun privilege administrateur requis).
+        """
+        import tarfile
+        import stat as _stat
+        app = PackageCommand._LinuxAppName(project)
+        version = project.appVersion or getattr(project, 'iosVersion', '') or '1.0.0'
+        arch = PackageCommand._LinuxArch(builder)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            top = tmp / f"{app}-{version}-{arch}"
+            # prefix="" : arborescence a plat dans l'archive (bin/, share/),
+            # pour que install.sh la recopie telle quelle dans ~/.local.
+            PackageCommand._StageLinuxTree(project, builder, exe_path, top, prefix="")
+
+            install = top / "install.sh"
+            install.write_text(
+                "#!/bin/sh\n"
+                "# Installation utilisateur (aucun privilege administrateur).\n"
+                "set -e\n"
+                'PREFIX="${PREFIX:-$HOME/.local}"\n'
+                'SRC="$(cd "$(dirname "$0")" && pwd)"\n'
+                # lib/ contient le binaire ET ses donnees ; l'oublier laisse un
+                # lanceur qui ne trouve rien (« cd: can t cd to ../lib/<app> »).
+                'mkdir -p "$PREFIX/bin" "$PREFIX/lib" "$PREFIX/share"\n'
+                'cp -a "$SRC/lib/." "$PREFIX/lib/"\n'
+                'cp -a "$SRC/bin/." "$PREFIX/bin/"\n'
+                'cp -a "$SRC/share/." "$PREFIX/share/"\n'
+                '# Rafraichit le menu et les associations de fichiers si les\n'
+                '# outils existent (absents sur une machine sans bureau).\n'
+                'command -v update-desktop-database >/dev/null 2>&1 && \\\n'
+                '  update-desktop-database "$PREFIX/share/applications" || true\n'
+                'echo "Installe dans $PREFIX."\n'
+                'case ":$PATH:" in *":$PREFIX/bin:"*) ;; *)\n'
+                '  echo "NOTE: $PREFIX/bin n\'est pas dans votre PATH." ;;\n'
+                'esac\n',
+                encoding="utf-8")
+            install.chmod(install.stat().st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
+
+            out = output_dir / f"{app}-{version}-linux-{arch}.tar.gz"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(out, "w:gz") as tf:
+                tf.add(str(top), arcname=top.name)
+            Colored.PrintSuccess(f"TAR.GZ package: {out}")
             return 0
 
     @staticmethod
     def _CreateRpm(project, builder, exe_path: Path, output_dir: Path) -> int:
         """Crée un package .rpm (nécessite rpmbuild)."""
-        Colored.PrintWarning("RPM packaging not yet implemented.")
-        return 1
+        import subprocess
+        if not FileSystem.FindExecutable("rpmbuild"):
+            Colored.PrintError("rpmbuild not found. Cannot create .rpm package.")
+            Colored.PrintWarning("  Fedora/RHEL : sudo dnf install rpm-build")
+            Colored.PrintWarning("  Debian/Ubuntu : sudo apt install rpm")
+            Colored.PrintWarning("  Repli sans outil externe : --type targz")
+            return 1
+
+        app = PackageCommand._LinuxAppName(project)
+        name = project.targetName or project.name
+        version = project.appVersion or getattr(project, 'iosVersion', '') or '1.0.0'
+        arch = PackageCommand._LinuxRpmArch(builder)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            # rpmbuild impose cette arborescence ; BUILDROOT tient l'image
+            # exacte de ce qui sera installe.
+            for d in ("BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS"):
+                (tmp / d).mkdir(parents=True)
+            buildroot = tmp / "BUILDROOT" / f"{app}-{version}-1.{arch}"
+            PackageCommand._StageLinuxTree(project, builder, exe_path, buildroot)
+
+            # %files liste explicitement le contenu : un fichier absent de cette
+            # liste fait ECHOUER rpmbuild (« installed but unpackaged files »).
+            # On l'engendre donc depuis l'arborescence reellement deposee.
+            files = []
+            for p in sorted(buildroot.rglob("*")):
+                if p.is_file() or p.is_symlink():
+                    files.append("/" + str(p.relative_to(buildroot)).replace("\\", "/"))
+
+            spec = tmp / "SPECS" / f"{app}.spec"
+            spec.write_text(
+                f"Name: {app}\n"
+                f"Version: {version}\n"
+                "Release: 1\n"
+                f"Summary: {name} packaged by Jenga\n"
+                "License: Proprietary\n"
+                f"Vendor: {project.appPublisher or DEFAULT_PUBLISHER}\n"
+                f"BuildArch: {arch}\n"
+                # Les binaires sont deja construits et deja strippes/lies : on
+                # neutralise les etapes automatiques de rpmbuild qui, sinon,
+                # rejettent un binaire prebuild.
+                "%global __os_install_post %{nil}\n"
+                "%global _build_id_links none\n"
+                "AutoReqProv: no\n"
+                "\n%description\n"
+                f"{name} packaged by Jenga.\n"
+                "\n%files\n" + "\n".join(files) + "\n",
+                encoding="utf-8")
+
+            res = subprocess.run(
+                ["rpmbuild", "-bb", "--define", f"_topdir {tmp}",
+                 "--buildroot", str(buildroot), str(spec)],
+                capture_output=True, text=True)
+            if res.returncode != 0:
+                Colored.PrintError("rpmbuild failed:")
+                for line in (res.stderr or res.stdout or "").splitlines()[-15:]:
+                    Colored.PrintError(f"  {line}")
+                return 1
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+            produced = list((tmp / "RPMS").rglob("*.rpm"))
+            if not produced:
+                Colored.PrintError("rpmbuild reported success but produced no .rpm")
+                return 1
+            for f in produced:
+                dst = output_dir / f.name
+                shutil.copy2(f, dst)
+                Colored.PrintSuccess(f"RPM package: {dst}")
+            return 0
 
     @staticmethod
     def _CreateAppImage(project, builder, exe_path: Path, output_dir: Path) -> int:
         """Crée un AppImage (nécessite appimagetool)."""
-        Colored.PrintWarning("AppImage packaging not yet implemented.")
-        return 1
+        import subprocess
+        tool = FileSystem.FindExecutable("appimagetool") or \
+            FileSystem.FindExecutable("appimagetool-x86_64.AppImage")
+        if not tool:
+            Colored.PrintError("appimagetool not found. Cannot create AppImage.")
+            Colored.PrintWarning("  https://github.com/AppImage/AppImageKit/releases")
+            Colored.PrintWarning("  Repli sans outil externe : --type targz")
+            return 1
+
+        app = PackageCommand._LinuxAppName(project)
+        version = project.appVersion or getattr(project, 'iosVersion', '') or '1.0.0'
+        arch = PackageCommand._LinuxArch(builder)
+        import stat as _stat
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            appdir = Path(tmpdir) / f"{app}.AppDir"
+            PackageCommand._StageLinuxTree(project, builder, exe_path, appdir)
+
+            # Un AppDir exige .desktop et icone A SA RACINE, en plus des copies
+            # FHS : appimagetool les cherche la et echoue sinon.
+            shutil.copy2(appdir / "usr" / "share" / "applications" / f"{app}.desktop",
+                         appdir / f"{app}.desktop")
+            icon_src = appdir / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / f"{app}.png"
+            if icon_src.exists():
+                shutil.copy2(icon_src, appdir / f"{app}.png")
+            else:
+                # Sans icone, appimagetool refuse de produire l'image. On depose
+                # un PNG 1x1 valide plutot que d'echouer l'empaquetage entier.
+                (appdir / f"{app}.png").write_bytes(bytes.fromhex(
+                    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+                    "890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"))
+
+            runner = appdir / "AppRun"
+            runner.write_text(
+                "#!/bin/sh\n"
+                'HERE="$(dirname "$(readlink -f "$0")")"\n'
+                'export PATH="$HERE/usr/bin:$PATH"\n'
+                # On passe par le lanceur de usr/bin : c'est lui qui se place
+                # dans usr/lib/<app>/ ou vivent les donnees.
+                f'exec "$HERE/usr/bin/{app}" "$@"\n',
+                encoding="utf-8")
+            runner.chmod(runner.stat().st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+            out = output_dir / f"{app}-{version}-{arch}.AppImage"
+            # `os` n'est pas importe au niveau module dans ce fichier (le reste
+            # du code fait « import os as _os » localement) : on suit la meme
+            # convention plutot que d'ajouter un import global.
+            import os as _os
+            env = dict(_os.environ)
+            # appimagetool refuse de deviner l'architecture : sans ARCH, il
+            # s'arrete avec « AppImages must be created from a directory ».
+            env.setdefault("ARCH", "x86_64" if arch == "amd64" else arch)
+            res = subprocess.run([str(tool), str(appdir), str(out)],
+                                 capture_output=True, text=True, env=env)
+            if res.returncode != 0:
+                Colored.PrintError("appimagetool failed:")
+                for line in (res.stderr or res.stdout or "").splitlines()[-15:]:
+                    Colored.PrintError(f"  {line}")
+                return 1
+            Colored.PrintSuccess(f"AppImage package: {out}")
+            return 0
 
     @staticmethod
     def _CreateSnap(project, builder, exe_path: Path, output_dir: Path) -> int:
         """Crée un Snap package (nécessite snapcraft)."""
-        Colored.PrintWarning("Snap packaging not yet implemented.")
-        return 1
+        import subprocess
+        if not FileSystem.FindExecutable("snapcraft"):
+            Colored.PrintError("snapcraft not found. Cannot create Snap package.")
+            Colored.PrintWarning("  sudo snap install snapcraft --classic")
+            Colored.PrintWarning("  Repli sans outil externe : --type targz")
+            return 1
+
+        app = PackageCommand._LinuxAppName(project)
+        version = project.appVersion or getattr(project, 'iosVersion', '') or '1.0.0'
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            prime = tmp / "prime"
+            PackageCommand._StageLinuxTree(project, builder, exe_path, prime)
+            meta = prime / "meta"
+            meta.mkdir(parents=True, exist_ok=True)
+            # snapcraft accepte de fabriquer directement depuis une arborescence
+            # « prime » deja constituee : on evite ainsi de recompiler le projet
+            # dans un conteneur, ce que Jenga a deja fait.
+            (meta / "snap.yaml").write_text(
+                f"name: {app}\n"
+                f"version: '{version}'\n"
+                f"summary: {(project.targetName or project.name)} packaged by Jenga\n"
+                f"description: |\n  {(project.targetName or project.name)} packaged by Jenga.\n"
+                "base: core22\n"
+                "confinement: classic\n"
+                "grade: stable\n"
+                "architectures:\n  - amd64\n"
+                "apps:\n"
+                f"  {app}:\n"
+                # Le lanceur, pas le binaire : lui seul se place dans le
+                # dossier ou vivent les donnees.
+                f"    command: usr/bin/{app}\n",
+                encoding="utf-8")
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+            res = subprocess.run(["snapcraft", "pack", str(prime), "--output",
+                                  str(output_dir / f"{app}_{version}_amd64.snap")],
+                                 capture_output=True, text=True)
+            if res.returncode != 0:
+                Colored.PrintError("snapcraft failed:")
+                for line in (res.stderr or res.stdout or "").splitlines()[-15:]:
+                    Colored.PrintError(f"  {line}")
+                return 1
+            Colored.PrintSuccess(f"Snap package: {output_dir / f'{app}_{version}_amd64.snap'}")
+            return 0
 
     # -----------------------------------------------------------------------
     # macOS
