@@ -37,8 +37,8 @@ setup(
     url='https://rihen',
     project_urls={
         'Documentation': 'https://rihen/docs',
-        'Source': 'https://github.com/RihenUniverse/Jenga',
-        'Tracker': 'https://github.com/RihenUniverse/Jenga/issues',
+        'Source': 'https://github.com/Rihen-Universe/Jenga',
+        'Tracker': 'https://github.com/Rihen-Universe/Jenga/issues',
     },
     license='Proprietary',  # À ajuster selon votre licence
     packages=find_packages(exclude=['tests', 'tests.*', 'examples', 'examples.*']),

@@ -3,7 +3,7 @@ setlocal EnableDelayedExpansion
 REM ============================================================================
 REM gitpush.bat - add + commit + push du SEUL superprojet Jenga.
 REM               Le sous-module Nkentseu n'est JAMAIS pousse ici : il se gere
-REM               a part, dans son propre depot RihenUniverse/Nkentseu.
+REM               a part, dans son propre depot Rihen-Universe/Nkentseu.
 REM
 REM Deux declencheurs cote GitHub Actions :
 REM   - Push de la BRANCHE   -> sync-wiki.yml  -> met a jour le WIKI.

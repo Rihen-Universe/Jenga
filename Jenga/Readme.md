@@ -5,7 +5,7 @@ Il expose l'API DSL, les commandes CLI, le moteur de build, les utilitaires et l
 framework de tests unitaires C++.
 
 > 📖 Pour l'usage **utilisateur** (installation, premiers pas, commandes), voir le
-> [README racine](../README.md) et le [Wiki (FR / EN)](https://github.com/RihenUniverse/Jenga/wiki).
+> [README racine](../README.md) et le [Wiki (FR / EN)](https://github.com/Rihen-Universe/Jenga/wiki).
 > Cette page s'adresse aux **développeurs/contributeurs** du package.
 
 ---
@@ -73,7 +73,7 @@ with workspace("MonWorkspace"):
 | `Commands/` | Toutes les commandes CLI | [Readme](./Commands/Readme.md) |
 | `Core/` | Moteur : Loader, Cache, Builder, Daemon, Variables | [Readme](./Core/Readme.md) |
 | `Core/Builders/` | Implémentations par plateforme | [Readme](./Core/Builders/Readme.md) |
-| `Core/FirewallSpec.py` | Règles réseau/pare-feu (netsh, socketfilterfw, ufw…) | [wiki](https://github.com/RihenUniverse/Jenga/wiki/Reseau-et-Pare-feu) |
+| `Core/FirewallSpec.py` | Règles réseau/pare-feu (netsh, socketfilterfw, ufw…) | [wiki](https://github.com/Rihen-Universe/Jenga/wiki/Reseau-et-Pare-feu) |
 | `Unitest/` | Framework de tests unitaires C++ | [Readme](./Unitest/Readme.md) |
 | `Utils/` | Console colorée, fichiers, processus, rapports | [Readme](./Utils/Readme.md) |
 
@@ -112,7 +112,7 @@ __email__     = "rihen.universe@gmail.com"
 
 - [README racine](../README.md) — vue d'ensemble & démarrage
 - [Roadmap](./Docs/ROADMAP.md) — fait / en cours / à faire
-- [Wiki (FR / EN)](https://github.com/RihenUniverse/Jenga/wiki) — documentation complète
+- [Wiki (FR / EN)](https://github.com/Rihen-Universe/Jenga/wiki) — documentation complète
 - [Sources du wiki](./Docs/wiki/) · [Guide complet](./Docs/GUIDE_COMPLET_JENGA.md)
 
 ---

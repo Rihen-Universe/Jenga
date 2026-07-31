@@ -1,7 +1,7 @@
 name: Sync Wiki
 
 # Publie automatiquement le contenu de Jenga/Docs/wiki/ vers l'onglet Wiki
-# GitHub (depot separe RihenUniverse/Jenga.wiki.git) a chaque push sur main
+# GitHub (depot separe Rihen-Universe/Jenga.wiki.git) a chaque push sur main
 # qui modifie le wiki. Declenchable aussi manuellement (workflow_dispatch).
 #
 # PREREQUIS (a faire UNE SEULE FOIS) :

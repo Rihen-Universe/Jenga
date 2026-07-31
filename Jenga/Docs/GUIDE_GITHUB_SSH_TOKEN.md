@@ -25,7 +25,7 @@ Dans GitHub:
 Dans le repo:
 
 ```powershell
-git remote set-url origin https://github.com/RihenUniverse/Jenga.git
+git remote set-url origin https://github.com/Rihen-Universe/Jenga.git
 git remote -v
 ```
 
@@ -86,7 +86,7 @@ Tu dois voir un message du type: authentification reussie.
 ## Etape 8: basculer le remote en SSH
 
 ```powershell
-git remote set-url origin git@github.com:RihenUniverse/Jenga.git
+git remote set-url origin git@github.com:Rihen-Universe/Jenga.git
 git remote -v
 ```
 
