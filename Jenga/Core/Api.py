@@ -1668,6 +1668,22 @@ def defines(defs: List[str]) -> None:
             _AppendFilteredValues(_currentProject._filteredDefines, _currentFilter, defs)
         else:
             _currentProject.defines.extend(defs)
+    elif defs:
+        # Hors `with project(...)` et hors toolchain, l'appel n'avait AUCUN
+        # effet et ne disait rien. Un define pose au niveau workspace semblait
+        # donc appliqué alors qu'il etait perdu — piege d'autant plus couteux
+        # qu'un define absent ne casse pas la compilation : il change
+        # silencieusement le code compile. Vecu sur Nkentseu : un define de
+        # backend pose au niveau workspace laissait moduls et application
+        # compiler pour deux backends differents, avec des dispositions memoire
+        # divergentes (violation d'ODR) et un plantage au demarrage dont la
+        # trace designait une fonction sans rapport.
+        print("[jenga] ATTENTION : defines() appele hors d'un projet et hors "
+              "toolchain -> SANS EFFET : "
+              + ", ".join(str(d) for d in defs)
+              + "\n          Placez l'appel dans un `with project(...)`, "
+              "une toolchain, ou un helper appele par chaque projet.",
+              file=sys.stderr)
 
 def removedefines(defs: List[str]) -> None:
     if _currentProject:
@@ -2469,6 +2485,13 @@ def harmonysign(enable: bool = True) -> None:
 def harmonycertfile(path: str) -> None:
     if _currentProject:
         _currentProject.harmonyCertFile = str(path or "").strip()
+
+def harmonyabis(abis: List[str]) -> None:
+    """ABIs HarmonyOS a compiler et embarquer dans un .hap unique (fat/"universal"),
+    meme principe que androidabis() pour les APK. Valeurs reconnues :
+    "arm64-v8a", "armeabi-v7a", "x86_64"."""
+    if _currentProject:
+        _currentProject.harmonyAbis = abis
 
 def harmonyprofile(path: str) -> None:
     if _currentProject:
@@ -4167,6 +4190,7 @@ __all__ = [
     'harmonytargetapi', 'harmonysign', 'harmonycertfile', 'harmonyprofile',
     'harmonykeystore', 'harmonykeyalias', 'harmonykeypwd', 'harmonyappicon',
     'harmonyresources', 'harmonyassets', 'harmonypermissions', 'harmonyets',
+    'harmonyabis',
     'testoptions', 'testfiles', 'testmainfile', 'testmaintemplate',
     'settarget', 'sysroot', 'targettriple', 'ccompiler', 'cppcompiler',
     'linker', 'archiver', 'addcflag', 'addcxxflag', 'addldflag',
