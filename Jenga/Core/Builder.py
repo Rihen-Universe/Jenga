@@ -207,8 +207,19 @@ class Builder(abc.ABC):
                 prefer = ['clang-mingw', 'mingw', 'clang-cl', 'msvc', 'zig-windows-x64', 'host-clang', 'host-gcc']
         elif self.targetOs == TargetOS.LINUX:
             if Platform.GetHostOS() == TargetOS.LINUX:
-                # Native Linux: prefer system compilers, then zig
-                prefer = ['host-clang', 'host-gcc', 'zig-linux-x64', 'zig-linux-x86_64', 'clang-cross-linux', 'gcc-cross-linux']
+                # Linux natif : zig D'ABORD, comme sur Windows ou le clang
+                # embarque est prefixe volontairement.
+                #
+                # L'ordre precedent mettait host-clang/host-gcc en tete : le
+                # compilateur SYSTEME de chaque machine l'emportait sur celui
+                # qu'on embarque. Deux consequences : un resultat qui varie d'un
+                # poste a l'autre (version de gcc, options par defaut, libstdc++),
+                # et surtout RIEN du tout chez un utilisateur qui n'a aucun
+                # compilateur installe — alors qu'on lui en fournit un.
+                #
+                # Un utilisateur qui prefere le sien force --toolchain host-clang
+                # ou retire tools/compilers.
+                prefer = ['zig-linux-x64', 'zig-linux-x86_64', 'host-clang', 'host-gcc', 'clang-cross-linux', 'gcc-cross-linux']
             else:
                 # Cross-compile from Windows/macOS: prefer zig
                 prefer = ['zig-linux-x64', 'zig-linux-x86_64', 'clang-cross-linux', 'gcc-cross-linux', 'host-clang', 'host-gcc']
