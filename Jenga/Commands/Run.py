@@ -272,4 +272,14 @@ class RunCommand:
                 # comportement historique plutot que d'empecher l'execution.
                 Colored.PrintWarning(f"Console dediee indisponible ({e}) — lancement standard.")
 
+        # Vider NOS tampons avant de rendre la main au programme. Il ecrit
+        # directement sur le descripteur, alors que les print() de Python sont
+        # bufferises des que la sortie n'est pas un terminal : sans ce flush, la
+        # sortie du programme apparait AVANT la banniere de construction.
+        try:
+            import sys as _s
+            _s.stdout.flush()
+            _s.stderr.flush()
+        except Exception:  # noqa: BLE001
+            pass
         return Process.Run(cmd)
