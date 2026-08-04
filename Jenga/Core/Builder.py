@@ -337,6 +337,74 @@ class Builder(abc.ABC):
     def Link(self, project: Project, objectFiles: List[str], outputFile: str) -> bool:
         pass
 
+    def _CibleDejaAJour(self, target_path, object_files, dep_outputs) -> bool:
+        """La sortie est-elle plus recente que TOUTES ses entrees ?
+
+        Evite de re-lier — et surtout de re-archiver — ce qui n'a pas bouge.
+        Entrees prises en compte : les objets du projet, et les sorties des
+        projets dont il depend (une bibliotheque rebattie doit faire relier ses
+        consommateurs).
+
+        En cas de doute — cible absente, aucune entree connue, erreur d'acces —
+        on renvoie False : relier inutilement coute du temps, ne PAS relier ce
+        qu'il fallait produit un binaire faux. Le doute profite a la correction.
+        """
+        try:
+            from pathlib import Path as _P
+            cible = _P(str(target_path))
+            if not cible.exists():
+                return False
+            t_cible = cible.stat().st_mtime
+
+            entrees = [str(o) for o in (object_files or [])]
+            entrees += [str(d) for d in (dep_outputs or [])]
+            if not entrees:
+                return False  # rien a comparer : on ne prend pas le risque
+
+            for e in entrees:
+                p = _P(e)
+                if not p.exists():
+                    return False  # entree manquante : laisser l'editeur de liens trancher
+                if p.stat().st_mtime > t_cible:
+                    return False  # une entree est plus recente -> relier
+            return True
+        except Exception:
+            return False
+
+    def _VerifierCibleEcrivable(self, target_path) -> bool:
+        """Le binaire de sortie peut-il etre remplace ? Sinon, dire POURQUOI.
+
+        Un fichier verrouille par un processus vivant fait echouer l'edition de
+        liens avec un message qui ne mentionne ni la cause ni le remede. On
+        renvoie False APRES avoir explique, plutot que de laisser l'utilisateur
+        face a « cannot open output file ».
+        """
+        try:
+            from pathlib import Path as _P
+            p = _P(str(target_path))
+            if not p.exists():
+                return True  # rien a remplacer
+            # Ouvrir en ajout demande le meme droit d'ecriture exclusif que
+            # l'editeur de liens, sans modifier le contenu.
+            with open(p, "ab"):
+                pass
+            return True
+        except PermissionError:
+            nom = getattr(target_path, 'name', str(target_path))
+            Reporter.Error(
+                f"'{nom}' est VERROUILLE : une execution precedente tourne encore.\n"
+                f"  Fichier : {target_path}\n"
+                f"  Fermer la fenetre ne suffit pas toujours — le processus peut survivre.\n"
+                f"  Windows : taskkill /IM {nom} /F     (ou via le Gestionnaire des taches)\n"
+                f"  Linux/macOS : pkill -f {nom}\n"
+                f"  Puis relancer la construction."
+            )
+            return False
+        except Exception:
+            # Tout autre souci (chemin exotique, systeme de fichiers) ne doit
+            # PAS empecher de tenter l'edition de liens.
+            return True
+
     @abc.abstractmethod
     def GetOutputExtension(self, project: Project) -> str:
         pass
@@ -1950,6 +2018,45 @@ class Builder(abc.ABC):
                             ProjectKind.TEST_SUITE):
             target_path = self.GetTargetPath(project)
             FileSystem.MakeDirectory(target_path.parent)
+
+            # ── Sortie DEJA A JOUR : ne pas relier pour rien ─────────────────
+            #
+            # La compilation etait bien sautee quand rien n'avait change, mais
+            # l'edition de liens, elle, etait TOUJOURS refaite. Mesure sur un
+            # build a vide de 22 projets : 27 s et 77 sous-processus, dont 21
+            # appels a `ar` qui re-archivaient des bibliotheques identiques.
+            # Le journal l'avouait — « All files up to date » suivi de
+            # « Linking... ».
+            #
+            # On compare donc la date de la cible a celle de ses entrees :
+            # objets, et sorties des dependances (une bibliotheque rebattie doit
+            # faire relier ce qui en depend).
+            if self._CibleDejaAJour(target_path, object_files, dep_link_map.values()):
+                # Pas de message supplementaire : « All files up to date » est
+                # deja affiche plus haut. Le gain est invisible, sauf en temps.
+                self.state.MarkProjectCompiled(project.name, success=True, platform=self.platform,
+                                               targetArch=self.targetArch.value if self.targetArch else "")
+                logger.PrintResultBox(True)
+                return True
+
+            # ── Binaire VERROUILLE par une execution encore vivante ──────────
+            #
+            # Sous Windows, un fichier ouvert par un processus ne peut etre ni
+            # remplace ni supprime. Si l'application lancee precedemment tourne
+            # toujours — fenetre fermee mais processus survivant, cas frequent
+            # d'une application console restee en attente de saisie —
+            # l'editeur de liens echoue avec un message OBSCUR (« cannot open
+            # output file », « Permission denied ») qui ne dit ni pourquoi ni
+            # quoi faire.
+            #
+            # Retour d'un utilisateur : « lorsqu'une instance de jeu est fermee,
+            # elle ne disparait pas completement et le projet ne se build plus ».
+            # Il avait raison sur les faits, sans pouvoir relier les deux.
+            #
+            # On teste donc l'ecriture AVANT de lier, et on nomme le vrai
+            # probleme.
+            if not self._VerifierCibleEcrivable(target_path):
+                return False
 
             # Link - capture ProcessResult pour afficher les erreurs
             link_ok = self.Link(project, object_files, str(target_path))

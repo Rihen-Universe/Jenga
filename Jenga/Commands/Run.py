@@ -32,6 +32,12 @@ class RunCommand:
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
         parser.add_argument("--target", help="Mobile only: device serial / UDID to run on (skip if a single device is connected)")
+        # Une application CONSOLE lancee depuis un IDE herite d'un TUBE, pas d'une
+        # console : elle ne peut rien lire au clavier. On lui ouvre donc une
+        # console dediee. Ce drapeau permet de s'en passer (redirection voulue,
+        # integration continue, test automatise).
+        parser.add_argument("--no-console", action="store_true",
+                            help="Ne pas ouvrir de console dediee pour une application console (Windows)")
         parser.add_argument("--device", help="Alias for --target")
         parsed = parser.parse_args(args)
 
@@ -230,4 +236,40 @@ class RunCommand:
         # Exécuter
         Colored.PrintInfo(f"Running {exe_path}...")
         cmd = [str(exe_path)] + parsed.args
+
+        # ── Application CONSOLE lancee SANS terminal interactif ──────────────
+        #
+        # Par defaut le programme herite des flux du parent. Depuis un vrai
+        # terminal c'est ce qu'on veut. Mais lance depuis un IDE (NKCode) ou
+        # tout appelant qui capture la sortie, il herite d'un TUBE : il n'a plus
+        # de console. Une application console qui attend une saisie ne recoit
+        # alors jamais rien — elle parait figee, puis echoue.
+        #
+        # Retour d'un utilisateur : « le running du programme s'affiche mais il
+        # ne s'ouvre jamais dans le terminal et cela fait planter le programme ».
+        # Son contournement — lancer le .exe a la main — confirmait que le
+        # binaire etait bon et que seul le MODE DE LANCEMENT posait probleme.
+        #
+        # On ouvre donc une VRAIE console quand les trois conditions sont
+        # reunies : Windows, projet de type console, et sortie non interactive.
+        # Depuis un terminal (isatty vrai), le comportement ne change pas.
+        if not parsed.no_console:
+            try:
+                import sys as _sys
+                from ..Core.Platform import Platform as _Plat
+                est_console = getattr(project, 'kind', None) == Api.ProjectKind.CONSOLE_APP
+                sans_terminal = not _sys.stdout.isatty()
+                if _Plat.GetHostOS() == Api.TargetOS.WINDOWS and est_console and sans_terminal:
+                    import subprocess as _sp
+                    Colored.PrintInfo("Application console sans terminal : ouverture d'une console dediee.")
+                    # CREATE_NEW_CONSOLE : fenetre console propre, entrees
+                    # clavier fonctionnelles. On ATTEND la fin, pour que le code
+                    # de sortie reste celui du programme.
+                    p = _sp.Popen(cmd, creationflags=0x00000010)  # CREATE_NEW_CONSOLE
+                    return p.wait()
+            except Exception as e:
+                # Jamais bloquant : en cas de souci on retombe sur le
+                # comportement historique plutot que d'empecher l'execution.
+                Colored.PrintWarning(f"Console dediee indisponible ({e}) — lancement standard.")
+
         return Process.Run(cmd)
