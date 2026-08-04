@@ -18,6 +18,11 @@ from ..IconConverter import (
     ResolveIconFor, DetectIconFormat, GenerateFaviconSet, HasPillow,
     PLATFORM_WEB, FORMAT_PNG, FORMAT_JPG,
 )
+# Port par defaut du petit serveur HTTP genere a cote du .html (scripts .bat/.sh).
+# 9001 plutot que 8080, trop souvent deja pris par un autre service. Expose comme
+# CONSTANTE : les tests s'y referent au lieu de recopier le chiffre, sinon chaque
+# changement de port cassait un test sans que rien ne soit casse.
+EMSCRIPTEN_DEFAULT_PORT = 9001
 
 
 class EmscriptenBuilder(Builder):
@@ -247,7 +252,7 @@ class EmscriptenBuilder(Builder):
         html_name = output_path.name
         proj_name = project.name
         out_dir = output_path.parent
-        port_default = 9001
+        port_default = EMSCRIPTEN_DEFAULT_PORT
 
         # --- Script Windows (.bat) ---
         bat_content = f'''@echo off
