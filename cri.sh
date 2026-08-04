@@ -23,10 +23,12 @@ cd "$(dirname "$(realpath "$0")")"
 # =============================================================================
 # Couleurs (désactivées si pas de terminal)
 # =============================================================================
-if [ -t 1 ]; then
+# Couleurs : uniquement sur un vrai terminal, et jamais si NO_COLOR est defini
+# (convention https://no-color.org, respectee par la plupart des outils).
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     C_RESET="\033[0m"
     C_OK="\033[0;32m"
-    C_WARN="\033[0;33m"
+    C_WARN="\033[1;33m"   # jaune vif, aligne sur gitpush.sh
     C_ERR="\033[0;31m"
     C_INFO="\033[0;36m"
 else

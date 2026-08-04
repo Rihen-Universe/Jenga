@@ -370,8 +370,12 @@ def Test(jenga_file: Optional[str] = None, target: Optional[str] = None,
 
 def ExecutablePath(jenga_file: Optional[str] = None, target: Optional[str] = None,
                    config: str = "Debug", platform: Optional[str] = None,
-                   toolchain: Optional[str] = None) -> str:
+                   toolchain: Optional[str] = None, withKind: bool = False) -> str:
     """Chemin du BINAIRE produit pour `target`, SANS rien construire ni lancer.
+
+    Avec `withKind=True`, renvoie `"<Kind>|<chemin>"` (ex.
+    `"ConsoleApp|D:/.../mon_app.exe"`) au lieu du seul chemin : l'IDE sait alors
+    s'il doit ouvrir un vrai terminal (ConsoleApp) ou lancer sans console.
 
     Permet a un IDE de faire lui-meme le lancement : `jenga run` est un processus
     LONG (l'application de l'utilisateur, eventuellement plusieurs instances en
@@ -405,7 +409,13 @@ def ExecutablePath(jenga_file: Optional[str] = None, target: Optional[str] = Non
             if proj is None:
                 return ""
             p = builder.GetTargetPath(proj)
-            return str(p) if p else ""
+            path = str(p) if p else ""
+            # Le KIND accompagne le chemin : l'hote (IDE) en a besoin pour choisir
+            # OU lancer. Une ConsoleApp veut un vrai terminal (stdin, ANSI, code de
+            # sortie visible) ; une WindowedApp n'en a pas besoin. Le calculer ici
+            # evite a l'appelant de recharger le workspace une seconde fois.
+            kind = getattr(getattr(proj, "kind", None), "value", "") or ""
+            return f"{kind}|{path}" if withKind else path
         except Exception:  # noqa: BLE001
             return ""
     finally:
