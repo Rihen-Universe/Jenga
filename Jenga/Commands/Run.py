@@ -346,16 +346,24 @@ class RunCommand:
             return cmd, "", str(exe_path)
 
         if cible == Api.TargetOS.LINUX and hote == Api.TargetOS.WINDOWS:
-            dispo = False
+            # Deux echecs DIFFERENTS, qui ne se corrigent pas de la meme facon :
+            # WSL absent (a installer) et WSL present mais sans distribution
+            # (a installer, mais autre commande). Les confondre enverrait
+            # l'utilisateur sur une fausse piste.
+            presente, r = False, None
             try:
                 r = Process.ExecuteCommand(["wsl", "--status"], captureOutput=True, silent=True)
-                dispo = r.returnCode == 0
+                presente = True
             except Exception:  # noqa: BLE001
-                dispo = False
-            if not dispo:
-                return None, ("Binaire Linux : impossible a executer sous Windows.\n"
-                              "  Installez WSL (`wsl --install`) — Jenga s'en servira "
-                              "automatiquement — ou lancez-le sur une machine Linux."), ""
+                presente = False
+            if not presente:
+                return None, ("Binaire Linux : WSL introuvable, impossible de l'executer sous Windows.\n"
+                              "  Installez-le avec `wsl --install` (redemarrage requis) — Jenga s'en\n"
+                              "  servira ensuite automatiquement — ou lancez le binaire sur une\n"
+                              "  machine Linux."), ""
+            if r is not None and r.returnCode != 0:
+                return None, ("Binaire Linux : WSL est installe mais aucune distribution n'est prete.\n"
+                              "  Installez-en une avec `wsl --install -d Ubuntu`, puis reessayez."), ""
             chemin = RunCommand._CheminWsl(exe_path)
             if not chemin:
                 return None, (f"Binaire Linux : chemin non traduisible pour WSL ({exe_path})."), ""
