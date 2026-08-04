@@ -14,6 +14,7 @@ from ..Core.Loader import Loader
 from ..Core.Cache import Cache
 from ..Core.Builder import Builder
 from ..Core import Api
+from ..Core.Platform import Platform
 from ..Utils import Colored, Process, FileSystem
 from .Build import BuildCommand
 from .Deploy import DeployCommand
@@ -241,6 +242,14 @@ class RunCommand:
         # de fin qui donne le code de sortie (jusqu'ici affiche nulle part) et la
         # duree du programme SEUL, sans le temps de construction.
         cmd = [str(exe_path)] + parsed.args
+        # Binaire construit pour un AUTRE systeme que l'hote : tenter de le lancer
+        # tel quel donnait un message incomprehensible de l'OS (sous Windows :
+        # « [WinError 193] %1 n'est pas une application Win32 valide »). On passe
+        # par WSL quand c'est possible, sinon on explique.
+        cmd, note = RunCommand._AdapterAuHote(cmd, exe_path, builder)
+        if cmd is None:
+            Colored.PrintError(note)
+            return 1
         largeur = 80
         depart = _time.time()  # chronometre le PROGRAMME, pas la construction
         ligne_args = (" " + " ".join(parsed.args)) if parsed.args else ""
@@ -297,6 +306,62 @@ class RunCommand:
         except Exception:  # noqa: BLE001
             pass
         return RunCommand._Bilan(Process.Run(cmd), _time.time() - depart, largeur)
+
+    @staticmethod
+    def _CheminWsl(p: Path) -> Optional[str]:
+        """Traduit un chemin Windows en chemin WSL. `wslpath` fait autorite (il
+        connait les points de montage reels) ; a defaut, conversion manuelle
+        D:\\a\\b -> /mnt/d/a/b, qui couvre le cas courant."""
+        try:
+            r = Process.ExecuteCommand(["wsl", "wslpath", "-a", str(p)],
+                                       captureOutput=True, silent=True)
+            chemin = (r.stdout or "").strip()
+            if r.returnCode == 0 and chemin:
+                return chemin
+        except Exception:  # noqa: BLE001
+            pass
+        s = str(p)
+        if len(s) > 2 and s[1] == ":":
+            return "/mnt/" + s[0].lower() + s[2:].replace("\\", "/")
+        return None
+
+    @staticmethod
+    def _AdapterAuHote(cmd: List[str], exe_path: Path, builder) -> Tuple[Optional[List[str]], str]:
+        """Adapte la commande quand le binaire ne vise PAS le systeme hote.
+
+        Retourne (commande, note). Commande None = impossible, `note` explique.
+        Aujourd'hui : Linux depuis Windows via WSL. Les autres combinaisons
+        (macOS depuis Windows, Windows depuis Linux...) n'ont pas d'equivalent
+        universel — on le dit clairement plutot que d'echouer dans l'OS."""
+        cible = getattr(builder, "targetOs", None)
+        hote = Platform.GetHostOS()
+        if cible is None or cible == hote:
+            return cmd, ""
+
+        if cible == Api.TargetOS.LINUX and hote == Api.TargetOS.WINDOWS:
+            dispo = False
+            try:
+                r = Process.ExecuteCommand(["wsl", "--status"], captureOutput=True, silent=True)
+                dispo = r.returnCode == 0
+            except Exception:  # noqa: BLE001
+                dispo = False
+            if not dispo:
+                return None, ("Binaire Linux : impossible a executer sous Windows.\n"
+                              "  Installez WSL (`wsl --install`) — Jenga s'en servira "
+                              "automatiquement — ou lancez-le sur une machine Linux.")
+            chemin = RunCommand._CheminWsl(exe_path)
+            if not chemin:
+                return None, (f"Binaire Linux : chemin non traduisible pour WSL ({exe_path}).")
+            Colored.PrintInfo("Binaire Linux sur hote Windows : execution via WSL.")
+            return ["wsl", "--", chemin] + cmd[1:], "wsl"
+
+        nom_cible = getattr(cible, "value", str(cible))
+        nom_hote = getattr(hote, "value", str(hote))
+        return None, (f"Binaire construit pour {nom_cible}, hote {nom_hote} : "
+                      f"execution impossible ici.\n"
+                      f"  Deployez-le sur une machine {nom_cible} "
+                      f"(voir `jenga deploy`), ou construisez pour {nom_hote} "
+                      f"avec --platform {nom_hote}.")
 
     @staticmethod
     def _Bilan(code: int, duree: float, largeur: int) -> int:
