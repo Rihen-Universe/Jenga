@@ -82,6 +82,32 @@ class WindowsBuilder(Builder):
             source_path.write_text(f'#include "{header_token}"\n', encoding="utf-8")
             project._jengaPchSourceResolved = str(source_path)
 
+        # ── PCH DEJA A JOUR : sauter la COMPILATION, pas la preparation ──────
+        #
+        # L'en-tete precompile etait refait a CHAQUE build : 16 lancements de
+        # clang++ sur un workspace de 22 projets sans la moindre modification.
+        #
+        # Le test se place ICI, et surtout PAS plus haut : tout ce qui precede
+        # renseigne l'etat dont la compilation des sources depend
+        # (_jengaPchSourceResolved, et l'ecriture de __jenga_pch.cpp). Un retour
+        # anticipe avant ce point laisse le projet sans PCH utilisable et fait
+        # RECOMPILER toutes les sources — essaye, mesure : 225 sous-processus
+        # et 44 s au lieu de 11 s.
+        #
+        # En cas de doute, on recompile : un PCH perime provoque des erreurs
+        # incomprehensibles (« predefined macro was disabled in precompiled
+        # file »). Le doute profite a la correction, jamais a la vitesse.
+        try:
+            if pch_file.exists():
+                t_pch = pch_file.stat().st_mtime
+                entrees = [header_path]
+                if source_path and Path(source_path).exists():
+                    entrees.append(Path(source_path))
+                if all(e.stat().st_mtime <= t_pch for e in entrees):
+                    return True
+        except Exception:
+            pass
+
         # Le PCH DOIT etre compile avec les MEMES flags d'optimisation et de
         # symboles que les sources qui l'utilisent. Sinon clang/gcc rejettent
         # le PCH avec "predefined macro was disabled in precompiled file"

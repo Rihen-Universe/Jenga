@@ -99,7 +99,7 @@ with project("Logger"):
   surchargent). Constantes, classes **et** fonctions sont propagées.
 - Le fichier de config n'a **pas besoin** de `from Jenga import *` (API injectée) ;
   remplace proprement le `from config import *` répété dans chaque module.
-- Exemple : [`Exemples/12_external_includes`](https://github.com/RihenUniverse/Jenga/tree/main/Jenga/Exemples/12_external_includes).
+- Exemple : [`Exemples/12_external_includes`](https://github.com/Rihen-Universe/Jenga/tree/main/Jenga/Exemples/12_external_includes).
 
 ### Type de projet
 
@@ -361,7 +361,7 @@ with project("Logger"):
   override). Constants, classes **and** functions are propagated.
 - The config file needs **no** `from Jenga import *` (API is injected); it cleanly
   replaces the `from config import *` repeated in every module.
-- Example: [`Exemples/12_external_includes`](https://github.com/RihenUniverse/Jenga/tree/main/Jenga/Exemples/12_external_includes).
+- Example: [`Exemples/12_external_includes`](https://github.com/Rihen-Universe/Jenga/tree/main/Jenga/Exemples/12_external_includes).
 
 ### Project kind
 

@@ -2,7 +2,7 @@
 #
 # gitpush.sh — add + commit + push du SEUL superprojet Jenga.
 #              (Le sous-module Nkentseu n'est JAMAIS pousse ici : il se gere
-#               a part, dans son propre depot RihenUniverse/Nkentseu.)
+#               a part, dans son propre depot Rihen-Universe/Nkentseu.)
 #
 # Deux declencheurs cote GitHub Actions :
 #   - Push de la BRANCHE  -> workflow sync-wiki.yml  -> met a jour le WIKI.

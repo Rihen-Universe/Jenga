@@ -6,6 +6,7 @@ Run command – Exécute l'exécutable d'un projet (après build si nécessaire)
 
 import argparse
 import sys
+import time as _time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -13,6 +14,7 @@ from ..Core.Loader import Loader
 from ..Core.Cache import Cache
 from ..Core.Builder import Builder
 from ..Core import Api
+from ..Core.Platform import Platform
 from ..Utils import Colored, Process, FileSystem
 from .Build import BuildCommand
 from .Deploy import DeployCommand
@@ -32,6 +34,12 @@ class RunCommand:
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
         parser.add_argument("--target", help="Mobile only: device serial / UDID to run on (skip if a single device is connected)")
+        # Une application CONSOLE lancee depuis un IDE herite d'un TUBE, pas d'une
+        # console : elle ne peut rien lire au clavier. On lui ouvre donc une
+        # console dediee. Ce drapeau permet de s'en passer (redirection voulue,
+        # integration continue, test automatise).
+        parser.add_argument("--no-console", action="store_true",
+                            help="Ne pas ouvrir de console dediee pour une application console (Windows)")
         parser.add_argument("--device", help="Alias for --target")
         parsed = parser.parse_args(args)
 
@@ -227,7 +235,159 @@ class RunCommand:
             Colored.PrintError(f"Executable not found: {exe_path}")
             return 1
 
-        # Exécuter
-        Colored.PrintInfo(f"Running {exe_path}...")
+        # ── Frontiere VISIBLE entre construction et execution ────────────────
+        # Tout arrive sur le meme flux : bannieres de build, compilation, puis la
+        # sortie du programme. Sans marque, on ne sait plus ou commence ce qui
+        # nous interesse vraiment — l'execution. D'ou un cadre net, et un bilan
+        # de fin qui donne le code de sortie (jusqu'ici affiche nulle part) et la
+        # duree du programme SEUL, sans le temps de construction.
         cmd = [str(exe_path)] + parsed.args
-        return Process.Run(cmd)
+        # Binaire construit pour un AUTRE systeme que l'hote : tenter de le lancer
+        # tel quel donnait un message incomprehensible de l'OS (sous Windows :
+        # « [WinError 193] %1 n'est pas une application Win32 valide »). On passe
+        # par WSL quand c'est possible, sinon on explique.
+        cmd, note, chemin_affiche = RunCommand._AdapterAuHote(cmd, exe_path, builder)
+        if cmd is None:
+            Colored.PrintError(note)
+            return 1
+        largeur = 80
+        depart = _time.time()  # chronometre le PROGRAMME, pas la construction
+        ligne_args = (" " + " ".join(parsed.args)) if parsed.args else ""
+        Colored.Print("")
+        Colored.Print("━" * largeur, color="brightcyan")
+        # `note` dit COMMENT on lance quand ce n'est pas en direct (ex. « via WSL »),
+        # et `chemin_affiche` est le chemin REELLEMENT execute : sous WSL, montrer
+        # le chemin Windows ferait chercher un probleme de chemin inexistant.
+        suffixe = f"  ({note})" if note else ""
+        Colored.Print(f"  ▶  EXECUTION  —  {exe_path.name}{ligne_args}{suffixe}", color="brightcyan", bold=True)
+        Colored.Print(f"     {chemin_affiche}", color="cyan")
+        Colored.Print("━" * largeur, color="brightcyan")
+        Colored.Print("")
+
+        # ── Application CONSOLE lancee SANS terminal interactif ──────────────
+        #
+        # Par defaut le programme herite des flux du parent. Depuis un vrai
+        # terminal c'est ce qu'on veut. Mais lance depuis un IDE (NKCode) ou
+        # tout appelant qui capture la sortie, il herite d'un TUBE : il n'a plus
+        # de console. Une application console qui attend une saisie ne recoit
+        # alors jamais rien — elle parait figee, puis echoue.
+        #
+        # Retour d'un utilisateur : « le running du programme s'affiche mais il
+        # ne s'ouvre jamais dans le terminal et cela fait planter le programme ».
+        # Son contournement — lancer le .exe a la main — confirmait que le
+        # binaire etait bon et que seul le MODE DE LANCEMENT posait probleme.
+        #
+        # On ouvre donc une VRAIE console quand les trois conditions sont
+        # reunies : Windows, projet de type console, et sortie non interactive.
+        # Depuis un terminal (isatty vrai), le comportement ne change pas.
+        if not parsed.no_console:
+            try:
+                import sys as _sys
+                from ..Core.Platform import Platform as _Plat
+                est_console = getattr(project, 'kind', None) == Api.ProjectKind.CONSOLE_APP
+                sans_terminal = not _sys.stdout.isatty()
+                if _Plat.GetHostOS() == Api.TargetOS.WINDOWS and est_console and sans_terminal:
+                    import subprocess as _sp
+                    Colored.PrintInfo("Application console sans terminal : ouverture d'une console dediee.")
+                    # CREATE_NEW_CONSOLE : fenetre console propre, entrees
+                    # clavier fonctionnelles. On ATTEND la fin, pour que le code
+                    # de sortie reste celui du programme.
+                    p = _sp.Popen(cmd, creationflags=0x00000010)  # CREATE_NEW_CONSOLE
+                    return RunCommand._Bilan(p.wait(), _time.time() - depart, largeur)
+            except Exception as e:
+                # Jamais bloquant : en cas de souci on retombe sur le
+                # comportement historique plutot que d'empecher l'execution.
+                Colored.PrintWarning(f"Console dediee indisponible ({e}) — lancement standard.")
+
+        # Vider NOS tampons avant de rendre la main au programme. Il ecrit
+        # directement sur le descripteur, alors que les print() de Python sont
+        # bufferises des que la sortie n'est pas un terminal : sans ce flush, la
+        # sortie du programme apparait AVANT la banniere de construction.
+        try:
+            import sys as _s
+            _s.stdout.flush()
+            _s.stderr.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        return RunCommand._Bilan(Process.Run(cmd), _time.time() - depart, largeur)
+
+    @staticmethod
+    def _CheminWsl(p: Path) -> Optional[str]:
+        """Traduit un chemin Windows en chemin WSL. `wslpath` fait autorite (il
+        connait les points de montage reels) ; a defaut, conversion manuelle
+        D:\\a\\b -> /mnt/d/a/b, qui couvre le cas courant."""
+        try:
+            r = Process.ExecuteCommand(["wsl", "wslpath", "-a", str(p)],
+                                       captureOutput=True, silent=True)
+            chemin = (r.stdout or "").strip()
+            if r.returnCode == 0 and chemin:
+                return chemin
+        except Exception:  # noqa: BLE001
+            pass
+        s = str(p)
+        if len(s) > 2 and s[1] == ":":
+            return "/mnt/" + s[0].lower() + s[2:].replace("\\", "/")
+        return None
+
+    @staticmethod
+    def _AdapterAuHote(cmd: List[str], exe_path: Path, builder) -> Tuple[Optional[List[str]], str, str]:
+        """Adapte la commande quand le binaire ne vise PAS le systeme hote.
+
+        Retourne (commande, note, chemin_affiche). Commande None = impossible,
+        `note` explique. `chemin_affiche` est le chemin REELLEMENT execute — sous
+        WSL ce n'est pas le chemin Windows, et afficher ce dernier ferait chercher
+        un probleme de chemin la ou il n'y en a pas.
+        Aujourd'hui : Linux depuis Windows via WSL. Les autres combinaisons
+        (macOS depuis Windows, Windows depuis Linux...) n'ont pas d'equivalent
+        universel — on le dit clairement plutot que d'echouer dans l'OS."""
+        cible = getattr(builder, "targetOs", None)
+        hote = Platform.GetHostOS()
+        if cible is None or cible == hote:
+            return cmd, "", str(exe_path)
+
+        if cible == Api.TargetOS.LINUX and hote == Api.TargetOS.WINDOWS:
+            # Deux echecs DIFFERENTS, qui ne se corrigent pas de la meme facon :
+            # WSL absent (a installer) et WSL present mais sans distribution
+            # (a installer, mais autre commande). Les confondre enverrait
+            # l'utilisateur sur une fausse piste.
+            presente, r = False, None
+            try:
+                r = Process.ExecuteCommand(["wsl", "--status"], captureOutput=True, silent=True)
+                presente = True
+            except Exception:  # noqa: BLE001
+                presente = False
+            if not presente:
+                return None, ("Binaire Linux : WSL introuvable, impossible de l'executer sous Windows.\n"
+                              "  Installez-le avec `wsl --install` (redemarrage requis) — Jenga s'en\n"
+                              "  servira ensuite automatiquement — ou lancez le binaire sur une\n"
+                              "  machine Linux."), ""
+            if r is not None and r.returnCode != 0:
+                return None, ("Binaire Linux : WSL est installe mais aucune distribution n'est prete.\n"
+                              "  Installez-en une avec `wsl --install -d Ubuntu`, puis reessayez."), ""
+            chemin = RunCommand._CheminWsl(exe_path)
+            if not chemin:
+                return None, (f"Binaire Linux : chemin non traduisible pour WSL ({exe_path})."), ""
+            # Le chemin RETOURNE est celui reellement execute : l'afficher evite
+            # de faire chercher un probleme de chemin la ou il n'y en a pas.
+            return ["wsl", "--", chemin] + cmd[1:], "via WSL", chemin
+
+        nom_cible = getattr(cible, "value", str(cible))
+        nom_hote = getattr(hote, "value", str(hote))
+        return None, (f"Binaire construit pour {nom_cible}, hote {nom_hote} : "
+                      f"execution impossible ici.\n"
+                      f"  Deployez-le sur une machine {nom_cible} "
+                      f"(voir `jenga deploy`), ou construisez pour {nom_hote} "
+                      f"avec --platform {nom_hote}."), ""
+
+    @staticmethod
+    def _Bilan(code: int, duree: float, largeur: int) -> int:
+        """Ferme le cadre d'execution : code de sortie et duree du PROGRAMME
+        seul (le temps de construction n'y entre pas). Retourne `code`, pour
+        s'inserer directement dans un `return`."""
+        couleur = "brightgreen" if code == 0 else "brightred"
+        etat = "termine normalement" if code == 0 else f"termine avec le code {code}"
+        Colored.Print("")
+        Colored.Print("━" * largeur, color=couleur)
+        Colored.Print(f"  ◀  FIN D'EXECUTION  —  {etat}  ({duree:.2f}s)", color=couleur, bold=True)
+        Colored.Print("━" * largeur, color=couleur)
+        return code

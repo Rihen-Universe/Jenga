@@ -62,8 +62,26 @@ class ToolchainManager:
             deduped.append(p)
         return deduped
 
+    # ── Cache de DETECTION (duree de vie : le processus) ────────────────────
+    #
+    # Sonder un compilateur coute un lancement de processus. Ces sondes etaient
+    # refaites POUR CHAQUE PROJET : sur un workspace de 22 projets dont aucun
+    # n'avait change, 31 lancements de clang/gcc/vswhere pour redecouvrir a
+    # chaque fois la meme chose.
+    #
+    # Le compilateur installe ne change pas pendant un build. On memorise donc
+    # le resultat. Portee volontairement limitee au PROCESSUS : un cache sur
+    # disque survivrait a une installation ou une desinstallation de toolchain
+    # et donnerait des reponses fausses.
+    _cacheRunnable: Dict[tuple, Optional[str]] = {}
+    _cacheFamily: Dict[str, "CompilerFamily"] = {}
+
     @staticmethod
     def _FirstRunnable(candidates: List[str], version_arg: str = "--version") -> Optional[str]:
+        cle = (tuple(candidates), version_arg)
+        if cle in ToolchainManager._cacheRunnable:
+            return ToolchainManager._cacheRunnable[cle]
+        resultat = None
         for name in candidates:
             path = Process.Which(name)
             if not path:
@@ -71,10 +89,12 @@ class ToolchainManager:
             try:
                 probe = Process.ExecuteCommand([path, version_arg], captureOutput=True, silent=True)
                 if probe.returnCode == 0:
-                    return path
+                    resultat = path
+                    break
             except Exception:
                 continue
-        return None
+        ToolchainManager._cacheRunnable[cle] = resultat
+        return resultat
 
     @staticmethod
     def _AddToolchainIfValid(toolchains: Dict[str, Toolchain], tc: Optional[Toolchain]) -> None:
@@ -396,7 +416,19 @@ class ToolchainManager:
 
     @staticmethod
     def _DetectCompilerFamily(compiler_path: str) -> CompilerFamily:
-        """DÃ©termine la famille du compilateur Ã  partir de --version."""
+        """Famille du compilateur, deduite de --version. MEMORISEE.
+
+        La famille d'un binaire donne ne change pas pendant un build, et
+        l'interroger coute un lancement de processus a chaque appel.
+        """
+        if compiler_path in ToolchainManager._cacheFamily:
+            return ToolchainManager._cacheFamily[compiler_path]
+        famille = ToolchainManager._DetectCompilerFamilyImpl(compiler_path)
+        ToolchainManager._cacheFamily[compiler_path] = famille
+        return famille
+
+    @staticmethod
+    def _DetectCompilerFamilyImpl(compiler_path: str) -> CompilerFamily:
         try:
             out = Process.Capture([compiler_path, "--version"])
             out_lower = out.lower()

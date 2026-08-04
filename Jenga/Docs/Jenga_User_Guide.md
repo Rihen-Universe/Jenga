@@ -72,7 +72,7 @@ pip install Jenga
 ### Installation from Source
 
 ```bash
-git clone https://github.com/RihenUniverse/Jenga.git
+git clone https://github.com/Rihen-Universe/Jenga.git
 cd Jenga
 pip install -e .
 ```
@@ -5066,7 +5066,7 @@ Builds only specified project and its dependencies.
    ```
 
 3. **GitHub Issues:**
-   - Report bugs: https://github.com/RihenUniverse/Jenga/issues
+   - Report bugs: https://github.com/Rihen-Universe/Jenga/issues
    - Feature requests welcome
 
 4. **Verbose Error Messages:**
@@ -5805,9 +5805,9 @@ Jenga provides a powerful, flexible, and intuitive build system for native appli
 4. Join the community and contribute
 
 **Resources:**
-- GitHub: https://github.com/RihenUniverse/Jenga
+- GitHub: https://github.com/Rihen-Universe/Jenga
 - Documentation: Run `Jenga docs`
-- Issue Tracker: https://github.com/RihenUniverse/Jenga/issues
+- Issue Tracker: https://github.com/Rihen-Universe/Jenga/issues
 
 Happy building with Jenga! 🎉
 

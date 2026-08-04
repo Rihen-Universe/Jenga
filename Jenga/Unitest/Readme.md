@@ -317,7 +317,7 @@ Aucune action manuelle n'est nécessaire – le projet `__Unitest__` est configu
 - [Documentation Commands](../Commands/README.md) – voir `Jenga test`
 - [API Jenga – contexte unitest](../Api.py) – implémentation DSL
 - [Utilitaires Jenga](../Utils/README.md) – pour l'affichage des rapports
-- [Exemples de projets](https://github.com/RihenUniverse/examples) (à créer)
+- [Exemples de projets](https://github.com/Rihen-Universe/examples) (à créer)
 
 ---
 

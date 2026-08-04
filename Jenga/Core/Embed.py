@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from . import Api
-from .Loader import Loader
+from .Loader import Loader, GetLoadedFiles
 # NB : `from ..Utils import Reporter` donnerait la CLASSE Reporter (re-exportee
 # par Utils/__init__), pas le module — importer le MODULE explicitement.
 from ..Utils import Reporter as _ReporterPkgAlias  # noqa: F401 (garde l'init du package)
@@ -193,6 +193,71 @@ def ResetState() -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# Cache du workspace (hote persistant uniquement)
+# ---------------------------------------------------------------------------
+#
+# Analyser les .jenga coute ~1,5 s sur un workspace de 186 projets, et chaque
+# operation (build, run, info, compile-flags) le refaisait — l'IDE payait donc
+# cette seconde et demie a chaque clic. L'interpreteur embarque, lui, VIT tout
+# au long de la session : on garde le workspace charge et on ne le relit que si
+# un .jenga a bouge.
+#
+# Pourquoi c'est sur : appliquer les filtres est IDEMPOTENT cote Jenga. Le
+# builder photographie l'etat non filtre dans `project._jenga_filter_base_state`
+# a la premiere application, puis RESTAURE depuis cette base a chaque fois
+# (Core/Builder.py). Construire en Debug puis en Release sur le meme objet
+# workspace ne melange donc pas les reglages — c'est une garantie du moteur, pas
+# une coincidence, et le test de non-regression ci-dessous la verifie.
+#
+# L'invalidation porte sur les fichiers REELLEMENT lus (Loader.GetLoadedFiles),
+# includes compris : balayer le disque a la recherche de .jenga serait lent, et
+# surtout faux des qu'un include pointe ailleurs.
+
+_wsCacheEntry: Optional[str] = None
+_wsCacheSig = None
+_wsCacheObj = None
+_wsCacheFiles: List[str] = []
+
+
+def _Signature(paths) -> tuple:
+    out = []
+    for p in paths:
+        try:
+            st = Path(p).stat()
+            out.append((str(p), st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((str(p), 0, -1))  # disparu = signature differente
+    return tuple(out)
+
+
+def InvalidateWorkspaceCache() -> None:
+    """Force la relecture au prochain appel (changement de branche, doute...)."""
+    global _wsCacheEntry, _wsCacheSig, _wsCacheObj, _wsCacheFiles
+    _wsCacheEntry, _wsCacheSig, _wsCacheObj, _wsCacheFiles = None, None, None, []
+
+
+def _LoadWorkspaceCached(entry: Path, verbose: bool = False):
+    """LoadWorkspace, en reutilisant le precedent si aucun .jenga n'a change."""
+    global _wsCacheEntry, _wsCacheSig, _wsCacheObj, _wsCacheFiles
+    key = str(entry)
+    if _wsCacheObj is not None and _wsCacheEntry == key and _wsCacheFiles:
+        if _Signature(_wsCacheFiles) == _wsCacheSig:
+            return _wsCacheObj
+    loader = Loader(verbose=verbose)
+    ws = loader.LoadWorkspace(str(entry))
+    try:
+        files = [str(p) for p in GetLoadedFiles()]
+    except Exception:  # noqa: BLE001
+        files = []
+    if ws is not None and files:
+        _wsCacheEntry, _wsCacheFiles = key, files
+        _wsCacheSig, _wsCacheObj = _Signature(files), ws
+    else:  # rien a garantir -> pas de cache (on relira)
+        InvalidateWorkspaceCache()
+    return ws
+
+
 def _ResolveEntry(jenga_file: Optional[str]):
     if jenga_file:
         p = Path(jenga_file).resolve()
@@ -220,8 +285,7 @@ def _RunBuilderAction(jenga_file: Optional[str], target: Optional[str], config: 
             res.errorMessage = "no workspace (.jenga introuvable)"
             return res
         try:
-            loader = Loader(verbose=verbose)
-            workspace = loader.LoadWorkspace(str(entry))
+            workspace = _LoadWorkspaceCached(entry, verbose=verbose)
         except Exception as e:  # noqa: BLE001
             res.errorMessage = f"load: {e}"
             return res
@@ -252,6 +316,24 @@ def _RunBuilderAction(jenga_file: Optional[str], target: Optional[str], config: 
         res.errorFiles = list(collector.errorFiles)
         res.hadLinkFailure = collector.hadLinkFailure
         res.hadWarnings = collector.hadWarnings
+
+        # ── Chemin + Kind du binaire, EN CADEAU du build ────────────────────
+        # Un IDE qui construit pour lancer avait besoin d'un second appel
+        # (ExecutablePath), qui rechargeait TOUT le workspace : ~1,5 s sur un
+        # workspace de 186 projets, pour une information que ce builder-ci
+        # possede deja. On l'emet donc ici, sur le meme canal de lignes que le
+        # transcript — l'hote reconnait les prefixes, aucun canal a creer.
+        if res.exitCode == 0 and target and action != "clean":
+            try:
+                proj = (getattr(workspace, "projects", {}) or {}).get(target)
+                if proj is not None:
+                    p = builder.GetTargetPath(proj)
+                    if p:
+                        kind = getattr(getattr(proj, "kind", None), "value", "") or ""
+                        collector.OnLogLine(f"[jenga-exekind] {kind}")
+                        collector.OnLogLine(f"[jenga-exepath] {p}")
+            except Exception:  # noqa: BLE001
+                pass  # simple optimisation : son echec ne doit jamais casser un build
         return res
     finally:
         tee.flush()
@@ -370,8 +452,12 @@ def Test(jenga_file: Optional[str] = None, target: Optional[str] = None,
 
 def ExecutablePath(jenga_file: Optional[str] = None, target: Optional[str] = None,
                    config: str = "Debug", platform: Optional[str] = None,
-                   toolchain: Optional[str] = None) -> str:
+                   toolchain: Optional[str] = None, withKind: bool = False) -> str:
     """Chemin du BINAIRE produit pour `target`, SANS rien construire ni lancer.
+
+    Avec `withKind=True`, renvoie `"<Kind>|<chemin>"` (ex.
+    `"ConsoleApp|D:/.../mon_app.exe"`) au lieu du seul chemin : l'IDE sait alors
+    s'il doit ouvrir un vrai terminal (ConsoleApp) ou lancer sans console.
 
     Permet a un IDE de faire lui-meme le lancement : `jenga run` est un processus
     LONG (l'application de l'utilisateur, eventuellement plusieurs instances en
@@ -390,8 +476,7 @@ def ExecutablePath(jenga_file: Optional[str] = None, target: Optional[str] = Non
         if not entry or not target:
             return ""
         try:
-            loader = Loader()
-            workspace = loader.LoadWorkspace(str(entry))
+            workspace = _LoadWorkspaceCached(entry)
             extra = [f"toolchain:{toolchain}"] if toolchain else None
             options = BuildCommand.CollectFilterOptions(
                 config=config, platform=platform, target=target,
@@ -405,7 +490,13 @@ def ExecutablePath(jenga_file: Optional[str] = None, target: Optional[str] = Non
             if proj is None:
                 return ""
             p = builder.GetTargetPath(proj)
-            return str(p) if p else ""
+            path = str(p) if p else ""
+            # Le KIND accompagne le chemin : l'hote (IDE) en a besoin pour choisir
+            # OU lancer. Une ConsoleApp veut un vrai terminal (stdin, ANSI, code de
+            # sortie visible) ; une WindowedApp n'en a pas besoin. Le calculer ici
+            # evite a l'appelant de recharger le workspace une seconde fois.
+            kind = getattr(getattr(proj, "kind", None), "value", "") or ""
+            return f"{kind}|{path}" if withKind else path
         except Exception:  # noqa: BLE001
             return ""
     finally:
@@ -422,8 +513,7 @@ def Info(jenga_file: Optional[str] = None) -> WorkspaceInfo:
             out.errorMessage = "no workspace (.jenga introuvable)"
             return out
         try:
-            loader = Loader()
-            workspace = loader.LoadWorkspace(str(entry))
+            workspace = _LoadWorkspaceCached(entry)
         except Exception as e:  # noqa: BLE001
             out.errorMessage = f"load: {e}"
             return out

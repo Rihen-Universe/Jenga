@@ -27,6 +27,19 @@ from .GlobalToolchains import ApplyGlobalRegistryToWorkspace
 from ..Utils import Colored, FileSystem
 
 
+# ── Fichiers .jenga REELLEMENT lus pendant le dernier chargement ────────────
+# Un `include()` peut tirer n'importe quel fichier, ou qu'il soit : balayer le
+# disque pour les retrouver serait a la fois lent et faux. On les enregistre
+# donc a la source, au moment ou ils sont executes. Sert a un hote qui garde un
+# workspace en cache (voir Core/Embed.py) a savoir quand le relire.
+_loadedFiles: List[Path] = []
+
+
+def GetLoadedFiles() -> List[Path]:
+    """Fichiers lus lors du dernier LoadWorkspace (entree + includes)."""
+    return list(_loadedFiles)
+
+
 class Loader:
     """
     Chargeur de workspaces et projets.
@@ -221,6 +234,9 @@ class Loader:
         filePath = Path(entryFile).resolve()
         if not filePath.exists():
             raise FileNotFoundError(f"Jenga file not found: {filePath}")
+        # Nouveau chargement : le registre repart de zero (sinon il accumule les
+        # fichiers de tous les chargements precedents du processus).
+        _loadedFiles.clear()
 
         self._Log(f"Loading workspace from {filePath}")
 
@@ -248,6 +264,7 @@ class Loader:
             _sys.path.insert(0, _typings)
 
         try:
+            _loadedFiles.append(filePath)
             exec(filePath.read_text(encoding='utf-8-sig'), globals_dict)
             workspace = Api.getcurrentworkspace()
             if workspace is None:
@@ -292,6 +309,7 @@ class Loader:
         os.chdir(fp.parent)
 
         try:
+            _loadedFiles.append(fp)
             exec(fp.read_text(encoding='utf-8-sig'), globals_dict)
             tempWks = Api._currentWorkspace
             if tempWks is None:
@@ -349,6 +367,7 @@ class Loader:
         os.chdir(filePath.parent)
 
         try:
+            _loadedFiles.append(filePath)
             exec(filePath.read_text(encoding='utf-8-sig'), globals_dict)
             # Récupérer le projet courant ou le premier du workspace
             proj = Api._currentProject
