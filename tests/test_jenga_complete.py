@@ -356,6 +356,13 @@ class TestVariableExpander:
 # 4. GlobalToolchains Registry
 # ===========================================================================
 
+# BuildToolchainFromRegistryEntry ECARTE volontairement les toolchains dont le
+# compilateur n'existe pas (registre recopie d'une autre machine). Les tests
+# doivent donc pointer un binaire REEL, sinon ils testent ce garde-fou au lieu
+# du mapping. sys.executable existe partout, quelle que soit la plateforme.
+_REAL_EXE = sys.executable
+
+
 class TestGlobalToolchainsRegistry:
     def test_empty_registry(self):
         with tempfile.TemporaryDirectory() as d:
@@ -372,8 +379,8 @@ class TestGlobalToolchainsRegistry:
                         "compilerFamily": "clang",
                         "targetOs": "Linux",
                         "targetArch": "x86_64",
-                        "ccPath": "/usr/bin/clang",
-                        "cxxPath": "/usr/bin/clang++",
+                        "ccPath": _REAL_EXE,
+                        "cxxPath": _REAL_EXE,
                     }
                 ],
                 "sdk": {
@@ -396,8 +403,8 @@ class TestGlobalToolchainsRegistry:
             "targetOs": "Linux",
             "targetArch": "x86_64",
             "targetEnv": "gnu",
-            "ccPath": "/usr/bin/clang",
-            "cxxPath": "/usr/bin/clang++",
+            "ccPath": _REAL_EXE,
+            "cxxPath": _REAL_EXE,
             "cflags": ["-O2"],
             "cxxflags": ["-std=c++17"],
         }
@@ -408,7 +415,7 @@ class TestGlobalToolchainsRegistry:
         assert tc.targetOs == TargetOS.LINUX
         assert tc.targetArch == TargetArch.X86_64
         assert tc.targetEnv == TargetEnv.GNU
-        assert tc.ccPath == "/usr/bin/clang"
+        assert tc.ccPath == _REAL_EXE
         assert "-O2" in tc.cflags
 
     def test_build_toolchain_invalid_entry(self):
@@ -426,7 +433,7 @@ class TestGlobalToolchainsRegistry:
                     "compilerFamily": "clang",
                     "targetOs": "Linux",
                     "targetArch": "x86_64",
-                    "ccPath": "/usr/bin/clang",
+                    "ccPath": _REAL_EXE,
                 }
             ],
             "sdk": {
@@ -520,8 +527,10 @@ class TestEmscriptenRunnerScripts:
 
             assert "MyWasmGame" in bat_text
             assert "MyWasmGame" in sh_text
-            assert "8080" in bat_text      # default port
-            assert "8080" in sh_text
+            # Port lu depuis la SOURCE (plus de litteral duplique dans le test).
+            from Jenga.Core.Builders.Emscripten import EMSCRIPTEN_DEFAULT_PORT as _P
+            assert str(_P) in bat_text
+            assert str(_P) in sh_text
 
     def test_runner_scripts_http_server_command(self):
         b = self._make_emscripten_builder()
@@ -588,55 +597,84 @@ class TestGlobalToolchainsFixed:
             "Bug: 'linker = cpp_compiler' still present (cpp_compiler undefined)"
         )
 
-    def test_toolchain_clang_native_no_undefined_linker_path(self):
+    def test_no_undefined_name_passed_to_linker(self):
+        """Le bug d'origine : `linker(linker_path)` avec `linker_path` JAMAIS
+        defini (et `linker = cpp_compiler` juste avant, tout aussi indefini).
+
+        On verifie l'INTENTION, pas un nom de variable : chaque identifiant
+        passe a linker(...) doit etre lie quelque part dans le fichier. Les
+        versions precedentes de ce test exigeaient le litteral
+        « linker(cpp_compiler_path) » — elles cassaient au moindre renommage
+        (la variable s'appelle « cxx » aujourd'hui) sans qu'aucun bug n'existe.
+        """
+        import ast
         src = (ROOT / "Jenga" / "GlobalToolchains.py").read_text(encoding="utf-8")
-        # The specific bug: ToolchainClangNative and ToolchainClangCrossLinux
-        # used `linker = cpp_compiler` (cpp_compiler undefined) followed by
-        # `linker(linker_path)` (linker_path undefined).
-        # After fix they both use `linker(cpp_compiler_path)` directly.
-        # Verify the two broken patterns from those two functions are gone.
-        # Note: other functions may legitimately define linker_path via ResolveTool.
-        assert "linker = cpp_compiler" not in src, (
-            "Bug: 'linker = cpp_compiler' still present (cpp_compiler undefined)"
-        )
-        # Verify clang-native / clang-cross-linux use cpp_compiler_path
-        assert "linker(cpp_compiler_path)" in src, (
-            "ToolchainClangNative/CrossLinux should call linker(cpp_compiler_path)"
+        tree = ast.parse(src)
+
+        bound = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                bound.add(node.id)
+            elif isinstance(node, ast.arg):
+                bound.add(node.arg)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bound.add(node.name)
+            elif isinstance(node, ast.alias):
+                bound.add((node.asname or node.name).split(".")[0])
+
+        undefined = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "linker"):
+                continue
+            for a in node.args:
+                if isinstance(a, ast.Name) and a.id not in bound:
+                    undefined.append((node.lineno, a.id))
+
+        assert not undefined, (
+            "linker(...) recoit un identifiant jamais defini : "
+            + ", ".join(f"ligne {ln} -> {nm}" for ln, nm in undefined)
         )
 
-    def test_clang_native_registers_linker_as_cpp_compiler(self):
+    def test_linker_uses_cpp_compiler_not_a_bare_assignment(self):
+        """Les affectations fautives d'origine ne doivent pas revenir."""
         src = (ROOT / "Jenga" / "GlobalToolchains.py").read_text(encoding="utf-8")
-        assert "linker(cpp_compiler_path)" in src, (
-            "ToolchainClangNative/CrossLinux should use cpp_compiler_path as linker"
-        )
+        assert "linker = cpp_compiler" not in src
+        assert "linker = c_compiler" not in src
 
-
-# ===========================================================================
-# 7. Examples – DSL parsing (syntax check)
-# ===========================================================================
 
 class TestExamplesParsing:
-    """Verify that all .jenga example files parse without syntax errors."""
-
     EXAMPLES_DIR = ROOT / "Jenga" / "Exemples"
-    # Examples requiring macOS/Xcode – skip on non-macOS
-    MACOS_ONLY = {"06_ios_app", "17_window_macos_cocoa", "20_window_ios_uikit"}
-    # Examples requiring specific hardware toolchains
-    TOOLCHAIN_REQUIRED = {
-        "21_zig_cross_compile", "22_nk_multiplatform_sandbox",
-        "23_android_sdl3_ndk_mk",
-    }
+    # Sous-dossiers d'Exemples/ qui ne sont PAS des exemples Jenga. « Nkentseu »
+    # est un SOUS-MODULE : un moteur complet, propriete d'un autre depot, present
+    # ici pour l'integration. Il est deja exclu de l'archive distribuee
+    # (scripts/build_examples_archive.py) — le test doit couvrir le MEME perimetre,
+    # sinon la suite de Jenga echoue sur du contenu qu'il ne livre pas et dont il
+    # n'est pas responsable.
+    NON_EXAMPLE_DIRS = {"Nkentseu"}
 
     def _get_example_files(self):
         if not self.EXAMPLES_DIR.exists():
             return []
-        return [p for p in self.EXAMPLES_DIR.rglob("*.jenga") if p.is_file()]
+        out = []
+        for p in self.EXAMPLES_DIR.rglob("*.jenga"):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(self.EXAMPLES_DIR)
+            if rel.parts and rel.parts[0] in self.NON_EXAMPLE_DIRS:
+                continue
+            out.append(p)
+        return out
 
     def test_all_examples_are_valid_python(self):
         """All .jenga files must be parseable Python."""
         import ast
         for jenga_file in self._get_example_files():
-            src = jenga_file.read_text(encoding="utf-8", errors="replace")
+            # MEME encodage que le chargeur (Core/Loader.py lit en utf-8-sig) :
+            # un BOM est donc legitimement supporte par Jenga. Lire en "utf-8"
+            # strict faisait echouer le test sur un fichier que le produit
+            # accepte — le test etait plus severe que la realite.
+            src = jenga_file.read_text(encoding="utf-8-sig", errors="replace")
             try:
                 ast.parse(src, filename=str(jenga_file))
             except SyntaxError as e:
@@ -689,7 +727,7 @@ class TestExamplesParsing:
 
 class TestBuildCommandUtilities:
     def _get_build_cmd(self):
-        from Jenga.Commands.build import BuildCommand
+        from Jenga.Commands.Build import BuildCommand  # PascalCase : nom REEL du module
         return BuildCommand
 
     def test_is_all_platforms_token(self):

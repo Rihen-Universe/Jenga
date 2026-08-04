@@ -30,7 +30,7 @@ pip install jenga
 ### Installation depuis les sources (développement)
 
 ```bash
-git clone https://github.com/RihenUniverse/Jenga.git
+git clone https://github.com/Rihen-Universe/Jenga.git
 cd Jenga
 pip install -e .
 ```
@@ -90,7 +90,7 @@ pip install jenga
 ### Install from source (development)
 
 ```bash
-git clone https://github.com/RihenUniverse/Jenga.git
+git clone https://github.com/Rihen-Universe/Jenga.git
 cd Jenga
 pip install -e .
 ```

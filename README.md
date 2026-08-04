@@ -11,7 +11,7 @@
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org)
 [![Targets](https://img.shields.io/badge/targets-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iOS%20%7C%20Web%20%7C%20HarmonyOS%20%7C%20Xbox-green.svg)]()
 
-**📖 [Wiki (FR / EN)](https://github.com/RihenUniverse/Jenga/wiki) · 🗺️ [Roadmap](./Jenga/Docs/ROADMAP.md) · 🚀 [Quick Start](#-quick-start) · 💬 Édité par [Rihen](#-publisher--license)**
+**📖 [Wiki (FR / EN)](https://github.com/Rihen-Universe/Jenga/wiki) · 🗺️ [Roadmap](./Jenga/Docs/ROADMAP.md) · 🚀 [Quick Start](#-quick-start) · 💬 Édité par [Rihen](#-publisher--license)**
 
 </div>
 
@@ -64,7 +64,7 @@ with workspace("HelloWorkspace"):
 | Web / WASM | ✅ Production | Emscripten (emsdk) |
 | macOS | ✅ Ready | requires macOS (Apple Clang) |
 | iOS / tvOS / watchOS / visionOS | ✅ Ready | requires macOS + Xcode |
-| HarmonyOS | ✅ Ready | OpenHarmony NDK — [guide](https://github.com/RihenUniverse/Jenga/wiki/HarmonyOS) |
+| HarmonyOS | ✅ Ready | OpenHarmony NDK — [guide](https://github.com/Rihen-Universe/Jenga/wiki/HarmonyOS) |
 | Xbox One / Series | 🟡 Partial | requires Microsoft GDK |
 | Nintendo Switch / PS4-PS5 | 🔒 Licensed | requires vendor SDK |
 
@@ -76,7 +76,7 @@ with workspace("HelloWorkspace"):
 
 ```bash
 # From source (recommended for this repository)
-git clone https://github.com/RihenUniverse/Jenga.git
+git clone https://github.com/Rihen-Universe/Jenga.git
 cd Jenga
 pip install -e .
 
@@ -91,7 +91,7 @@ jenga --version
 jenga --help          # or: jenga.bat --help (Windows) / bash ./jenga.sh --help
 ```
 
-Full setup details: **[Installation wiki](https://github.com/RihenUniverse/Jenga/wiki/Installation)**.
+Full setup details: **[Installation wiki](https://github.com/Rihen-Universe/Jenga/wiki/Installation)**.
 
 ---
 
@@ -108,29 +108,29 @@ jenga run HelloApp
 jenga test
 ```
 
-Step-by-step: **[First Workspace wiki](https://github.com/RihenUniverse/Jenga/wiki/Premier-Workspace)**.
+Step-by-step: **[First Workspace wiki](https://github.com/Rihen-Universe/Jenga/wiki/Premier-Workspace)**.
 
 ---
 
 ## 📚 Documentation
 
-The full documentation lives in the **bilingual (FR / EN) [Wiki](https://github.com/RihenUniverse/Jenga/wiki)**. Source pages are versioned under [`Jenga/Docs/wiki/`](./Jenga/Docs/wiki/) and auto-published to the wiki on push to `main`.
+The full documentation lives in the **bilingual (FR / EN) [Wiki](https://github.com/Rihen-Universe/Jenga/wiki)**. Source pages are versioned under [`Jenga/Docs/wiki/`](./Jenga/Docs/wiki/) and auto-published to the wiki on push to `main`.
 
 | Page | Description |
 |------|-------------|
-| [Home](https://github.com/RihenUniverse/Jenga/wiki/Home) | Wiki entry point |
-| [Installation](https://github.com/RihenUniverse/Jenga/wiki/Installation) | Install & prerequisites |
-| [First Workspace](https://github.com/RihenUniverse/Jenga/wiki/Premier-Workspace) | Your first `.jenga` project |
-| [CLI Commands](https://github.com/RihenUniverse/Jenga/wiki/Commandes-CLI) | All `jenga` commands |
-| [DSL Reference](https://github.com/RihenUniverse/Jenga/wiki/DSL-Reference) | Full DSL API |
-| [Toolchains & Sysroots](https://github.com/RihenUniverse/Jenga/wiki/Toolchains-et-Sysroots) | Custom/cross toolchains |
-| [Unitest Tests](https://github.com/RihenUniverse/Jenga/wiki/Tests-Unitest) | Built-in C++ testing |
-| [Automatic Documentation](https://github.com/RihenUniverse/Jenga/wiki/Documentation-Automatique) | `jenga docs` extractor |
-| [Packaging & Deployment](https://github.com/RihenUniverse/Jenga/wiki/Packaging-Deploiement-Publication) | MSI/EXE/DEB/PKG/APK/IPA/HAP… |
-| [Networking & Firewall](https://github.com/RihenUniverse/Jenga/wiki/Reseau-et-Pare-feu) | Install-time network permissions |
-| [HarmonyOS](https://github.com/RihenUniverse/Jenga/wiki/HarmonyOS) | OpenHarmony / HAP builds |
-| [Examples](https://github.com/RihenUniverse/Jenga/wiki/Exemples) | Sample workspaces |
-| [FAQ / Troubleshooting](https://github.com/RihenUniverse/Jenga/wiki/FAQ-Depannage) | Common issues |
+| [Home](https://github.com/Rihen-Universe/Jenga/wiki/Home) | Wiki entry point |
+| [Installation](https://github.com/Rihen-Universe/Jenga/wiki/Installation) | Install & prerequisites |
+| [First Workspace](https://github.com/Rihen-Universe/Jenga/wiki/Premier-Workspace) | Your first `.jenga` project |
+| [CLI Commands](https://github.com/Rihen-Universe/Jenga/wiki/Commandes-CLI) | All `jenga` commands |
+| [DSL Reference](https://github.com/Rihen-Universe/Jenga/wiki/DSL-Reference) | Full DSL API |
+| [Toolchains & Sysroots](https://github.com/Rihen-Universe/Jenga/wiki/Toolchains-et-Sysroots) | Custom/cross toolchains |
+| [Unitest Tests](https://github.com/Rihen-Universe/Jenga/wiki/Tests-Unitest) | Built-in C++ testing |
+| [Automatic Documentation](https://github.com/Rihen-Universe/Jenga/wiki/Documentation-Automatique) | `jenga docs` extractor |
+| [Packaging & Deployment](https://github.com/Rihen-Universe/Jenga/wiki/Packaging-Deploiement-Publication) | MSI/EXE/DEB/PKG/APK/IPA/HAP… |
+| [Networking & Firewall](https://github.com/Rihen-Universe/Jenga/wiki/Reseau-et-Pare-feu) | Install-time network permissions |
+| [HarmonyOS](https://github.com/Rihen-Universe/Jenga/wiki/HarmonyOS) | OpenHarmony / HAP builds |
+| [Examples](https://github.com/Rihen-Universe/Jenga/wiki/Exemples) | Sample workspaces |
+| [FAQ / Troubleshooting](https://github.com/Rihen-Universe/Jenga/wiki/FAQ-Depannage) | Common issues |
 
 **Other documents:**
 - 🗺️ [Roadmap](./Jenga/Docs/ROADMAP.md) — done / in progress / to do
@@ -159,7 +159,7 @@ jenga docs extract        jenga bench        jenga examples list|copy
 ```
 
 Aliases: `b`=build, `r`=run, `t`=test, `c`=clean, `w`=watch, `i`=info, `e`=examples, `d`=docs, `h`=help.
-Full reference: **[CLI wiki](https://github.com/RihenUniverse/Jenga/wiki/Commandes-CLI)**.
+Full reference: **[CLI wiki](https://github.com/Rihen-Universe/Jenga/wiki/Commandes-CLI)**.
 
 ---
 
@@ -183,7 +183,7 @@ with project("MyGame"):
 | iOS | `NSLocalNetworkUsageDescription` + Bonjour keys |
 | HarmonyOS | `ohos.permission.INTERNET` + network info |
 
-Details: **[Networking & Firewall wiki](https://github.com/RihenUniverse/Jenga/wiki/Reseau-et-Pare-feu)**.
+Details: **[Networking & Firewall wiki](https://github.com/Rihen-Universe/Jenga/wiki/Reseau-et-Pare-feu)**.
 
 ---
 
@@ -233,7 +233,7 @@ See the [Roadmap](./Jenga/Docs/ROADMAP.md) for the full status.
 **Jenga** is a product developed and maintained by **Rihen**.
 
 - Author / Publisher: **Rihen** — <rihen.universe@gmail.com>
-- Repository: <https://github.com/RihenUniverse/Jenga>
+- Repository: <https://github.com/Rihen-Universe/Jenga>
 - License: **Proprietary** — see [`LICENSE`](./LICENSE).
 
 ---

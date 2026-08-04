@@ -372,10 +372,26 @@ class PackageCommand:
             # comportement d'origine : rien de ce qui existe ne change.
             dest_override = None
             spec = str(dep)
+
+            # EXCLUSIONS : « source => destination | dossier1, dossier2 ».
+            #
+            # Sans elles, embarquer un arbre volumineux force a lister ses
+            # sous-dossiers un par un — fragile des que l'arbre evolue. Vecu :
+            # embarquer les sources Jenga tirait Exemples/ (1,7 Go de
+            # sous-modules) et produisait un paquet de 935 Mo.
+            #
+            # Le separateur « | » est illegal dans un chemin Windows et rarissime
+            # sous Unix : le risque de collision est negligeable.
+            exclusions = set()
+            if "|" in spec:
+                spec, excl = spec.split("|", 1)
+                exclusions = {e.strip() for e in excl.split(",") if e.strip()}
+
             if "=>" in spec:
                 src_part, dst_part = spec.split("=>", 1)
                 spec = src_part.strip()
                 dest_override = dst_part.strip().strip("/").replace("\\", "/")
+            spec = spec.strip()
 
             # Resolve via builder pour gerer correctement les chemins
             # relatifs au project.location (ex: "../../Resources/Pong").
@@ -413,8 +429,18 @@ class PackageCommand:
                 collected.append((resolved, _archive_path_for(resolved)))
             elif resolved.is_dir():
                 for f in resolved.rglob("*"):
-                    if f.is_file():
-                        collected.append((f, _archive_path_for(f)))
+                    if not f.is_file():
+                        continue
+                    # Ecarte des qu'UN composant du chemin relatif est exclu :
+                    # « Exemples » elimine tout l'arbre, pas seulement sa racine.
+                    if exclusions:
+                        try:
+                            parties = set(f.relative_to(resolved).parts)
+                        except ValueError:
+                            parties = set()
+                        if parties & exclusions:
+                            continue
+                    collected.append((f, _archive_path_for(f)))
 
         # Auto-detection des SHARED_LIB dependances : si le project depend
         # d'une SHARED_LIB construite par jenga, on embarque automatiquement
@@ -1338,6 +1364,23 @@ Filename: "{{app}}\\{exe_path.name}"; Description: "Lancer {app_name}"; Flags: n
         }.get(arch, 'amd64')
 
     @staticmethod
+    def _LinuxBackendSuffix(builder) -> str:
+        """Suffixe « -xcb » / « -wayland » du nom de paquet, vide pour xlib.
+
+        Les trois variantes Linux produisent des binaires DIFFERENTS et non
+        interchangeables. Sans ce suffixe elles portaient toutes le meme nom et
+        s'ecrasaient l'une l'autre dans le dossier de sortie. xlib, backend par
+        defaut, reste sans suffixe pour ne pas casser les liens existants.
+        """
+        opts = getattr(builder, 'options', None) or []
+        for o in opts:
+            s = str(o)
+            if s.startswith('linux-backend='):
+                b = s.split('=', 1)[1].strip().lower()
+                return '' if b in ('', 'xlib') else f'-{b}'
+        return ''
+
+    @staticmethod
     def _LinuxRpmArch(builder) -> str:
         """Meme chose, au format RPM (x86_64/aarch64/i686)."""
         return {
@@ -1545,7 +1588,11 @@ Filename: "{{app}}\\{exe_path.name}"; Description: "Lancer {app_name}"; Flags: n
                 encoding="utf-8")
             install.chmod(install.stat().st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
 
-            out = output_dir / f"{app}-{version}-linux-{arch}.tar.gz"
+            # Le BACKEND fait partie du nom. Sans lui, empaqueter xlib, xcb puis
+            # wayland dans le meme dossier produisait TROIS FOIS le meme fichier,
+            # chacun ecrasant le precedent en silence : on croyait avoir trois
+            # variantes et on n'avait que la derniere. Constate en livrant.
+            out = output_dir / f"{app}-{version}-linux-{arch}{PackageCommand._LinuxBackendSuffix(builder)}.tar.gz"
             output_dir.mkdir(parents=True, exist_ok=True)
             with tarfile.open(out, "w:gz") as tf:
                 tf.add(str(top), arcname=top.name)

@@ -19,7 +19,7 @@ class ExamplesCommand:
     """jenga examples [list|copy] [options]"""
 
     # Depot GitHub d'ou telecharger l'archive d'exemples (release assets).
-    GITHUB_REPO = "RihenUniverse/Jenga"
+    GITHUB_REPO = "Rihen-Universe/Jenga"
 
     # Example projects metadata
     EXAMPLES = {

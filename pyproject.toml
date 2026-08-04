@@ -31,8 +31,8 @@ dependencies = [
 
 [project.urls]
 Documentation = "https://rihen/docs"
-Source = "https://github.com/RihenUniverse/Jenga"
-Tracker = "https://github.com/RihenUniverse/Jenga/issues"
+Source = "https://github.com/Rihen-Universe/Jenga"
+Tracker = "https://github.com/Rihen-Universe/Jenga/issues"
 
 [project.scripts]
 jenga = "Jenga.Jenga:main"

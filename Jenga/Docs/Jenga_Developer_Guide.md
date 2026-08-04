@@ -138,7 +138,7 @@ Jenga is structured as a **layered architecture** with clear separation of conce
 ### Clone Repository
 
 ```bash
-git clone https://github.com/RihenUniverse/Jenga.git
+git clone https://github.com/Rihen-Universe/Jenga.git
 cd Jenga
 ```
 

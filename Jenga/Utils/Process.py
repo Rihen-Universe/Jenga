@@ -113,8 +113,15 @@ class Process:
         # une fenetre cmd.exe visible 1-2s — pollution visuelle. Le flag
         # CREATE_NO_WINDOW (0x08000000) supprime cette fenetre tout en
         # preservant la capture d'output normale.
+        #
+        # ATTENTION : uniquement quand la sortie est CAPTUREE (tubes) ou mise au
+        # silence. Un processus qui HERITE des flux du parent herite aussi de sa
+        # console ; avec CREATE_NO_WINDOW il n'en a plus AUCUNE, et tout ce qu'il
+        # ecrit part dans le vide. C'est ce qui rendait `jenga run` muet pour
+        # toute application console sous Windows : le programme s'executait, code
+        # de sortie 0, et pas une ligne affichee.
         creation_flags = 0
-        if sys.platform == "win32" and not shell:
+        if sys.platform == "win32" and not shell and (captureOutput or silent):
             creation_flags = 0x08000000   # CREATE_NO_WINDOW
 
         try:
