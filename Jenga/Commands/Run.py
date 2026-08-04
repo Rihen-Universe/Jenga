@@ -6,6 +6,7 @@ Run command – Exécute l'exécutable d'un projet (après build si nécessaire)
 
 import argparse
 import sys
+import time as _time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -233,9 +234,22 @@ class RunCommand:
             Colored.PrintError(f"Executable not found: {exe_path}")
             return 1
 
-        # Exécuter
-        Colored.PrintInfo(f"Running {exe_path}...")
+        # ── Frontiere VISIBLE entre construction et execution ────────────────
+        # Tout arrive sur le meme flux : bannieres de build, compilation, puis la
+        # sortie du programme. Sans marque, on ne sait plus ou commence ce qui
+        # nous interesse vraiment — l'execution. D'ou un cadre net, et un bilan
+        # de fin qui donne le code de sortie (jusqu'ici affiche nulle part) et la
+        # duree du programme SEUL, sans le temps de construction.
         cmd = [str(exe_path)] + parsed.args
+        largeur = 80
+        depart = _time.time()  # chronometre le PROGRAMME, pas la construction
+        ligne_args = (" " + " ".join(parsed.args)) if parsed.args else ""
+        Colored.Print("")
+        Colored.Print("━" * largeur, color="brightcyan")
+        Colored.Print(f"  ▶  EXECUTION  —  {exe_path.name}{ligne_args}", color="brightcyan", bold=True)
+        Colored.Print(f"     {exe_path}", color="cyan")
+        Colored.Print("━" * largeur, color="brightcyan")
+        Colored.Print("")
 
         # ── Application CONSOLE lancee SANS terminal interactif ──────────────
         #
@@ -266,7 +280,7 @@ class RunCommand:
                     # clavier fonctionnelles. On ATTEND la fin, pour que le code
                     # de sortie reste celui du programme.
                     p = _sp.Popen(cmd, creationflags=0x00000010)  # CREATE_NEW_CONSOLE
-                    return p.wait()
+                    return RunCommand._Bilan(p.wait(), _time.time() - depart, largeur)
             except Exception as e:
                 # Jamais bloquant : en cas de souci on retombe sur le
                 # comportement historique plutot que d'empecher l'execution.
@@ -282,4 +296,17 @@ class RunCommand:
             _s.stderr.flush()
         except Exception:  # noqa: BLE001
             pass
-        return Process.Run(cmd)
+        return RunCommand._Bilan(Process.Run(cmd), _time.time() - depart, largeur)
+
+    @staticmethod
+    def _Bilan(code: int, duree: float, largeur: int) -> int:
+        """Ferme le cadre d'execution : code de sortie et duree du PROGRAMME
+        seul (le temps de construction n'y entre pas). Retourne `code`, pour
+        s'inserer directement dans un `return`."""
+        couleur = "brightgreen" if code == 0 else "brightred"
+        etat = "termine normalement" if code == 0 else f"termine avec le code {code}"
+        Colored.Print("")
+        Colored.Print("━" * largeur, color=couleur)
+        Colored.Print(f"  ◀  FIN D'EXECUTION  —  {etat}  ({duree:.2f}s)", color=couleur, bold=True)
+        Colored.Print("━" * largeur, color=couleur)
+        return code
