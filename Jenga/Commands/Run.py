@@ -246,7 +246,7 @@ class RunCommand:
         # tel quel donnait un message incomprehensible de l'OS (sous Windows :
         # « [WinError 193] %1 n'est pas une application Win32 valide »). On passe
         # par WSL quand c'est possible, sinon on explique.
-        cmd, note = RunCommand._AdapterAuHote(cmd, exe_path, builder)
+        cmd, note, chemin_affiche = RunCommand._AdapterAuHote(cmd, exe_path, builder)
         if cmd is None:
             Colored.PrintError(note)
             return 1
@@ -255,8 +255,12 @@ class RunCommand:
         ligne_args = (" " + " ".join(parsed.args)) if parsed.args else ""
         Colored.Print("")
         Colored.Print("━" * largeur, color="brightcyan")
-        Colored.Print(f"  ▶  EXECUTION  —  {exe_path.name}{ligne_args}", color="brightcyan", bold=True)
-        Colored.Print(f"     {exe_path}", color="cyan")
+        # `note` dit COMMENT on lance quand ce n'est pas en direct (ex. « via WSL »),
+        # et `chemin_affiche` est le chemin REELLEMENT execute : sous WSL, montrer
+        # le chemin Windows ferait chercher un probleme de chemin inexistant.
+        suffixe = f"  ({note})" if note else ""
+        Colored.Print(f"  ▶  EXECUTION  —  {exe_path.name}{ligne_args}{suffixe}", color="brightcyan", bold=True)
+        Colored.Print(f"     {chemin_affiche}", color="cyan")
         Colored.Print("━" * largeur, color="brightcyan")
         Colored.Print("")
 
@@ -326,17 +330,20 @@ class RunCommand:
         return None
 
     @staticmethod
-    def _AdapterAuHote(cmd: List[str], exe_path: Path, builder) -> Tuple[Optional[List[str]], str]:
+    def _AdapterAuHote(cmd: List[str], exe_path: Path, builder) -> Tuple[Optional[List[str]], str, str]:
         """Adapte la commande quand le binaire ne vise PAS le systeme hote.
 
-        Retourne (commande, note). Commande None = impossible, `note` explique.
+        Retourne (commande, note, chemin_affiche). Commande None = impossible,
+        `note` explique. `chemin_affiche` est le chemin REELLEMENT execute — sous
+        WSL ce n'est pas le chemin Windows, et afficher ce dernier ferait chercher
+        un probleme de chemin la ou il n'y en a pas.
         Aujourd'hui : Linux depuis Windows via WSL. Les autres combinaisons
         (macOS depuis Windows, Windows depuis Linux...) n'ont pas d'equivalent
         universel — on le dit clairement plutot que d'echouer dans l'OS."""
         cible = getattr(builder, "targetOs", None)
         hote = Platform.GetHostOS()
         if cible is None or cible == hote:
-            return cmd, ""
+            return cmd, "", str(exe_path)
 
         if cible == Api.TargetOS.LINUX and hote == Api.TargetOS.WINDOWS:
             dispo = False
@@ -348,12 +355,13 @@ class RunCommand:
             if not dispo:
                 return None, ("Binaire Linux : impossible a executer sous Windows.\n"
                               "  Installez WSL (`wsl --install`) — Jenga s'en servira "
-                              "automatiquement — ou lancez-le sur une machine Linux.")
+                              "automatiquement — ou lancez-le sur une machine Linux."), ""
             chemin = RunCommand._CheminWsl(exe_path)
             if not chemin:
-                return None, (f"Binaire Linux : chemin non traduisible pour WSL ({exe_path}).")
-            Colored.PrintInfo("Binaire Linux sur hote Windows : execution via WSL.")
-            return ["wsl", "--", chemin] + cmd[1:], "wsl"
+                return None, (f"Binaire Linux : chemin non traduisible pour WSL ({exe_path})."), ""
+            # Le chemin RETOURNE est celui reellement execute : l'afficher evite
+            # de faire chercher un probleme de chemin la ou il n'y en a pas.
+            return ["wsl", "--", chemin] + cmd[1:], "via WSL", chemin
 
         nom_cible = getattr(cible, "value", str(cible))
         nom_hote = getattr(hote, "value", str(hote))
@@ -361,7 +369,7 @@ class RunCommand:
                       f"execution impossible ici.\n"
                       f"  Deployez-le sur une machine {nom_cible} "
                       f"(voir `jenga deploy`), ou construisez pour {nom_hote} "
-                      f"avec --platform {nom_hote}.")
+                      f"avec --platform {nom_hote}."), ""
 
     @staticmethod
     def _Bilan(code: int, duree: float, largeur: int) -> int:
