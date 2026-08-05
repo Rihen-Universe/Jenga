@@ -1443,11 +1443,30 @@ def testsuite() -> None:
     if _currentProject and not _currentFilter:
         _currentProject.isTest = True
 
+def _ResolveProjectKind(k: str) -> ProjectKind:
+    """Resout un kind ecrit en toutes lettres, par NOM ou par VALEUR.
+
+    `ProjectKind[k.upper()]` n'acceptait que le NOM de l'enumeration
+    (« CONSOLE_APP »). Or `jenga info` affiche la VALEUR (« ConsoleApp »), et
+    c'est elle que l'utilisateur recopie : il obtenait alors un KeyError brut
+    (« 'CONSOLEAPP' ») qui ne dit ni ce qui est attendu, ni ou est l'erreur.
+    On accepte donc les deux formes, insensibles a la casse et aux tirets bas,
+    et on echoue avec un message qui liste les valeurs valides.
+    """
+    brut = (k or "").strip()
+    plat = brut.upper().replace("_", "").replace("-", "")
+    for pk in ProjectKind:
+        if plat in (pk.name.replace("_", ""), pk.value.upper().replace("_", "")):
+            return pk
+    valides = ", ".join(pk.value for pk in ProjectKind)
+    raise ValueError(f"kind(\"{brut}\") inconnu. Valeurs acceptees : {valides}.")
+
+
 def kind(k: Union[str, ProjectKind]) -> None:
     """Generic kind setter (alternative to specific functions)."""
     if _currentProject:
         if isinstance(k, str):
-            k = ProjectKind[k.upper()]
+            k = _ResolveProjectKind(k)
         _SetProjectKind(k)
         if k == ProjectKind.TEST_SUITE and not _currentFilter:
             _currentProject.isTest = True
