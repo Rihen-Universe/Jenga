@@ -62,8 +62,13 @@ class PackageCommand:
     @staticmethod
     def Execute(args: List[str]) -> int:
         parser = argparse.ArgumentParser(prog="jenga package", description="Create distributable packages.")
-        parser.add_argument("--platform", required=True, choices=list(PackageCommand.SUPPORTED_PLATFORMS.keys()),
-                            help="Target platform")
+        # `type=str.lower` : `build` accepte « Linux », « linux », « LINUX » — il
+        # serait absurde que `package` refuse la meme valeur dans la meme ligne de
+        # commande. On normalise AVANT la verification des choix, sinon argparse
+        # rejette « Linux » avec un message qui liste « linux » : deroutant.
+        parser.add_argument("--platform", required=True, type=str.lower,
+                            choices=list(PackageCommand.SUPPORTED_PLATFORMS.keys()),
+                            help="Target platform (insensible a la casse)")
         parser.add_argument("--ios-builder", choices=["direct", "xcode", "xbuilder"], default=None,
                             help="Apple mobile builder backend (direct or xcode/xbuilder).")
         parser.add_argument("--config", default="Release", help="Build configuration (default: Release)")

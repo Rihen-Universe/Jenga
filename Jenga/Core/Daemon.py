@@ -292,15 +292,46 @@ class Daemon:
     def _Run(self, args: Dict) -> Dict:
         """Exécute run."""
         from ..Commands.Run import RunCommand
-        cmd = RunCommand()
-        return_code = cmd.Execute(self.workspace, args)
+        # RunCommand.Execute est une STATICMETHODE qui prend une LISTE argv,
+        # pas (workspace, dict) : l'ancien appel levait un TypeError a tous
+        # les coups, donc `jenga run` echouait des qu'un daemon tournait.
+        # On reconstruit donc l'argv, `--args` EN DERNIER (argparse.REMAINDER
+        # avale tout ce qui suit).
+        argv = []
+        proj = args.get('project')
+        if proj:
+            argv.append(str(proj))
+        for cle, drapeau in (('config', '--config'), ('platform', '--platform')):
+            v = args.get(cle)
+            if v:
+                argv += [drapeau, str(v)]
+        if args.get('build'):
+            argv.append('--build')
+        argv.append('--no-daemon')  # on Y EST deja : ne pas se rappeler soi-meme
+        extra = args.get('args') or []
+        if extra:
+            argv += ['--args'] + [str(a) for a in extra]
+        return_code = RunCommand.Execute(argv)
         return {'status': 'ok' if return_code == 0 else 'error', 'return_code': return_code}
 
     def _Test(self, args: Dict) -> Dict:
         """Exécute test."""
         from ..Commands.Test import TestCommand
-        cmd = TestCommand()
-        return_code = cmd.Execute(self.workspace, args)
+        # `test` n'a NI argument positionnel, NI --build, NI --args : il prend
+        # --project et --no-build. Reutiliser l'argv de `run` produirait une
+        # erreur argparse — les deux commandes ont des surfaces differentes.
+        argv = []
+        proj = args.get('project')
+        if proj:
+            argv += ['--project', str(proj)]
+        for cle, drapeau in (('config', '--config'), ('platform', '--platform')):
+            v = args.get(cle)
+            if v:
+                argv += [drapeau, str(v)]
+        if not args.get('build', True):
+            argv.append('--no-build')
+        argv.append('--no-daemon')  # on y est deja : ne pas se rappeler soi-meme
+        return_code = TestCommand.Execute(argv)
         return {'status': 'ok' if return_code == 0 else 'error', 'return_code': return_code}
 
     def _StartWatcher(self, args: Dict) -> Dict:
