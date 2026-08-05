@@ -1807,6 +1807,32 @@ class Builder(abc.ABC):
     #         logger.PrintResultBox(True)
     #         return True
 
+    def _TransitiveDeps(self, project) -> List[str]:
+        """Toutes les dependances de `project`, directes ET indirectes.
+
+        Necessaire pour les usage requirements : si A depend de B qui depend de
+        NKNetwork, c'est bien A — l'executable — qui doit passer -lws2_32 au
+        linker. Un parcours a un seul niveau raterait ce cas, qui est le plus
+        courant des qu'un projet a plus de deux etages de modules.
+
+        Parcours en largeur avec ensemble de visites : un graphe de modules
+        contient des losanges (deux chemins vers la meme base) et les visiter
+        deux fois n'apporterait rien.
+        """
+        vus = set()
+        ordre: List[str] = []
+        file: List[str] = list(getattr(project, "dependsOn", []) or [])
+        while file:
+            nom = str(file.pop(0))
+            if nom in vus:
+                continue
+            vus.add(nom)
+            ordre.append(nom)
+            dep = self.workspace.projects.get(nom)
+            if dep:
+                file.extend(str(d) for d in (getattr(dep, "dependsOn", []) or []))
+        return ordre
+
     def BuildProject(self, project: Project) -> bool:
         # Check if project is already compiled for this platform/arch context
         if self.state.IsProjectCompiled(project.name, self.platform, self.targetArch.value if self.targetArch else ""):
@@ -2012,6 +2038,51 @@ class Builder(abc.ABC):
             # Preserve explicit project link order first (important for GNU-like
             # one-pass linkers). Only append missing dependency outputs.
             project.links = new_links + missing_dep_outputs
+
+        # ── USAGE REQUIREMENTS : bibliotheques SYSTEME des dependances ────────
+        # Une bibliotheque statique qui declare links(["ws2_32"]) enregistre un
+        # besoin qu'elle ne peut PAS satisfaire elle-meme : une archive .a/.lib
+        # ne lie rien, elle se contente d'empiler des objets. C'est l'executable
+        # final qui doit passer -lws2_32 au linker.
+        #
+        # Sans cette propagation, le module compilait, l'archive se creait, et
+        # l'echec ne surgissait qu'au tout premier executable a en dependre —
+        # avec un message (« undefined reference to __imp_ntohs ») qui ne
+        # designe ni le module fautif ni la bibliotheque manquante.
+        #
+        # On ne propage QUE les noms de bibliotheques systeme : les entrees qui
+        # designent un projet du workspace sont deja gerees par dependsOn, et
+        # les remonter creerait des doublons voire des cycles.
+        if project.kind in (ProjectKind.CONSOLE_APP, ProjectKind.WINDOWED_APP,
+                            ProjectKind.SHARED_LIB, ProjectKind.TEST_SUITE):
+            herites: List[str] = []
+            vus = set(str(x) for x in project.links)
+            for dep_name in self._TransitiveDeps(project):
+                dep_proj = self.workspace.projects.get(dep_name)
+                if not dep_proj or dep_proj.kind != ProjectKind.STATIC_LIB:
+                    continue
+                # Etat RESOLU (filtres appliques) : `links(["ws2_32"])` est declare
+                # DANS un filtre `system:Windows`, donc absent de l'etat de base.
+                # Lire la base raterait precisement ce qu'on cherche. Les chemins
+                # absolus introduits par la resolution sont ecartes plus bas.
+                dep_links = list(dep_proj.links)
+                for lib in dep_links:
+                    nom = str(lib)
+                    if nom in vus:
+                        continue
+                    if self.workspace.projects.get(nom):
+                        continue  # projet du workspace : dependsOn s'en charge
+                    if Path(nom).is_absolute() or "/" in nom or "\\" in nom:
+                        continue  # chemin explicite : deja resolu
+                    herites.append(nom)
+                    vus.add(nom)
+                for d in list(dep_proj.libDirs):
+                    if d not in project.libDirs:
+                        project.libDirs.append(d)
+            if herites:
+                # EN DERNIER : les linkers GNU resolvent en une passe, les
+                # bibliotheques systeme doivent suivre ce qui les utilise.
+                project.links = list(project.links) + herites
 
         if project.kind in (ProjectKind.CONSOLE_APP, ProjectKind.WINDOWED_APP,
                             ProjectKind.SHARED_LIB, ProjectKind.STATIC_LIB,
