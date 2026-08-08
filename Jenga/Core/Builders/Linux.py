@@ -43,7 +43,19 @@ class LinuxBuilder(Builder):
         compiler = self.toolchain.cxxPath or self.toolchain.ccPath
         if not compiler:
             return False
+        # Le PCH etait reconstruit a CHAQUE build ici (aucun test de fraicheur) :
+        # correct, mais couteux. On applique le meme test que sous Windows, qui
+        # tient compte des en-tetes INCLUS et pas seulement du fichier d'entete.
+        source_resolu = Path(self.ResolveProjectPath(project, project.pchSource)) if project.pchSource else None
+        entrees = [header] + ([source_resolu] if source_resolu and source_resolu.exists() else [])
+        if self.PchIsFresh(project, pch_path, entrees):
+            project._jengaPchFile = str(pch_path)
+            project._jengaPchHeaderResolved = str(header)
+            if project.pchSource:
+                project._jengaPchSourceResolved = str(source_resolu)
+            return True
         args = [compiler, "-x", "c++-header", str(header), "-o", str(pch_path)]
+        args.extend(self.GetDependencyFlags(str(pch_path)))
         pch_flags = [f for f in self._GetCompilerFlags(project) if f not in ("-Winvalid-pch",)]
         filtered = []
         skip_next = False

@@ -634,6 +634,44 @@ class Builder(abc.ABC):
     # Méthodes communes
     # -----------------------------------------------------------------------
 
+    def GetObjectName(self, project: Project, srcPath: Path) -> str:
+        """Nom du fichier objet d'une source, UNIQUE au sein du projet.
+
+        Les objets etaient nommes d'apres le seul nom de fichier et deposes a
+        plat : deux sources homonymes dans des dossiers differents (`src/main.cpp`
+        et `src/App/main.cpp`, cas tres courant) produisaient donc le MEME objet,
+        le second ecrasant le premier. Le lien echouait ensuite sur un symbole
+        manquant sans aucun rapport apparent avec la cause — `undefined reference
+        to 'WinMain'` alors que le point d'entree etait bien present.
+
+        On derive donc le nom du CHEMIN de la source, relatif a la racine du
+        projet, en remplacant les separateurs par des tirets bas. Le resultat
+        reste plat (aucun sous-dossier a creer, aucun code appelant a adapter),
+        lisible, et surtout stable : le meme fichier donne toujours le meme nom,
+        ce dont depend le cache incremental.
+
+        Les chemins tres profonds sont raccourcis en conservant la fin (la partie
+        qui distingue) et en prefixant une empreinte courte du chemin complet, ce
+        qui borne la longueur sans reintroduire d'ambiguite.
+        """
+        ext = self.GetObjectExtension()
+        try:
+            base = Path(self.workspace.location) / project.location
+            rel = srcPath.resolve().relative_to(base.resolve())
+        except (ValueError, OSError):
+            # Source hors de l'arborescence du projet (chemin genere, absolu,
+            # autre volume...) : le nom seul redevient ambigu, on desambigue
+            # alors par une empreinte du chemin complet.
+            digest = hashlib.sha1(str(srcPath).encode("utf-8", "replace")).hexdigest()[:8]
+            return f"{srcPath.stem}-{digest}{ext}"
+
+        parts = list(rel.with_suffix("").parts)
+        flat = "_".join(parts)
+        if len(flat) > 96:
+            digest = hashlib.sha1(str(rel).encode("utf-8", "replace")).hexdigest()[:8]
+            flat = f"{digest}_{flat[-80:]}"
+        return f"{flat}{ext}"
+
     def GetObjectDir(self, project: Project) -> Path:
         if project.objDir:
             if self._expander:
@@ -1184,6 +1222,44 @@ class Builder(abc.ABC):
         """
         dep_file = self.GetDependencyFilePath(objectFile)
         return ["-MMD", "-MF", str(dep_file), "-MT", str(objectFile)]
+
+    def PchIsFresh(self, project: Project, pchFile: Path, entrees: List[Path]) -> bool:
+        """Le PCH est-il encore valable ?
+
+        La verification ne comparait que l'en-tete precompile et son source.
+        Or un PCH englobe TOUT ce que cet en-tete inclut : modifier un en-tete
+        bas niveau (un NkPlatformDetect.h, un Config.h) le laissait donc passer
+        pour frais, et le compilateur rejetait ensuite chaque source avec un
+        message deroutant qui accuse un fichier parfaitement innocent :
+
+            fatal error: file 'X.h' has been modified since the precompiled
+            header 'Y.pch' was built
+
+        On relit donc le fichier de dependances emis a la construction du PCH
+        (meme format Make que pour les objets, meme analyseur) et on compare
+        TOUTES les entrees. Sans ce fichier — premier build, compilateur qui ne
+        sait pas les emettre — on refuse la fraicheur : reconstruire un PCH
+        coute quelques secondes, un PCH perime coute une session a comprendre.
+        """
+        try:
+            if not pchFile.exists():
+                return False
+            t_pch = pchFile.stat().st_mtime
+            for e in entrees:
+                e = Path(e)
+                if not e.exists() or e.stat().st_mtime > t_pch:
+                    return False
+            dep_file = self.GetDependencyFilePath(str(pchFile))
+            if not dep_file.exists():
+                return False  # dans le doute, on reconstruit
+            for d in self._ParseDependencyFile(dep_file, project):
+                # Un en-tete disparu invalide aussi : la source qui l'incluait
+                # ne compilera plus de la meme facon.
+                if not d.exists() or d.stat().st_mtime > t_pch:
+                    return False
+            return True
+        except Exception:
+            return False  # le doute profite a la correction, jamais a la vitesse
 
     def _ParseDependencyFile(self, depFile: Path, project: Project) -> List[Path]:
         """
@@ -1902,7 +1978,7 @@ class Builder(abc.ABC):
         # Compile modules to object files
         for mod_file in module_files:
             src_path = Path(mod_file)
-            obj_name = src_path.with_suffix(self.GetObjectExtension()).name
+            obj_name = self.GetObjectName(project, src_path)
             obj_path = obj_dir / obj_name
 
             # _CompileModuleToObject retourne bool pour l'instant, on garde
@@ -1928,7 +2004,7 @@ class Builder(abc.ABC):
             # Sequential compilation
             for src in regular_files:
                 src_path = Path(src)
-                obj_name = src_path.with_suffix(self.GetObjectExtension()).name
+                obj_name = self.GetObjectName(project, src_path)
                 obj_path = obj_dir / obj_name
 
                 if not self._NeedsCompileSource(project, str(src_path), str(obj_path)):
@@ -1956,7 +2032,7 @@ class Builder(abc.ABC):
 
                 for src in regular_files:
                     src_path = Path(src)
-                    obj_name = src_path.with_suffix(self.GetObjectExtension()).name
+                    obj_name = self.GetObjectName(project, src_path)
                     obj_path = obj_dir / obj_name
 
                     if not self._NeedsCompileSource(project, str(src_path), str(obj_path)):

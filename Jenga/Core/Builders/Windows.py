@@ -97,16 +97,15 @@ class WindowsBuilder(Builder):
         # En cas de doute, on recompile : un PCH perime provoque des erreurs
         # incomprehensibles (« predefined macro was disabled in precompiled
         # file »). Le doute profite a la correction, jamais a la vitesse.
-        try:
-            if pch_file.exists():
-                t_pch = pch_file.stat().st_mtime
-                entrees = [header_path]
-                if source_path and Path(source_path).exists():
-                    entrees.append(Path(source_path))
-                if all(e.stat().st_mtime <= t_pch for e in entrees):
-                    return True
-        except Exception:
-            pass
+        entrees = [header_path]
+        if source_path and Path(source_path).exists():
+            entrees.append(Path(source_path))
+        # La verification porte desormais aussi sur les en-tetes INCLUS par le
+        # PCH (fichier .d emis plus bas) : sans cela, modifier un en-tete bas
+        # niveau laissait le PCH passer pour frais et faisait echouer toutes
+        # les sources sur un message qui accuse un fichier innocent.
+        if self.PchIsFresh(project, pch_file, entrees):
+            return True
 
         # Le PCH DOIT etre compile avec les MEMES flags d'optimisation et de
         # symboles que les sources qui l'utilisent. Sinon clang/gcc rejettent
@@ -155,6 +154,9 @@ class WindowsBuilder(Builder):
         for inc in project.includeDirs:
             args.append(f"-I{self.ResolveProjectPath(project, inc)}")
         args.append(f"-I{header_path.parent}")
+        # Emet la liste des en-tetes reellement inclus, a cote du PCH. C'est ce
+        # fichier que PchIsFresh relit pour decider s'il est encore valable.
+        args.extend(self.GetDependencyFlags(str(pch_file)))
         for define in self.toolchain.defines:
             args.append(f"-D{define}")
         for define in project.defines:
