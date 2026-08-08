@@ -634,6 +634,44 @@ class Builder(abc.ABC):
     # Méthodes communes
     # -----------------------------------------------------------------------
 
+    def GetObjectName(self, project: Project, srcPath: Path) -> str:
+        """Nom du fichier objet d'une source, UNIQUE au sein du projet.
+
+        Les objets etaient nommes d'apres le seul nom de fichier et deposes a
+        plat : deux sources homonymes dans des dossiers differents (`src/main.cpp`
+        et `src/App/main.cpp`, cas tres courant) produisaient donc le MEME objet,
+        le second ecrasant le premier. Le lien echouait ensuite sur un symbole
+        manquant sans aucun rapport apparent avec la cause — `undefined reference
+        to 'WinMain'` alors que le point d'entree etait bien present.
+
+        On derive donc le nom du CHEMIN de la source, relatif a la racine du
+        projet, en remplacant les separateurs par des tirets bas. Le resultat
+        reste plat (aucun sous-dossier a creer, aucun code appelant a adapter),
+        lisible, et surtout stable : le meme fichier donne toujours le meme nom,
+        ce dont depend le cache incremental.
+
+        Les chemins tres profonds sont raccourcis en conservant la fin (la partie
+        qui distingue) et en prefixant une empreinte courte du chemin complet, ce
+        qui borne la longueur sans reintroduire d'ambiguite.
+        """
+        ext = self.GetObjectExtension()
+        try:
+            base = Path(self.workspace.location) / project.location
+            rel = srcPath.resolve().relative_to(base.resolve())
+        except (ValueError, OSError):
+            # Source hors de l'arborescence du projet (chemin genere, absolu,
+            # autre volume...) : le nom seul redevient ambigu, on desambigue
+            # alors par une empreinte du chemin complet.
+            digest = hashlib.sha1(str(srcPath).encode("utf-8", "replace")).hexdigest()[:8]
+            return f"{srcPath.stem}-{digest}{ext}"
+
+        parts = list(rel.with_suffix("").parts)
+        flat = "_".join(parts)
+        if len(flat) > 96:
+            digest = hashlib.sha1(str(rel).encode("utf-8", "replace")).hexdigest()[:8]
+            flat = f"{digest}_{flat[-80:]}"
+        return f"{flat}{ext}"
+
     def GetObjectDir(self, project: Project) -> Path:
         if project.objDir:
             if self._expander:
@@ -1902,7 +1940,7 @@ class Builder(abc.ABC):
         # Compile modules to object files
         for mod_file in module_files:
             src_path = Path(mod_file)
-            obj_name = src_path.with_suffix(self.GetObjectExtension()).name
+            obj_name = self.GetObjectName(project, src_path)
             obj_path = obj_dir / obj_name
 
             # _CompileModuleToObject retourne bool pour l'instant, on garde
@@ -1928,7 +1966,7 @@ class Builder(abc.ABC):
             # Sequential compilation
             for src in regular_files:
                 src_path = Path(src)
-                obj_name = src_path.with_suffix(self.GetObjectExtension()).name
+                obj_name = self.GetObjectName(project, src_path)
                 obj_path = obj_dir / obj_name
 
                 if not self._NeedsCompileSource(project, str(src_path), str(obj_path)):
@@ -1956,7 +1994,7 @@ class Builder(abc.ABC):
 
                 for src in regular_files:
                     src_path = Path(src)
-                    obj_name = src_path.with_suffix(self.GetObjectExtension()).name
+                    obj_name = self.GetObjectName(project, src_path)
                     obj_path = obj_dir / obj_name
 
                     if not self._NeedsCompileSource(project, str(src_path), str(obj_path)):
