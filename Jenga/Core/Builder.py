@@ -1223,6 +1223,44 @@ class Builder(abc.ABC):
         dep_file = self.GetDependencyFilePath(objectFile)
         return ["-MMD", "-MF", str(dep_file), "-MT", str(objectFile)]
 
+    def PchIsFresh(self, project: Project, pchFile: Path, entrees: List[Path]) -> bool:
+        """Le PCH est-il encore valable ?
+
+        La verification ne comparait que l'en-tete precompile et son source.
+        Or un PCH englobe TOUT ce que cet en-tete inclut : modifier un en-tete
+        bas niveau (un NkPlatformDetect.h, un Config.h) le laissait donc passer
+        pour frais, et le compilateur rejetait ensuite chaque source avec un
+        message deroutant qui accuse un fichier parfaitement innocent :
+
+            fatal error: file 'X.h' has been modified since the precompiled
+            header 'Y.pch' was built
+
+        On relit donc le fichier de dependances emis a la construction du PCH
+        (meme format Make que pour les objets, meme analyseur) et on compare
+        TOUTES les entrees. Sans ce fichier — premier build, compilateur qui ne
+        sait pas les emettre — on refuse la fraicheur : reconstruire un PCH
+        coute quelques secondes, un PCH perime coute une session a comprendre.
+        """
+        try:
+            if not pchFile.exists():
+                return False
+            t_pch = pchFile.stat().st_mtime
+            for e in entrees:
+                e = Path(e)
+                if not e.exists() or e.stat().st_mtime > t_pch:
+                    return False
+            dep_file = self.GetDependencyFilePath(str(pchFile))
+            if not dep_file.exists():
+                return False  # dans le doute, on reconstruit
+            for d in self._ParseDependencyFile(dep_file, project):
+                # Un en-tete disparu invalide aussi : la source qui l'incluait
+                # ne compilera plus de la meme facon.
+                if not d.exists() or d.stat().st_mtime > t_pch:
+                    return False
+            return True
+        except Exception:
+            return False  # le doute profite a la correction, jamais a la vitesse
+
     def _ParseDependencyFile(self, depFile: Path, project: Project) -> List[Path]:
         """
         Parse a Make-style .d dependency file and return normalized paths.
