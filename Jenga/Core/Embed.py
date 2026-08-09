@@ -173,6 +173,11 @@ class _CollectingSink:
             self.errorFiles.append(file)
         self._Fwd("OnCompileError", project, file, message)
 
+    def OnCompileWarning(self, project, file, message):
+        # Meme relais que OnCompileError, sans marquer le fichier en echec : un
+        # avertissement n'empeche pas la construction d'aboutir.
+        self._Fwd("OnCompileWarning", project, file, message)
+
     def OnLinkError(self, project, file, message):
         self.hadLinkFailure = True
         self._Fwd("OnLinkError", project, file, message)
