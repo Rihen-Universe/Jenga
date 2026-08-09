@@ -634,6 +634,44 @@ class Builder(abc.ABC):
     # Méthodes communes
     # -----------------------------------------------------------------------
 
+    def MaybeResponseFile(self, args: List[str], workDir: Path, tag: str = "link") -> List[str]:
+        """Replie une ligne de commande trop longue dans un FICHIER DE REPONSE.
+
+        Sous Windows, une commande lancee via cmd.exe est plafonnee a ~8191
+        caracteres — et les lanceurs des chaines de compilation (emcc.bat,
+        emar.bat...) passent forcement par lui. Un projet de quelques centaines
+        d'objets depasse ce plafond, et l'echec est particulierement opaque :
+
+            La ligne de commande est trop longue.
+
+        Aucun compilateur n'est cite, aucun fichier, aucun symbole ; on croit a
+        une erreur de lien alors que la commande n'a jamais ete executee.
+
+        Tous les outils concernes (clang, lld, gcc, emcc, ar/emar, link.exe)
+        acceptent la forme `@fichier` : un argument par ligne. On ne replie que
+        les arguments APRES l'executable, et seulement au-dela du seuil — en
+        deca, garder la ligne en clair rend les journaux lisibles et le
+        diagnostic direct.
+        """
+        if len(args) < 2:
+            return args
+        longueur = sum(len(a) + 3 for a in args)  # +3 : espace et guillemets eventuels
+        if longueur < 6000:  # marge sous les 8191, le shell ajoute son propre prefixe
+            return args
+        try:
+            FileSystem.MakeDirectory(workDir)
+            rsp = Path(workDir) / f"{tag}.rsp"
+            with open(rsp, "w", encoding="utf-8") as f:
+                for a in args[1:]:
+                    a = str(a).replace("\\", "/")  # le backslash echappe DANS un fichier de reponse
+                    ligne = f'"{a}"' if " " in a else a
+                    f.write(ligne + "\n")
+            return [args[0], f"@{rsp}"]
+        except Exception:
+            # Impossible d'ecrire le fichier : on rend la commande telle quelle
+            # plutot que d'echouer ici — l'erreur d'origine reste plus parlante.
+            return args
+
     def GetObjectName(self, project: Project, srcPath: Path) -> str:
         """Nom du fichier objet d'une source, UNIQUE au sein du projet.
 
