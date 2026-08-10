@@ -54,6 +54,7 @@ from .Core.Api import (
     # Installer packaging DSL (MSI/EXE/DEB/PKG)
     licensefile, createdesktopshortcut, apppublisher, appversion, installeroption,
     harmonyminsdk, harmonysdk, harmonybundlename, harmonyversioncode, harmonyversionname, harmonytargetapi, harmonysign, harmonycertfile, harmonyprofile, harmonypermissions, harmonyassets,
+    harmonyabis, harmonyappicon, harmonyorientation, harmonyets,
 
     gdkpath, xboxmode, xboxplatform, xboxsigningmode, xboxpackagename, xboxpublisher, xboxversion, xboxlekbpath, xboxassetchunks,
     emscriptenshellfile, emscriptenfullscreenshell, emscriptencanvasid, emscripteninitialmemory,
@@ -118,6 +119,7 @@ __all__ = [
     'licensefile', 'createdesktopshortcut', 'apppublisher', 'appversion',
     'installeroption',
     'harmonyminsdk', 'harmonysdk', 'harmonybundlename', 'harmonyversioncode', 'harmonyversionname', 'harmonytargetapi', 'harmonysign', 'harmonycertfile', 'harmonyprofile', 'harmonypermissions', 'harmonyassets',
+    'harmonyabis', 'harmonyappicon', 'harmonyorientation', 'harmonyets',
     'gdkpath', 'xboxmode', 'xboxplatform', 'xboxsigningmode', 'xboxpackagename', 'xboxpublisher', 'xboxversion', 'xboxlekbpath', 'xboxassetchunks',
     'emscriptenshellfile', 'emscriptenfullscreenshell', 'emscriptencanvasid', 'emscripteninitialmemory',
     'emscriptenstacksize', 'emscriptenexportname', 'emscriptenextraflags',
