@@ -235,6 +235,15 @@ class RunCommand:
             Colored.PrintError(f"Executable not found: {exe_path}")
             return 1
 
+        # ── WEB : « executer » = SERVIR puis ouvrir le navigateur ────────────
+        # Un module WASM ne se lance pas comme un binaire, et file:// ne suffit
+        # pas : le runtime charge .data et .wasm par XHR, interdits hors HTTP.
+        # Jenga fait donc les deux gestes lui-meme — serveur local + navigateur
+        # par defaut — au lieu d'exiger un script externe par plateforme :
+        # webbrowser/http.server sont le « .bat ou .sh » universel de Python.
+        if getattr(builder, "targetOs", None) == Api.TargetOS.WEB:
+            return RunCommand._RunWeb(exe_path, parsed.args)
+
         # ── Frontiere VISIBLE entre construction et execution ────────────────
         # Tout arrive sur le meme flux : bannieres de build, compilation, puis la
         # sortie du programme. Sans marque, on ne sait plus ou commence ce qui
@@ -378,6 +387,78 @@ class RunCommand:
                       f"  Deployez-le sur une machine {nom_cible} "
                       f"(voir `jenga deploy`), ou construisez pour {nom_hote} "
                       f"avec --platform {nom_hote}."), ""
+
+    @staticmethod
+    def _RunWeb(html_path: Path, args: List[str]) -> int:
+        """Sert le dossier des artefacts sur 127.0.0.1 et ouvre le navigateur.
+
+        - Bind EXPLICITE sur 127.0.0.1 : un serveur IPv6-only rend la page
+          inaccessible aux clients qui resolvent localhost en 127.0.0.1 (vecu :
+          navigateur en ::1, outil headless en IPv4 — l'un charge, l'autre non).
+        - Cache-Control: no-store : pendant le developpement, un .wasm en cache
+          fait « tester » un build precedent sans que rien ne le signale.
+        - COOP/COEP : sans effet aujourd'hui, indispensables le jour ou un build
+          active les pthreads (SharedArrayBuffer exige l'isolation cross-origin).
+        - Les arguments --cle=valeur deviennent des parametres d'URL (?cle=valeur),
+          seul canal d'arguments d'une page : main.cpp les lit via URLSearchParams.
+        - Chaque requete servie est journalisee : c'est la telemetrie qui dit ce
+          que la page a REELLEMENT charge (.js sans .data/.wasm = echec precoce).
+        """
+        import http.server as _hs
+        import webbrowser as _wb
+
+        dossier = str(html_path.parent)
+        largeur = 80
+
+        parametres = []
+        for a in args:
+            morceau = a.lstrip("-")
+            if morceau:
+                parametres.append(morceau)
+        query = "&".join(parametres)
+
+        class _Handler(_hs.SimpleHTTPRequestHandler):
+            def __init__(self, *a, **kw):
+                super().__init__(*a, directory=dossier, **kw)
+
+            def end_headers(self):
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+                self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+                super().end_headers()
+
+            def log_message(self, fmt, *a):
+                Colored.Print("     " + (fmt % a), color="cyan")
+
+        srv = _hs.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        port = srv.server_address[1]
+        url = f"http://127.0.0.1:{port}/{html_path.name}"
+        if query:
+            url += f"?{query}"
+
+        depart = _time.time()
+        Colored.Print("")
+        Colored.Print("━" * largeur, color="brightcyan")
+        Colored.Print(f"  ▶  EXECUTION WEB  —  {html_path.name}", color="brightcyan", bold=True)
+        Colored.Print(f"     {url}", color="cyan")
+        Colored.Print("     Ctrl+C pour arreter le serveur.", color="cyan")
+        Colored.Print("━" * largeur, color="brightcyan")
+        Colored.Print("")
+        # VIDAGE EXPLICITE : sys.stdout est bufferise en BLOC des qu'il n'est
+        # plus un terminal (redirection vers fichier/pipe). serve_forever() ne
+        # rend jamais la main -> sans ce flush, ces lignes restent coincees en
+        # memoire pour toujours et l'URL n'apparait NULLE PART, alors que le
+        # serveur tourne reellement. Vecu : 5 minutes d'attente sur un fichier
+        # de sortie vide pendant que le serveur repondait deja aux requetes.
+        sys.stdout.flush()
+        _wb.open(url)
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            srv.server_close()
+        return RunCommand._Bilan(0, _time.time() - depart, largeur)
 
     @staticmethod
     def _Bilan(code: int, duree: float, largeur: int) -> int:
