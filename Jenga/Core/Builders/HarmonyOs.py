@@ -417,6 +417,14 @@ class HarmonyOsBuilder(Builder):
             flags.append(f"-D{define}")
         flags.append("-D__OHOS__")
 
+        # Nom du module NAPI = nom de la bibliothèque native, celui-là même que
+        # le XComponent réclame via `libraryname`. Sans module enregistré sous ce
+        # nom, le runtime ne charge jamais la .so : l'application s'installe, son
+        # écran de démarrage s'affiche, et le code C++ n'est JAMAIS exécuté — sans
+        # la moindre erreur. Le moteur s'enregistre tout seul avec ce nom
+        # (NkHarmonyOS.h), pour qu'aucune application n'ait à l'écrire.
+        flags.append(f'-DNK_HARMONY_MODULE_NAME={project.targetName or project.name}')
+
         if getattr(project, 'harmonyMinSdk', ''):
             flags.append(f"-D__OHOS_API__={project.harmonyMinSdk}")
 
@@ -1520,34 +1528,68 @@ class HarmonyOsBuilder(Builder):
             Reporter.Info(f"  Created: entry/src/main/ets/entryability/EntryAbility.ets")
 
         # ── 13. entry/src/main/ets/pages/Index.ets ───────────────────────
-        # Format officiel DevEco Studio avec RelativeContainer.
+        # La page HÉBERGE LA SURFACE NATIVE. C'est le seul point par lequel une
+        # application native est chargée : le XComponent réclame `libraryname`,
+        # le runtime charge lib<nom>.so et appelle son module NAPI, lequel lance
+        # nkmain().
+        #
+        # La page « Hello World » du template DevEco, générée ici jusqu'à
+        # présent, ne contenait AUCUN XComponent : la bibliothèque native
+        # n'était jamais chargée. L'application s'installait, affichait son nom
+        # au centre de l'écran, et le code C++ ne s'exécutait pas — sans une
+        # seule ligne d'erreur. Seules les applications fournissant leur propre
+        # page fonctionnaient, ce qui rendait le défaut invisible.
+        lib_name = project.targetName or project.name
         entry_pages = entry_main / "ets" / "pages"
         index_page  = entry_pages / "Index.ets"
         if not index_page.exists():
             entry_pages.mkdir(parents=True, exist_ok=True)
             index_page.write_text(
+                "// Page GÉNÉRÉE par Jenga — héberge la surface de rendu native.\n"
+                "// Pour une page maison, déclarez-la avec harmonyets() : elle a\n"
+                "// priorité, mais elle DOIT porter un XComponent équivalent et\n"
+                "// transmettre le ResourceManager comme ci-dessous, sinon la\n"
+                "// bibliothèque native ne sera pas chargée et l'application ne\n"
+                "// pourra lire AUCUNE de ses ressources.\n"
+                "import resourceManager from '@ohos.resourceManager';\n"
+                "\n"
+                "// Surface typée des exports du moteur : l'ArkTS strict interdit\n"
+                "// any/unknown (arkts-no-any-unknown).\n"
+                "interface NkNativeExports {\n"
+                "  nkSetResMgr?: (mgr: resourceManager.ResourceManager) => void;\n"
+                "}\n"
+                "\n"
                 "@Entry\n"
                 "@Component\n"
                 "struct Index {\n"
-                "  @State message: string = '" + app_name + "';\n\n"
                 "  build() {\n"
-                "    RelativeContainer() {\n"
-                "      Text(this.message)\n"
-                "        .id('HelloWorld')\n"
-                "        .fontSize(50)\n"
-                "        .fontWeight(FontWeight.Bold)\n"
-                "        .alignRules({\n"
-                "          center: { anchor: '__container__', align: VerticalAlign.Center },\n"
-                "          middle: { anchor: '__container__', align: HorizontalAlign.Center }\n"
+                "    Stack() {\n"
+                "      XComponent({\n"
+                "        id: 'nk_surface',\n"
+                "        type: XComponentType.SURFACE,\n"
+                "        libraryname: '" + lib_name + "'\n"
+                "      })\n"
+                "        .onLoad((context) => {\n"
+                "          // Les fichiers empaquetés dans resources/rawfile ne sont\n"
+                "          // PAS visibles par la libc : le ResourceManager est le\n"
+                "          // seul moyen de les lire. Sans cette ligne, textures,\n"
+                "          // sons et polices sont introuvables — l'application se\n"
+                "          // dessine en noir sans la moindre erreur.\n"
+                "          const nk = context as NkNativeExports;\n"
+                "          if (nk.nkSetResMgr !== undefined) {\n"
+                "            nk.nkSetResMgr(getContext(this).resourceManager);\n"
+                "          }\n"
                 "        })\n"
+                "        .width('100%')\n"
+                "        .height('100%')\n"
                 "    }\n"
-                "    .height('100%')\n"
                 "    .width('100%')\n"
+                "    .height('100%')\n"
                 "  }\n"
                 "}\n",
                 encoding="utf-8"
             )
-            Reporter.Info(f"  Created: entry/src/main/ets/pages/Index.ets")
+            Reporter.Info(f"  Created: entry/src/main/ets/pages/Index.ets (XComponent -> lib{lib_name}.so)")
 
         # Les icones etaient preparees UNIQUEMENT dans _CustomizeHAPTemplate,
         # donc jamais sans template DevEco : hvigor s'arretait alors sur
