@@ -501,6 +501,15 @@ class HarmonyOsBuilder(Builder):
           3. Convention auto-detection — NkHarmonyBridge.ts dans harmony/ets/.
              Copié automatiquement si présent, même sans déclaration.
 
+        Les sources 1 et 2 parcourent le projet ET TOUTE SA CHAÎNE DE
+        DÉPENDANCES. C'est un usage requirement, au même titre que les
+        bibliothèques système : une bibliothèque comme NKWindow apporte le pont
+        ArkTS sans lequel son propre code natif ne reçoit RIEN du système —
+        insets de zone sûre, clavier virtuel, orientation. Ne regarder que le
+        projet applicatif laissait ce pont sur le bord de la route : le HAP se
+        construisait, l'application s'affichait, et GetSafeAreaInsets()
+        retournait des zéros pour toujours — sans le moindre message.
+
         Mapping de destination (même logique que .mm → entryability/pages) :
           *Ability.ts/.ets  → entry/src/main/ets/entryability/
           *page*.*          → entry/src/main/ets/pages/
@@ -515,49 +524,73 @@ class HarmonyOsBuilder(Builder):
         dest_ets = build_dir / "entry" / "src" / "main" / "ets"
         copied_any = False
 
+        # Le projet d'abord, puis ses dépendances : à nom de fichier égal, ce
+        # que l'application déclare doit primer sur ce qu'une bibliothèque
+        # apporte (une page Index.ets maison ne doit pas être écrasée par celle
+        # d'un module). L'ordre de la copie suffit à obtenir ce résultat.
+        chaine = [project]
+        for nom in self._TransitiveDeps(project):
+            dep = self.workspace.projects.get(nom)
+            if dep is not None:
+                chaine.append(dep)
+
+        deja_copies = set()
+
         # ── Source 1 : fichiers déclarés dans files() ─────────────────────────
-        # Collecter tous les fichiers .ts/.ets résolus depuis files() du projet.
+        # Collecter tous les fichiers .ts/.ets résolus depuis files().
         # Le Builder de base les a déjà résolus (globs, filtres, etc.) mais
         # les a ignorés car non compilables C++. On les récupère ici.
-        arkts_from_files = []
-        all_files = self._ResolveAllProjectFiles(project)
-        for f in all_files:
-            p = Path(f)
-            if p.suffix.lower() in ARKTS_EXTENSIONS and p.exists():
-                arkts_from_files.append(p)
+        for proj in chaine:
+            arkts_from_files = []
+            for f in self._ResolveAllProjectFiles(proj):
+                p = Path(f)
+                if p.suffix.lower() in ARKTS_EXTENSIONS and p.exists():
+                    arkts_from_files.append(p)
 
-        for src_file in arkts_from_files:
-            dest = self._ArkTSDestination(src_file.name, dest_ets)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_file, dest)
-            Reporter.Info(f"  ArkTS [files()]: {src_file.name} -> ets/{dest.parent.name}/")
-            copied_any = True
+            for src_file in arkts_from_files:
+                dest = self._ArkTSDestination(src_file.name, dest_ets)
+                if dest in deja_copies:
+                    continue
+                deja_copies.add(dest)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, dest)
+                origine = "" if proj is project else f" (via {proj.name})"
+                Reporter.Info(f"  ArkTS [files()]: {src_file.name} -> ets/{dest.parent.name}/{origine}")
+                copied_any = True
 
         # ── Source 2 : harmonyets() DSL explicite ─────────────────────────────
-        ets_dirs = getattr(project, 'harmonyEtsDirs', []) or []
-        for src_pattern in ets_dirs:
-            src_path = Path(self.ResolveProjectPath(project, src_pattern))
-            if not src_path.exists():
-                Reporter.Warning(f"[HarmonyOS] harmonyets: introuvable : {src_path}")
-                continue
-            if src_path.is_dir():
-                for f in src_path.rglob("*"):
-                    if not f.is_file() or f.suffix.lower() not in ARKTS_EXTENSIONS:
-                        continue
-                    rel  = f.relative_to(src_path)
-                    dest = dest_ets / rel
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(f, dest)
-                    Reporter.Info(f"  ArkTS [harmonyets()]: {rel}")
-                    copied_any = True
-            else:
-                if src_path.suffix.lower() not in ARKTS_EXTENSIONS:
+        for proj in chaine:
+            ets_dirs = getattr(proj, 'harmonyEtsDirs', []) or []
+            origine = "" if proj is project else f" (via {proj.name})"
+            for src_pattern in ets_dirs:
+                src_path = Path(self.ResolveProjectPath(proj, src_pattern))
+                if not src_path.exists():
+                    Reporter.Warning(f"[HarmonyOS] harmonyets: introuvable : {src_path}")
                     continue
-                dest = self._ArkTSDestination(src_path.name, dest_ets)
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src_path, dest)
-                Reporter.Info(f"  ArkTS [harmonyets()]: {src_path.name}")
-                copied_any = True
+                if src_path.is_dir():
+                    for f in src_path.rglob("*"):
+                        if not f.is_file() or f.suffix.lower() not in ARKTS_EXTENSIONS:
+                            continue
+                        rel  = f.relative_to(src_path)
+                        dest = dest_ets / rel
+                        if dest in deja_copies:
+                            continue
+                        deja_copies.add(dest)
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(f, dest)
+                        Reporter.Info(f"  ArkTS [harmonyets()]: {rel}{origine}")
+                        copied_any = True
+                else:
+                    if src_path.suffix.lower() not in ARKTS_EXTENSIONS:
+                        continue
+                    dest = self._ArkTSDestination(src_path.name, dest_ets)
+                    if dest in deja_copies:
+                        continue
+                    deja_copies.add(dest)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_path, dest)
+                    Reporter.Info(f"  ArkTS [harmonyets()]: {src_path.name}{origine}")
+                    copied_any = True
 
         # ── Source 3 : convention auto-detection ──────────────────────────────
         if not copied_any:
@@ -567,7 +600,7 @@ class HarmonyOsBuilder(Builder):
         # ── Patch EntryAbility si NkHarmonyBridge a été copié ─────────────────
         bridge_dest = dest_ets / "NkHarmonyBridge.ts"
         if bridge_dest.exists():
-            self._PatchEntryAbilityForBridge(build_dir)
+            self._PatchEntryAbilityForBridge(build_dir, project)
 
     def _ArkTSDestination(self, filename: str, dest_ets: Path) -> Path:
         """
@@ -640,10 +673,10 @@ class HarmonyOsBuilder(Builder):
                 shutil.copy2(cand, dest_ets / "NkHarmonyBridge.ts")
                 Reporter.Info(f"  ArkTS: NkHarmonyBridge.ts (auto-detected)")
                 # Patcher EntryAbility.ets pour importer le bridge
-                self._PatchEntryAbilityForBridge(build_dir)
+                self._PatchEntryAbilityForBridge(build_dir, project)
                 return
 
-    def _PatchEntryAbilityForBridge(self, build_dir: Path):
+    def _PatchEntryAbilityForBridge(self, build_dir: Path, project: Project = None):
         """
         Patche EntryAbility.ets pour importer et initialiser NkHarmonyBridge.
 
@@ -663,8 +696,13 @@ class HarmonyOsBuilder(Builder):
         if "NkHarmonyBridge" in content:
             return
 
-        # Injecter l'import en tête de fichier
-        import_line = ("import { NkHarmonyBridge } from '../NkHarmonyBridge';\n")
+        # Le pont a besoin du module natif, et lui seul ne peut pas l'importer :
+        # le nom de la bibliothèque dépend de l'application (librenderdemo.so,
+        # libmou.so...). Jenga le connaît — c'est le même que le `libraryname`
+        # du XComponent — donc c'est ici qu'on fait le raccord.
+        lib_name = project.name if project is not None else "entry"
+        import_line = ("import { NkHarmonyBridge } from '../NkHarmonyBridge';\n"
+                       f"import nkNative from 'lib{lib_name}.so';\n")
 
         if "import " in content:
             # Ajouter après le dernier import existant
@@ -683,7 +721,7 @@ class HarmonyOsBuilder(Builder):
             content = content.replace(
                 "onWindowStageCreate(windowStage: window.WindowStage): void {",
                 "onWindowStageCreate(windowStage: window.WindowStage): void {\n"
-                "    NkHarmonyBridge.init(windowStage, this.context);"
+                "    NkHarmonyBridge.init(windowStage, this.context, nkNative);"
             )
 
         # Injecter destroy dans onWindowStageDestroy
