@@ -450,6 +450,10 @@ class Project:
     harmonyCertFile: str = ""
     harmonyProfile: str = ""
     harmonyAppIcon: str = ""
+    # Orientation de l'Ability (cf. harmonyorientation). Vide = aucune cle ecrite,
+    # le systeme applique son defaut. Declare ICI et pas seulement pose par le DSL :
+    # les champs absents de la dataclass ne survivent pas au cache de workspace.
+    harmonyOrientation: str = ""
     harmonyKeyPwd : str = ""
     harmonyKeyAlias : str = ""
     harmonyKeystore : str = ""
@@ -1967,6 +1971,31 @@ def androidnativeactivity(enable: bool = True) -> None:
 def androidallowrotation(enable: bool = True) -> None:
     if _currentProject:
         _currentProject.androidAllowRotation = enable
+
+def harmonyorientation(mode: str = "auto_rotation") -> None:
+    """Orientation de l'ecran pour l'Ability HarmonyOS.
+
+    Valeurs reconnues par le systeme (ecrites telles quelles dans le
+    module.json5, cle `orientation` de l'ability) :
+
+      "portrait"                  verrouille en portrait
+      "landscape"                 verrouille en paysage
+      "auto_rotation"             suit le capteur, les quatre sens
+      "auto_rotation_landscape"   suit le capteur, paysage uniquement
+      "auto_rotation_portrait"    suit le capteur, portrait uniquement
+      "follow_recent"             reprend l'orientation precedente
+      "unspecified"               laisse le systeme decider (defaut HarmonyOS)
+
+    Sans appel, l'ability n'ecrit aucune cle et le systeme applique son propre
+    defaut — c'est-a-dire, sur telephone, du portrait. Une demo 3D ou un jeu
+    veut generalement "landscape" ou "auto_rotation_landscape".
+
+    Equivalent HarmonyOS d'androidallowrotation() ; les deux coexistent parce
+    que les deux systemes n'offrent pas les memes modes.
+    """
+    if _currentProject:
+        _currentProject.harmonyOrientation = mode
+
 
 def androidlargeheap(enable: bool = True) -> None:
     """Active android:largeHeap dans le manifeste : demande un heap Java/ART

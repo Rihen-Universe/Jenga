@@ -841,6 +841,55 @@ class HarmonyOsBuilder(Builder):
                 shutil.copy2(asset_path, rawfile_dir / asset_path.name)
                 Reporter.Info(f"  Asset copied: {asset_path.name} -> rawfile/")
 
+    @staticmethod
+    def _MakeSolidPng(size: int, rgb) -> bytes:
+        """Fabrique un PNG uni, sans aucune dependance tierce.
+
+        Pillow n'est qu'une dependance OPTIONNELLE de Jenga : l'icone par defaut
+        ne peut pas en dependre, sans quoi une machine sans Pillow ET sans
+        DevEco Studio ne pourrait construire aucun HAP. zlib et struct suffisent
+        — un PNG est un en-tete, des lignes filtrees compressees, et un CRC.
+        """
+        import struct
+        import zlib
+
+        def chunk(tag: bytes, data: bytes) -> bytes:
+            return (struct.pack(">I", len(data)) + tag + data +
+                    struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+        r, g, b = rgb
+        # Chaque ligne est precedee de son octet de filtre (0 = aucun).
+        ligne = b"\x00" + bytes([r, g, b]) * size
+        brut = ligne * size
+        return (b"\x89PNG\r\n\x1a\n" +
+                chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)) +
+                chunk(b"IDAT", zlib.compress(brut, 9)) +
+                chunk(b"IEND", b""))
+
+    def _WriteDefaultHAPIcons(self, build_dir: Path):
+        """Ecrit les trois icones que HarmonyOS exige, si elles manquent.
+
+        Volontairement UNIES et sobres (bleu petrole de la charte) : c'est un
+        repli technique, pas une identite visuelle. Une application qui tient a
+        son icone la declare avec appicon() ou harmonyappicon().
+        """
+        cibles = [
+            (build_dir / "AppScope" / "resources" / "base" / "media", ["app_icon.png"]),
+            (build_dir / "entry" / "src" / "main" / "resources" / "base" / "media",
+             ["layered_image.png", "startIcon.png", "background.png", "foreground.png"]),
+        ]
+        png = self._MakeSolidPng(192, (10, 85, 95))
+        ecrites = 0
+        for dossier, noms in cibles:
+            dossier.mkdir(parents=True, exist_ok=True)
+            for nom in noms:
+                f = dossier / nom
+                if not f.exists():
+                    f.write_bytes(png)
+                    ecrites += 1
+        if ecrites:
+            Reporter.Info(f"  Icones par defaut generees ({ecrites} fichier(s), 192x192)")
+
     def _PrepareHAPIcons(self, project: Project, build_dir: Path):
         """
         Copie ou génère les icônes de l'application dans la structure HAP.
@@ -865,7 +914,13 @@ class HarmonyOsBuilder(Builder):
             ''
         )
         if not icon_src:
-            return  # Pas d'icône configurée — conserver les placeholders
+            # Aucune icone declaree : on en ECRIT une. Compter sur les
+            # placeholders du template DevEco rendait la construction
+            # impossible sans cet IDE — hvigor s'arrete sur
+            #     Error: The resource reference '$media:app_icon' is not defined
+            # et le message ne dit pas que la cause est un template absent.
+            self._WriteDefaultHAPIcons(build_dir)
+            return
 
         icon_path = Path(self.ResolveProjectPath(project, icon_src))
         if not icon_path.exists():
@@ -994,7 +1049,20 @@ class HarmonyOsBuilder(Builder):
         # C'est la méthode la plus fiable — le template est toujours à jour
         # avec la version de hvigor installée sur la machine.
         # On ne copie que si les fichiers de base n'existent pas encore.
-        deveco_template = self._FindDevEcoTemplate()
+        # ── PRIORITE A LA GENERATION MAISON ───────────────────────────────
+        # Regle du projet : tout ce qui est necessaire a une application doit
+        # pouvoir sortir de Jenga SEUL, sans dependre d'un IDE tiers installe
+        # sur la machine. Copier le template de DevEco Studio contredisait ce
+        # principe et importait au passage ses artefacts : le paquet installe
+        # declarait par exemple un `EntryFormAbility` (widget d'ecran d'accueil)
+        # que le projet ne demande nulle part.
+        #
+        # Le template reste un REPLI, utilisable quand la generation maison
+        # echoue ou quand une version de hvigor introduit un format qu'on ne
+        # produit pas encore. NKJENGA_HARMONY_TEMPLATE=1 le redemande
+        # explicitement, pour comparer les deux en cas de doute.
+        veut_template = os.environ.get("NKJENGA_HARMONY_TEMPLATE", "") == "1"
+        deveco_template = self._FindDevEcoTemplate() if veut_template else None
         if deveco_template and not (build_dir / "hvigor" / "hvigor-config.json5").exists():
             Reporter.Info(f"  Using DevEco Studio template from {deveco_template}")
             try:
@@ -1279,6 +1347,11 @@ class HarmonyOsBuilder(Builder):
                     '    ],\n'
                 )
 
+            # Orientation : ecrite UNIQUEMENT si le projet en demande une. Sans
+            # cle, le systeme applique son defaut (portrait sur telephone) — ce
+            # qui surprend pour une demo 3D, d'ou harmonyorientation().
+            _orient = str(getattr(project, "harmonyOrientation", "") or "")
+            _orientation_json = ('        "orientation": "%s",\n' % _orient) if _orient else ""
             module_json.write_text(
                 '{\n'
                 '  "module": {\n'
@@ -1304,6 +1377,7 @@ class HarmonyOsBuilder(Builder):
                 '        "label": "$string:EntryAbility_label",\n'
                 '        "startWindowIcon": "$media:startIcon",\n'
                 '        "startWindowBackground": "$color:start_window_background",\n'
+                + _orientation_json +
                 '        "exported": true,\n'
                 '        "skills": [\n'
                 '          {\n'
@@ -1436,6 +1510,12 @@ class HarmonyOsBuilder(Builder):
                 encoding="utf-8"
             )
             Reporter.Info(f"  Created: entry/src/main/ets/pages/Index.ets")
+
+        # Les icones etaient preparees UNIQUEMENT dans _CustomizeHAPTemplate,
+        # donc jamais sans template DevEco : hvigor s'arretait alors sur
+        # « The resource reference '$media:app_icon' is not defined ». La
+        # generation maison doit produire une application COMPLETE.
+        self._PrepareHAPIcons(project, build_dir)
 
         Reporter.Success(f"[HarmonyOS] HAP project structure ready in {build_dir}")
         return True
