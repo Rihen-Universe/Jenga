@@ -96,7 +96,9 @@ jenga package --platform harmonyos --type hap --project MyApp --output ./dist
 | `harmonyets(["ets/"])` | Répertoires de sources ArkTS/ETS ✅ **nouveau** |
 | `harmonyresources([...])` | Dossiers de ressources (string.json, color.json, media…) |
 | `harmonyassets([...])` | Fichiers bruts → `resources/rawfile/` |
-| `harmonyappicon("icon.png")` | Icône applicative |
+| `harmonyappicon("icon.png")` | Icône applicative (sinon Jenga en génère une unie) |
+| `harmonyabis(["arm64-v8a", "x86_64"])` | ABIs embarquées dans un HAP unique ✅ **nouveau** |
+| `harmonyorientation("landscape")` | Orientation de l'écran ✅ **nouveau** |
 | `harmonysign(True)` | Active la signature du HAP |
 | `harmonycertfile`, `harmonyprofile`, `harmonykeystore`, `harmonykeyalias`, `harmonykeypwd` | Paramètres de signature |
 
@@ -157,6 +159,18 @@ with project("MyApp"):
 
 ## 6. Ce que génère Jenga
 
+> **Jenga génère le projet HAP en entier**, sans dépendre de DevEco Studio. La
+> structure était auparavant copiée depuis le template de l'IDE quand il était
+> présent, ce qui importait ses artefacts — le paquet installé déclarait par
+> exemple un `EntryFormAbility` que le projet ne demandait nulle part.
+>
+> Le template reste un repli, réactivable par `NKJENGA_HARMONY_TEMPLATE=1`, si
+> une version de hvigor introduit un format que Jenga ne produit pas encore.
+>
+> Conséquence pratique : **une machine avec les seuls Command Line Tools**
+> (sans DevEco Studio) construit un HAP complet. Les icônes manquantes sont
+> générées (PNG uni 192×192, sans dépendance à Pillow).
+
 ```
 Build/Bin/Release-HarmonyOS/MyApp/
 ├── libMyApp.so                       ← bibliothèque native compilée
@@ -175,6 +189,59 @@ Build/Bin/Release-HarmonyOS/MyApp/
 ```
 
 Le `.hap` final est assemblé via `hvigorw assembleHap` et copié dans `./dist`.
+
+---
+
+## 6bis. Orientation de l'écran
+
+```python
+harmonyorientation("landscape")   # verrouillé en paysage
+```
+
+| Valeur | Effet |
+|--------|-------|
+| `portrait` | verrouillé en portrait |
+| `landscape` | verrouillé en paysage |
+| `auto_rotation` | suit le capteur, les quatre sens |
+| `auto_rotation_landscape` | suit le capteur, paysage uniquement |
+| `auto_rotation_portrait` | suit le capteur, portrait uniquement |
+| `follow_recent` | reprend l'orientation précédente |
+| `unspecified` | laisse le système décider |
+
+**Sans appel, aucune clé n'est écrite** et le système applique son défaut — du
+portrait sur téléphone. Une démo 3D ou un jeu veut généralement `landscape`.
+
+C'est l'équivalent HarmonyOS d'`androidallowrotation()` ; les deux coexistent
+parce que les deux systèmes n'offrent pas les mêmes modes.
+
+---
+
+## 6ter. HAP multi-ABI — indispensable pour les émulateurs
+
+```python
+harmonyabis(["arm64-v8a", "x86_64"])
+```
+
+Les **émulateurs HarmonyOS-NEXT sur PC tournent en x86_64**
+(`const.product.cpu.abilist`), alors que les appareils réels sont en arm64. Un
+HAP mono-ABI ne peut donc pas servir aux deux, et l'échec côté émulateur est
+particulièrement muet :
+
+```
+error: failed to install bundle. code:9568347
+error: install parse native so failed.
+```
+
+Ce message ne mentionne **nulle part** l'architecture. Déclarer les deux ABIs
+produit un HAP unique qui s'installe partout.
+
+> **Piège vérifié** — `libc++_shared.so` doit être **dans le HAP**. Comme sur
+> Android, le système ne fournit pas la STL du NDK : aucune `libc++_shared.so`
+> dans `/system/lib64`. Jenga l'embarque désormais automatiquement, par ABI.
+> Sans elle, `dlopen` échoue **en silence** au chargement du XComponent :
+> l'ArkTS reçoit `undefined` et plante sur
+> `TypeError: Cannot read property <export> of undefined` — un symptôme qui ne
+> désigne jamais sa cause, d'autant que l'**installation, elle, réussit**.
 
 ---
 
@@ -228,7 +295,7 @@ sources, automatically generating the ArkTS project structure expected by
 | Tool | Detail | Environment variable |
 |------|--------|----------------------|
 | OpenHarmony/HarmonyOS SDK | Native NDK (LLVM) + `hvigorw` | `OHOS_SDK`, `HARMONY_OS_SDK` or `HARMONY_SDK` |
-| DevEco Studio (optional) | Official template + `hvigor` | auto-detected |
+| DevEco Studio (optional) | Fallback template only — **not used by default** | `NKJENGA_HARMONY_TEMPLATE=1` |
 | Node.js | Required by `hvigorw` to assemble the `.hap` | on PATH |
 
 ```bash
@@ -277,6 +344,7 @@ jenga package --platform harmonyos --type hap --project MyApp --output ./dist
 `harmonysdk` · `harmonyminsdk` · `harmonytargetapi` · `harmonybundlename` ·
 `harmonyversioncode` · `harmonyversionname` · `harmonypermissions` (✅ new) ·
 `harmonyets` (✅ new) · `harmonyresources` · `harmonyassets` · `harmonyappicon` ·
+`harmonyabis` (✅ new) · `harmonyorientation` (✅ new) ·
 `harmonysign` · `harmonycertfile` · `harmonyprofile` · `harmonykeystore` ·
 `harmonykeyalias` · `harmonykeypwd`.
 
@@ -301,6 +369,19 @@ The cross-platform network DSL is shared — see
 
 ### 6. What Jenga generates
 
+> **Jenga generates the whole HAP project**, with no dependency on DevEco
+> Studio. The structure used to be copied from the IDE's template when present,
+> which dragged in its artefacts — the installed bundle declared an
+> `EntryFormAbility` the project never asked for.
+>
+> The template remains a fallback, re-enabled with
+> `NKJENGA_HARMONY_TEMPLATE=1`, should a hvigor release introduce a format Jenga
+> does not produce yet.
+>
+> In practice: **a machine with only the Command Line Tools** (no DevEco Studio)
+> builds a complete HAP. Missing icons are generated (flat 192×192 PNG, with no
+> dependency on Pillow).
+
 ```
 Build/Bin/Release-HarmonyOS/MyApp/
 ├── libMyApp.so
@@ -310,6 +391,58 @@ Build/Bin/Release-HarmonyOS/MyApp/
         ├── ets/entryability/EntryAbility.ets
         └── libs/arm64-v8a/libMyApp.so
 ```
+
+### 6bis. Screen orientation
+
+```python
+harmonyorientation("landscape")   # locked to landscape
+```
+
+| Value | Effect |
+|-------|--------|
+| `portrait` | locked to portrait |
+| `landscape` | locked to landscape |
+| `auto_rotation` | follows the sensor, all four ways |
+| `auto_rotation_landscape` | follows the sensor, landscape only |
+| `auto_rotation_portrait` | follows the sensor, portrait only |
+| `follow_recent` | reuses the previous orientation |
+| `unspecified` | lets the system decide |
+
+**Without a call, no key is written** and the system applies its own default —
+portrait on phones. A 3D demo or a game usually wants `landscape`.
+
+This is the HarmonyOS counterpart of `androidallowrotation()`; both exist
+because the two systems do not offer the same modes.
+
+---
+
+### 6ter. Multi-ABI HAP — required for emulators
+
+```python
+harmonyabis(["arm64-v8a", "x86_64"])
+```
+
+**HarmonyOS-NEXT emulators on PC run x86_64** (`const.product.cpu.abilist`),
+while real devices are arm64. A single-ABI HAP cannot serve both, and the
+emulator-side failure is remarkably silent:
+
+```
+error: failed to install bundle. code:9568347
+error: install parse native so failed.
+```
+
+That message never mentions the architecture. Declaring both ABIs produces one
+HAP that installs everywhere.
+
+> **Verified pitfall** — `libc++_shared.so` must be **inside the HAP**. As on
+> Android, the system does not ship the NDK's STL: there is no
+> `libc++_shared.so` under `/system/lib64`. Jenga now embeds it automatically,
+> per ABI. Without it `dlopen` fails **silently** when the XComponent loads:
+> ArkTS receives `undefined` and throws
+> `TypeError: Cannot read property <export> of undefined` — a symptom that
+> never points at its cause, all the more so since **installation succeeds**.
+
+---
 
 ### 7. Signing the HAP
 
