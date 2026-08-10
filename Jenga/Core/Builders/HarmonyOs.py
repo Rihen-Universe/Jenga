@@ -1214,21 +1214,32 @@ class HarmonyOsBuilder(Builder):
         # Format minimal sans externalNativeOptions — le .so est fourni
         # directement dans entry/libs/ sans passer par CMake.
         entry_build_profile = entry_dir / "build-profile.json5"
-        if not entry_build_profile.exists():
-            entry_build_profile.write_text(
-                '{\n'
-                '  "apiType": "stageMode",\n'
-                '  "buildOption": {\n'
-                '  },\n'
-                '  "targets": [\n'
-                '    {\n'
-                '      "name": "default"\n'
-                '    }\n'
-                '  ]\n'
-                '}\n',
-                encoding="utf-8"
-            )
-            Reporter.Info(f"  Created: entry/build-profile.json5")
+        # ECRIT SYSTEMATIQUEMENT : quand la structure vient du template DevEco,
+        # le fichier existe deja avec des options qui ne nous appartiennent pas.
+        # Jenga reste maitre de ce qu'il genere (regle du projet : tout doit
+        # pouvoir sortir de Jenga seul, sans heritage d'un IDE tiers).
+        #
+        # Forme MINIMALE volontairement. Un bloc nativeLib/abiFilters a ete
+        # essaye ici et REJETE par hvigor (00303038 « Schema validate failed »).
+        # Il etait de toute facon inutile : les .so precompilees deposees dans
+        # entry/libs/<abi>/ sont empaquetees puis installees pour la bonne ABI
+        # sans aucune declaration — verifie, la lib x86_64 arrivait bien sur
+        # l'emulateur. Le vrai probleme de chargement etait l'absence de
+        # libc++_shared.so dans le HAP (cf. BuildHAP).
+        entry_build_profile.write_text(
+            '{\n'
+            '  "apiType": "stageMode",\n'
+            '  "buildOption": {\n'
+            '  },\n'
+            '  "targets": [\n'
+            '    {\n'
+            '      "name": "default"\n'
+            '    }\n'
+            '  ]\n'
+            '}\n',
+            encoding="utf-8"
+        )
+        Reporter.Info("  Created: entry/build-profile.json5")
 
         # ── 10. entry/src/main/module.json5 ──────────────────────────────
         # Format officiel avec skills (intent-filter pour l'écran d'accueil).
@@ -1514,7 +1525,18 @@ class HarmonyOsBuilder(Builder):
     # Packaging HAP
     # -----------------------------------------------------------------------
 
-    def BuildHAP(self, project: Project, native_libs: List[str]) -> bool:
+    # Nom du dossier ABI attendu par hvigor dans entry/libs/. Une seule source
+    # de verite : la table etait auparavant codee en dur sur "arm64-v8a".
+    _ABI_DIRS = {
+        TargetArch.ARM:    "armeabi-v7a",
+        TargetArch.ARM64:  "arm64-v8a",
+        TargetArch.X86_64: "x86_64",
+    }
+
+    def _AbiDirName(self, arch=None) -> str:
+        return self._ABI_DIRS.get(arch or self.targetArch, "arm64-v8a")
+
+    def BuildHAP(self, project: Project, native_libs) -> bool:
         """
         Assemble un .hap HarmonyOS à partir des .so compilés.
 
@@ -1548,15 +1570,65 @@ class HarmonyOsBuilder(Builder):
         # Ils vont dans entry/src/main/ets/ et sont intégrés au HAP.
         self._CopyHarmonyArkTSFiles(project, build_dir)
 
-        # Étape 3 : copier les .so dans entry/libs/arm64-v8a/
-        libs_dir = build_dir / "entry" / "libs" / "arm64-v8a"
-        libs_dir.mkdir(parents=True, exist_ok=True)
+        # Étape 3 : copier les .so dans entry/libs/<ABI>/, une entree par ABI
+        #
+        # Le dossier etait code en dur sur "arm64-v8a". Les emulateurs
+        # HarmonyOS-NEXT sur PC tournent pourtant en x86_64 (comme les AVD
+        # Android x86_64 sur hote x86) : un HAP dont les .so sont ranges sous
+        # arm64-v8a y est refuse a l'installation avec
+        #
+        #     error: install parse native so failed. code:9568347
+        #
+        # message qui ne mentionne nulle part l'architecture. On derive donc le
+        # dossier de l'architecture REELLEMENT compilee.
+        # `native_libs` accepte les DEUX formes : une liste (une seule ABI, celle
+        # compilee) ou un dictionnaire {abi: [libs]} produit par le chemin
+        # multi-ABI. La seconde evite de dupliquer toute cette fonction.
+        if isinstance(native_libs, dict):
+            libs_par_abi = native_libs
+        else:
+            libs_par_abi = {self._AbiDirName(): list(native_libs)}
 
-        for lib in native_libs:
-            lib_path = Path(lib)
-            dest     = libs_dir / lib_path.name
-            shutil.copy2(lib_path, dest)
-            Reporter.Info(f"  Copied: {lib_path.name} -> entry/libs/arm64-v8a/")
+        # Triple du NDK par dossier ABI — pour retrouver la STL a embarquer.
+        # ATTENTION : le dossier de lib 32 bits du NDK s'appelle arm-linux-ohos,
+        # PAS armv7a-linux-ohos (qui n'est que le triple de COMPILATION).
+        stl_triples = {
+            "armeabi-v7a": "arm-linux-ohos",
+            "arm64-v8a":   "aarch64-linux-ohos",
+            "x86_64":      "x86_64-linux-ohos",
+        }
+        for abi_dir, libs in libs_par_abi.items():
+            libs_dir = build_dir / "entry" / "libs" / abi_dir
+            libs_dir.mkdir(parents=True, exist_ok=True)
+            for lib in libs:
+                lib_path = Path(lib)
+                shutil.copy2(lib_path, libs_dir / lib_path.name)
+                Reporter.Info(f"  Copied: {lib_path.name} -> entry/libs/{abi_dir}/")
+
+            # ── libc++_shared.so : OBLIGATOIRE dans le HAP ─────────────────────
+            # Meme regle qu'Android : le systeme ne fournit PAS la STL du NDK.
+            # Verifie sur l'emulateur HarmonyOS-NEXT : /system/lib64 n'a aucune
+            # libc++_shared.so, alors que la .so du projet la declare en NEEDED.
+            # Sans elle, dlopen echoue en silence au chargement du XComponent :
+            # l'ArkTS recoit `undefined` en guise d'exports et plante sur
+            #     TypeError: Cannot read property nkSetResMgr of undefined
+            # — un symptome qui ne designe jamais la vraie cause. Le chemin
+            # Android (_BuildUniversalAPK) faisait deja cet embarquement ; celui
+            # de HarmonyOS ne l'avait jamais fait, et ne pouvait pas etre pris en
+            # defaut tant que l'installation arm64-seule echouait avant meme
+            # d'executer quoi que ce soit.
+            deja = any(Path(l).name == "libc++_shared.so" for l in libs)
+            triple = stl_triples.get(abi_dir)
+            if not deja and triple and self.ndk_path:
+                stl = self.ndk_path / "llvm" / "lib" / triple / "libc++_shared.so"
+                if stl.exists():
+                    shutil.copy2(stl, libs_dir / stl.name)
+                    Reporter.Info(f"  Copied: libc++_shared.so ({triple}) -> entry/libs/{abi_dir}/")
+                else:
+                    Reporter.Warning(
+                        f"libc++_shared.so introuvable pour {abi_dir} ({stl}) — "
+                        "le HAP risque d'echouer au chargement de la .so"
+                    )
 
         # Étape 4 : trouver hvigorw
         cli_tools = self._ResolveCliTools()
@@ -1701,6 +1773,131 @@ class HarmonyOsBuilder(Builder):
     # Build principal
     # -----------------------------------------------------------------------
 
+    def _BuildUniversalHAP(self, project: Project, target_abis: List[str]) -> bool:
+        """Compile le projet pour CHAQUE ABI demandee et assemble un HAP unique.
+
+        Transposition de `AndroidBuilder._BuildUniversalAPK` : meme mecanisme de
+        redirection par ABI des dossiers de sortie (`_filteredTargetDir` /
+        `_filteredObjDir`), sans quoi les archives .a et les .so d'architectures
+        differentes se melangeraient dans les memes dossiers — et le lien
+        prendrait silencieusement l'objet de la mauvaise ABI.
+
+        Raison d'etre : les emulateurs HarmonyOS-NEXT sur PC tournent en x86_64
+        (verifie : `const.product.cpu.abilist` = x86_64), alors que les appareils
+        reels sont en arm64. Un HAP mono-ABI ne peut donc pas servir aux deux, et
+        l'echec cote emulateur est particulierement muet :
+
+            error: install parse native so failed. code:9568347
+        """
+        Reporter.Info(
+            f"Building universal HAP for {project.name} "
+            f"({len(target_abis)} ABIs: {', '.join(target_abis)})"
+        )
+
+        abi_to_arch = {
+            "armeabi-v7a": TargetArch.ARM,
+            "arm64-v8a":   TargetArch.ARM64,
+            "x86_64":      TargetArch.X86_64,
+        }
+
+        # Le cache de workspace ne suit pas les changements de plateforme/arch :
+        # on s'appuie sur les horodatages (meme choix que le chemin Android).
+        original_cache_status = getattr(self.workspace, "_cache_status", None)
+        self.workspace._cache_status = None
+        original_arch = self.targetArch
+        original_platform = self.platform
+        sentinel = object()
+        all_native_libs = {}
+
+        try:
+            for abi in target_abis:
+                if abi not in abi_to_arch:
+                    Reporter.Warning(f"ABI inconnue : {abi}, ignoree")
+                    continue
+                Reporter.Info(f"  -> Compilation pour {abi}...")
+
+                self.targetArch = abi_to_arch[abi]
+                self.platform = f"harmonyos-{abi}"
+                self._PrepareToolchain()
+
+                abi_tag = f"{self.config}-HarmonyOS-{abi}"
+                abi_filter = f"platform:{self.platform}"
+                restore = {}
+                for proj_name, proj_ctx in self.workspace.projects.items():
+                    if proj_name.startswith("__"):
+                        continue
+                    if proj_ctx.kind in (ProjectKind.STATIC_LIB, ProjectKind.SHARED_LIB):
+                        forced_target = Path(self.workspace.location) / "Build" / "Lib" / abi_tag / proj_ctx.name
+                    elif proj_ctx.kind == ProjectKind.TEST_SUITE:
+                        forced_target = Path(self.workspace.location) / "Build" / "Tests" / abi_tag
+                    else:
+                        forced_target = Path(self.workspace.location) / "Build" / "Bin" / abi_tag / proj_ctx.name
+                    forced_obj = Path(self.workspace.location) / "Build" / "Obj" / abi_tag / proj_ctx.name
+
+                    restore[proj_name] = {
+                        "targetDir": proj_ctx.targetDir,
+                        "objDir": proj_ctx.objDir,
+                        "appliedContext": getattr(proj_ctx, "_jenga_applied_filter_context", None),
+                        "filteredTargetDir": proj_ctx._filteredTargetDir.get(abi_filter, sentinel),
+                        "filteredObjDir": proj_ctx._filteredObjDir.get(abi_filter, sentinel),
+                    }
+                    proj_ctx._filteredTargetDir[abi_filter] = str(forced_target.resolve())
+                    proj_ctx._filteredObjDir[abi_filter] = str(forced_obj.resolve())
+                    proj_ctx._jenga_applied_filter_context = None
+
+                native_libs = []
+                success = False
+                try:
+                    success = (super(HarmonyOsBuilder, self).Build(project.name) == 0)
+                    if success:
+                        # Collecte AVANT restauration : c'est la seule fenetre ou
+                        # GetTargetPath rend les chemins de CETTE ABI.
+                        out = self.GetTargetPath(project)
+                        if out.exists():
+                            native_libs.append(str(out))
+                        for dep_name in project.dependsOn:
+                            dep = self.workspace.projects.get(dep_name)
+                            if not dep:
+                                continue
+                            dep_out = self.GetTargetPath(dep)
+                            if dep.kind == ProjectKind.SHARED_LIB and dep_out.exists():
+                                native_libs.append(str(dep_out))
+                finally:
+                    for proj_name, snap in restore.items():
+                        proj_ctx = self.workspace.projects.get(proj_name)
+                        if not proj_ctx:
+                            continue
+                        if snap["filteredTargetDir"] is sentinel:
+                            proj_ctx._filteredTargetDir.pop(abi_filter, None)
+                        else:
+                            proj_ctx._filteredTargetDir[abi_filter] = snap["filteredTargetDir"]
+                        if snap["filteredObjDir"] is sentinel:
+                            proj_ctx._filteredObjDir.pop(abi_filter, None)
+                        else:
+                            proj_ctx._filteredObjDir[abi_filter] = snap["filteredObjDir"]
+                        proj_ctx.targetDir = snap["targetDir"]
+                        proj_ctx.objDir = snap["objDir"]
+                        proj_ctx._jenga_applied_filter_context = snap["appliedContext"]
+
+                if not success:
+                    Reporter.Error(f"Echec de la compilation pour {abi}")
+                    return False
+                if not native_libs:
+                    Reporter.Warning(f"Aucune bibliotheque native pour {abi}")
+                else:
+                    all_native_libs[abi] = native_libs
+                    Reporter.Success(f"  {abi} compile ({len(native_libs)} lib(s))")
+
+            if not all_native_libs:
+                Reporter.Error("Aucune bibliotheque native pour aucune ABI")
+                return False
+            return self.BuildHAP(project, all_native_libs)
+        finally:
+            self.targetArch = original_arch
+            self.platform = original_platform
+            self._PrepareToolchain()
+            self.workspace._cache_status = original_cache_status
+
     def Build(self, targetProject: Optional[str] = None) -> int:
         """
         Build principal : compile puis package en .hap si WINDOWED_APP.
@@ -1712,6 +1909,14 @@ class HarmonyOsBuilder(Builder):
 
         Équivalent Android : Build() → BuildAPK() dans AndroidBuilder.
         """
+        # Multi-ABI demande (harmonyabis) : chemin dedie, qui compile lui-meme
+        # une fois par ABI. On ne passe donc PAS par la compilation simple.
+        if targetProject:
+            proj = self.workspace.projects.get(targetProject)
+            abis = list(getattr(proj, "harmonyAbis", []) or []) if proj else []
+            if proj and proj.kind == ProjectKind.WINDOWED_APP and len(abis) > 1:
+                return 0 if self._BuildUniversalHAP(proj, abis) else 1
+
         # Étape 1 : compilation via la classe de base
         code = super().Build(targetProject)
         if code != 0:

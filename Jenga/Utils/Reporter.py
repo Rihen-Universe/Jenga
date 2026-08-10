@@ -555,6 +555,14 @@ class BuildLogger:
                     print(f"{Colored.Colorize('✓', color='green')}   {status} Compiled: {filename}")
                 _SinkCall("OnFileDone", self.project_name, self.compiled, self.total_files,
                           source_file, True, bool(has_warnings))
+                # Le TEXTE des avertissements n'etait transmis a personne : seul un
+                # booleen passait, ce qui permet d'allumer un voyant mais pas de
+                # dire OU ni QUOI. Un IDE branche sur ce flux ne pouvait donc lister
+                # que les erreurs. On envoie la sortie BRUTE (non encadree) — c'est
+                # elle qui porte le chemin complet et les numeros de ligne, alors
+                # que l'affichage console les tronque pour tenir dans son cadre.
+                if has_warnings:
+                    _SinkCall("OnCompileWarning", self.project_name, source_file, output)
             else:
                 # Échec de compilation
                 self.failed += 1

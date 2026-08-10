@@ -151,6 +151,8 @@ class EmscriptenBuilder(Builder):
             ar = self.toolchain.arPath or "emar"
             args = [ar, "rcs", str(out)] + objectFiles
             use_shell = ar and (str(ar).endswith('.bat') or str(ar).endswith('.cmd'))
+            # emar est un .bat : il passe par cmd.exe, plafonne a ~8191 caracteres.
+            args = self.MaybeResponseFile(args, out.parent, f"{project.name}-ar")
             result = Process.ExecuteCommand(args, captureOutput=True, silent=False, shell=use_shell)
             self._lastResult = result
             return result.returnCode == 0
@@ -197,6 +199,10 @@ class EmscriptenBuilder(Builder):
         args.extend(self.toolchain.ldflags)
 
         use_shell = linker and (str(linker).endswith('.bat') or str(linker).endswith('.cmd'))
+        # Idem pour emcc : quelques centaines d'objets suffisent a depasser la
+        # limite de cmd.exe, avec pour seul message « La ligne de commande est
+        # trop longue » — qui ne cite ni fichier ni symbole.
+        args = self.MaybeResponseFile(args, out.parent, f"{project.name}-link")
         result = Process.ExecuteCommand(args, captureOutput=True, silent=False, shell=use_shell)
         self._lastResult = result
 
