@@ -3120,13 +3120,23 @@ def arflags(flags: List[str]) -> None:
         _currentToolchain.arflags.extend(flags)
 
 def frameworks(names: Union[str, List[str]]) -> None:
-    """Add one or more frameworks (macOS/iOS). Can accept single name or list."""
-    if not _currentToolchain:
-        return
-    if isinstance(names, str):
-        _currentToolchain.frameworks.append(names)
-    else:
-        _currentToolchain.frameworks.extend(names)
+    """Add one or more frameworks (macOS/iOS). Can accept single name or list.
+
+    Correctif 2026-08-11 : comme ldflags(), la cible est le PROJET quand un
+    projet est actif — c'est `project.frameworks` que lisent les builders
+    Apple (Macos.py/Ios.py). Avant, tout partait dans la toolchain COURANTE
+    (None au niveau projet → perdu en silence, `frameworks()` d'une app
+    n'atteignait jamais le link : -framework OpenGL absent, symbole
+    _glGetString non résolu — deux itérations de CI Nkentseu pour le voir).
+    Repli toolchain conservé : comportement historique inchangé quand aucun
+    projet n'est ouvert. Inoffensif hors Apple (les autres builders ignorent
+    project.frameworks).
+    """
+    lst = [names] if isinstance(names, str) else list(names)
+    if _currentProject is not None:
+        _currentProject.frameworks.extend(lst)
+    elif _currentToolchain:
+        _currentToolchain.frameworks.extend(lst)
 
 def framework(name: str) -> None:
     """Backward-compatible singular alias for frameworks()."""
