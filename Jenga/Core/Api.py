@@ -3134,7 +3134,20 @@ def frameworks(names: Union[str, List[str]]) -> None:
     """
     lst = [names] if isinstance(names, str) else list(names)
     if _currentProject is not None:
-        _currentProject.frameworks.extend(lst)
+        if _currentFilter:
+            # SOUS FILTRE, les frameworks doivent respecter la plateforme :
+            # la 1re version de ce correctif les versait dans
+            # project.frameworks sans condition → un build macOS liait le
+            # UIKit du filtre iOS (« ld: framework 'UIKit' not found ») et
+            # réciproquement. On réutilise la résolution par filtre des
+            # ldflags (mécanisme existant et éprouvé) sous forme
+            # « -framework X » — équivalent strict au lien direct.
+            flags: List[str] = []
+            for n in lst:
+                flags.extend(["-framework", n])
+            _AppendFilteredValues(_currentProject._filteredLdFlags, _currentFilter, flags)
+        else:
+            _currentProject.frameworks.extend(lst)
     elif _currentToolchain:
         _currentToolchain.frameworks.extend(lst)
 
