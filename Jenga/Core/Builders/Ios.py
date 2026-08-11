@@ -363,9 +363,12 @@ class DirectIOSBuilder(Builder):
                 FileSystem.MakeDirectory(dest.parent)
                 shutil.copy2(src, dest)
 
-        # Générer Info.plist
+        # Générer Info.plist. _GenerateInfoPlist écrit DÉJÀ bundle_dir/Info.plist :
+        # la copie inconditionnelle plantait (« are the same file », premier
+        # packaging iOS réel en CI, 2026-08-11). On ne copie que si le
+        # générateur a rendu un autre chemin.
         plist_path = self._GenerateInfoPlist(project, bundle_dir)
-        if plist_path:
+        if plist_path and Path(plist_path) != (bundle_dir / "Info.plist"):
             shutil.copy2(plist_path, bundle_dir / "Info.plist")
 
         # Icone : iosAppIcon (specifique) gagne, sinon fallback sur appicon()
