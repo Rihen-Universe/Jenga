@@ -22,7 +22,11 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 """
 
 # Version du produit Jenga.
-__version__ = "2.1.1"
+# 2.2.0 (2026-08-11) : frameworks() Apple par PROJET et par FILTRE (avant :
+# toolchain seulement, perdus en silence au niveau projet) + builder iOS
+# direct réparé (init _GetMinimumVersion, packaging Info.plist) — première
+# chaîne complète compile+link+bundle iOS/macOS prouvée en CI GitHub Actions.
+__version__ = "2.2.0"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer
