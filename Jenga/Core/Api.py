@@ -499,6 +499,7 @@ class Project:
     _filteredCFlags: Dict[str, List[str]] = field(default_factory=dict)
     _filteredCxxFlags: Dict[str, List[str]] = field(default_factory=dict)
     _filteredLdFlags: Dict[str, List[str]] = field(default_factory=dict)
+    _filteredFrameworks: Dict[str, List[str]] = field(default_factory=dict)
     _filteredPreBuildCommands: Dict[str, List[str]] = field(default_factory=dict)
     _filteredPostBuildCommands: Dict[str, List[str]] = field(default_factory=dict)
     _filteredPreLinkCommands: Dict[str, List[str]] = field(default_factory=dict)
@@ -3136,16 +3137,13 @@ def frameworks(names: Union[str, List[str]]) -> None:
     if _currentProject is not None:
         if _currentFilter:
             # SOUS FILTRE, les frameworks doivent respecter la plateforme :
-            # la 1re version de ce correctif les versait dans
-            # project.frameworks sans condition → un build macOS liait le
-            # UIKit du filtre iOS (« ld: framework 'UIKit' not found ») et
-            # réciproquement. On réutilise la résolution par filtre des
-            # ldflags (mécanisme existant et éprouvé) sous forme
-            # « -framework X » — équivalent strict au lien direct.
-            flags: List[str] = []
-            for n in lst:
-                flags.extend(["-framework", n])
-            _AppendFilteredValues(_currentProject._filteredLdFlags, _currentFilter, flags)
+            # ils passent par _filteredFrameworks, résolu au build par
+            # _FilterMatches comme toute propriété filtrée. NE PAS les
+            # encoder en paires ldflags ["-framework", X] : _AppendUnique
+            # déduplique token par token, le 2e « -framework » saute et le
+            # linker reçoit des noms nus (« clang: error: no such file or
+            # directory: 'QuartzCore' », probes CI macOS/iOS du 11/08).
+            _AppendFilteredValues(_currentProject._filteredFrameworks, _currentFilter, lst)
         else:
             _currentProject.frameworks.extend(lst)
     elif _currentToolchain:
