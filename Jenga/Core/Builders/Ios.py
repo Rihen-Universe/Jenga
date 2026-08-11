@@ -160,7 +160,14 @@ class DirectIOSBuilder(Builder):
         except Exception as e:
             raise RuntimeError(f"Apple Clang not found. Install Xcode command line tools: {e}")
 
-    def _GetMinimumVersion(self, project: Project) -> str:
+    def _GetMinimumVersion(self, project: Optional[Project] = None) -> str:
+        # Correctif 2026-08-11 : l'__init__ (ligne ~137) appelle sans projet —
+        # « missing 1 required positional argument » cassait TOUT build iOS
+        # direct (révélé par le premier `--platform ios` en CI). Sans projet,
+        # on rend le défaut du profil ; la version PAR PROJET reste calculée
+        # aux appels qui en passent un (même logique qu'AppleMobileBuilder).
+        if project is None:
+            return str(self.target_profile.get("default_min", "12.0"))
         # Selon la cible, on cherche un attribut spécifique
         if self.targetOs == TargetOS.IOS:
             min_ver = getattr(project, 'iosMinSdk', None)
