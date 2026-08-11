@@ -1174,6 +1174,9 @@ class Builder(abc.ABC):
         for filter_name, flags in getattr(project, "_filteredLdFlags", {}).items():
             if self._FilterMatches(filter_name, project):
                 self._AppendUnique(project.ldflags, list(flags))
+        for filter_name, fws in getattr(project, "_filteredFrameworks", {}).items():
+            if self._FilterMatches(filter_name, project):
+                self._AppendUnique(project.frameworks, list(fws))
         for filter_name, cmds in getattr(project, "_filteredPreBuildCommands", {}).items():
             if self._FilterMatches(filter_name, project):
                 self._AppendUnique(project.preBuildCommands, list(cmds))
