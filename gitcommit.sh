@@ -5,8 +5,7 @@
 # L'identite AUTEUR *et* COMMITTER est imposee via `git -c` (independant de la
 # config git globale) -> le commit est attribue a LeTeguis, "comme si c'est
 # l'utilisateur qui commit". Le message est EXACTEMENT celui passe (jamais de
-# trailer Co-Authored-By Claude). Le pointeur du sous-module Nkentseu n'est
-# JAMAIS committe ici (il se gere a part).
+# trailer Co-Authored-By Claude).
 #
 # USAGE
 #   ./gitcommit.sh "<message>" [chemin1 chemin2 ...]
@@ -22,7 +21,6 @@ set -uo pipefail
 # Identite imposee (cf. memoire feedback_git_identity_leteguis / no-claude-coauthor).
 GIT_NAME="LeTeguis"
 GIT_EMAIL="teuguiasederis@gmail.com"
-SUBMODULE="Jenga/Exemples/Nkentseu"
 
 [ "${1:-}" != "" ] || { echo "Usage: $0 \"<message>\" [chemins...]" >&2; exit 1; }
 MSG="$1"; shift
@@ -36,8 +34,6 @@ else
   git add -u || { echo "[gitcommit] git add -u a echoue" >&2; exit 1; }
 fi
 
-# Ne jamais committer le pointeur du sous-module Nkentseu.
-git reset -q -- "$SUBMODULE" 2>/dev/null || true
 
 if git diff --cached --quiet; then
   echo "[gitcommit] rien a committer (index vide)."

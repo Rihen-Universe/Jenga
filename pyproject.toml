@@ -39,8 +39,8 @@ jenga = "Jenga.Jenga:main"
 
 [tool.setuptools]
 # IMPORTANT : false (et non true). Avec true, setuptools embarque TOUT le
-# contenu git-tracke sous Jenga/, y compris Jenga/Exemples (~490 Mo : Nkentseu,
-# externals, modeles 3D) -> wheel inutilisable. En listant explicitement les
+# contenu git-tracke sous Jenga/, y compris Jenga/Exemples (externals, modeles
+# 3D, ressources lourdes) -> wheel inutilisable. En listant explicitement les
 # donnees ci-dessous, on garde un wheel leger. Les exemples restent dans le
 # depot git et sont distribues separement (archive d'exemples allegee, voir
 # .github/workflows/release.yml).
@@ -56,10 +56,10 @@ Jenga = [
     "Templates/**/*",
     "py.typed",
     # Mini-echantillon : tous les exemples NUMEROTES (dossiers commencant par
-    # 0/1/2), en version source legere (~2 Mo total, < 10 Mo). Le gros projet
-    # "Nkentseu" et les ressources lourdes sont exclus ci-dessous et restent
-    # disponibles via "jenga examples copy" (telechargement a la demande) ou
-    # l'archive d'exemples de la release GitHub.
+    # 0/1/2), en version source legere (~2 Mo total, < 10 Mo). Les ressources
+    # lourdes sont exclues ci-dessous et restent disponibles via
+    # "jenga examples copy" (telechargement a la demande) ou l'archive
+    # d'exemples de la release GitHub.
     "Exemples/*.md",
     "Exemples/[012]*/**/*",
 ]
@@ -68,7 +68,6 @@ Jenga = [
 # Retire du wheel le contenu lourd des exemples (build, dependances externes
 # vendored, binaires, modeles 3D). Garde uniquement les sources/.jenga/README.
 Jenga = [
-    "Exemples/Nkentseu/**",
     "Exemples/**/build/**",
     "Exemples/**/Build/**",
     "Exemples/**/Externals/**",

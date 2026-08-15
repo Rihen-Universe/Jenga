@@ -3,6 +3,60 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.4.0
+
+### Retiré
+
+- **Le sous-module `Jenga/Exemples/Nkentseu` est retiré du dépôt.** Ce n'est pas
+  du ménage : **le dépôt n'était pas clonable.** Mesuré par le clone lui-même :
+
+  ```
+  git clone --recurse-submodules <jenga>
+  Submodule path 'Jenga/Exemples/Nkentseu': checked out '05f25e39...'
+  fatal: No url found for submodule path
+         'Jenga/Exemples/Nkentseu/Externals/Libs/NKSPIRVCross' in .gitmodules
+  fatal: Failed to recurse into submodule path 'Jenga/Exemples/Nkentseu'
+  EXIT = 128
+  ```
+
+  La cause est **un cran plus bas que le sous-module lui-même**. Le commit
+  épinglé `05f25e39` (28/03/2026) se récupère très bien ; il est peuplé
+  (2 351 fichiers). Mais l'instantané de Nkentseu de mars 2026 porte
+  **deux gitlinks orphelins** — `Externals/Libs/NKSPIRVCross` et
+  `Externals/Libs/NKShaderc`, enregistrés en mode `160000` dans son arbre —
+  **sans aucun fichier `.gitmodules` pour leur donner une URL**. Git ne peut donc
+  pas descendre d'un niveau, et abandonne le clone entier.
+
+  Jenga ne peut pas réparer ça depuis son côté : le défaut est dans le contenu
+  du commit épinglé, pas dans sa déclaration.
+  - Retrait complet, pas un `rm` : `.gitmodules` (supprimé, la déclaration y
+    était unique), gitlink de l'index, page wiki `Docs/wiki/Exemples.md` (FR+EN),
+    exclusions de `scripts/build_examples_archive.py` et de `pyproject.toml`,
+    mentions de `cri.sh` / `cri.bat` / `.github/workflows/release.yml`, et le
+    garde-fou « ne jamais committer le pointeur » devenu sans objet dans
+    `gitcommit.sh`, `gitpush.sh`, `gitpush.bat`.
+  - **Le catalogue de `jenga examples` n'est pas touché** : vérifié, son
+    dictionnaire `EXAMPLES` (28 entrées) ne contenait aucun identifiant
+    `Nkentseu` — l'exemple n'a jamais été listé ni documenté par la commande. Il
+    n'était atteignable que par coïncidence de chemin
+    (`jenga examples copy Nkentseu` dans un clone), ce qui retourne désormais
+    l'erreur « exemple introuvable » habituelle.
+
+### Limites connues
+
+- **Jenga perd ici son seul exemple à grande échelle**, et c'est mesuré :
+  l'exemple retiré comptait **35 fichiers `.jenga` et 1 226 fichiers source** ;
+  le plus gros restant, `27_nk_window`, en compte **2 et 135**. Aucun exemple
+  restant ne démontre la composition multi-`.jenga` par `include()` à cette
+  échelle. Le remplacer — ou pointer vers le dépôt Nkentseu public — reste à
+  décider.
+- Le contenu retiré (arborescence de mars 2026, `Modules/Runtime/`, plus 431
+  entrées modifiées non commitées) a été **archivé avant la coupe**, hors dépôt.
+- **Ré-ajouter un jour un exemple Nkentseu suppose de vérifier d'abord que le
+  commit visé déclare ses propres sous-modules.** C'est exactement ce qui
+  manquait ici, et un `.gitmodules` correct côté Jenga ne suffit pas à s'en
+  prémunir.
+
 ## v2.3.0
 
 > ⚠️ Ce fichier saute de `v2.0.5` à `v2.3.0` : les versions intermédiaires n'y

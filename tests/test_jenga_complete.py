@@ -645,13 +645,13 @@ class TestGlobalToolchainsFixed:
 
 class TestExamplesParsing:
     EXAMPLES_DIR = ROOT / "Jenga" / "Exemples"
-    # Sous-dossiers d'Exemples/ qui ne sont PAS des exemples Jenga. « Nkentseu »
-    # est un SOUS-MODULE : un moteur complet, propriete d'un autre depot, present
-    # ici pour l'integration. Il est deja exclu de l'archive distribuee
-    # (scripts/build_examples_archive.py) — le test doit couvrir le MEME perimetre,
-    # sinon la suite de Jenga echoue sur du contenu qu'il ne livre pas et dont il
-    # n'est pas responsable.
-    NON_EXAMPLE_DIRS = {"Nkentseu"}
+    # Sous-dossiers d'Exemples/ qui ne sont PAS des exemples Jenga (code vendore
+    # depuis un autre depot, par exemple). Le test doit couvrir le MEME perimetre
+    # que l'archive distribuee (scripts/build_examples_archive.py), sinon la suite
+    # de Jenga echoue sur du contenu qu'il ne livre pas et dont il n'est pas
+    # responsable.
+    # Vide depuis v2.4.0 : le seul membre etait « Nkentseu », sous-module retire.
+    NON_EXAMPLE_DIRS: set = set()
 
     def _get_example_files(self):
         if not self.EXAMPLES_DIR.exists():
