@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 #
-# gitpush.sh — add + commit + push du SEUL superprojet Jenga.
-#              (Le sous-module Nkentseu n'est JAMAIS pousse ici : il se gere
-#               a part, dans son propre depot Rihen-Universe/Nkentseu.)
+# gitpush.sh — add + commit + push du depot Jenga.
 #
 # Deux declencheurs cote GitHub Actions :
 #   - Push de la BRANCHE  -> workflow sync-wiki.yml  -> met a jour le WIKI.
@@ -69,7 +67,6 @@ MSG="$2"
 # ── Chemins (marche depuis n'importe ou) ─────────────────────────────────────
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT" || die "impossible d'aller dans $ROOT"
-SUBMODULE_PATH="Jenga/Exemples/Nkentseu"
 
 # ── Helper d'execution (respecte --dry-run) ──────────────────────────────────
 run() {
@@ -98,12 +95,8 @@ if [ "$CUR" != "$BRANCH" ]; then
   run git checkout "$BRANCH" || die "checkout '$BRANCH' impossible (conflits ?)."
 fi
 
-# ── 2) Indexer Jenga, mais JAMAIS le pointeur du sous-module Nkentseu ─────────
+# ── 2) Indexer Jenga ─────────────────────────────────────────────────────────
 run git add -A || die "git add a echoue."
-if ! git diff --cached --quiet -- "$SUBMODULE_PATH" 2>/dev/null; then
-  warn "changement de pointeur Nkentseu detecte -> EXCLU (Nkentseu se pousse a part)."
-  run git reset -q -- "$SUBMODULE_PATH"
-fi
 
 # ── 3) Committer s'il y a quelque chose d'indexe ─────────────────────────────
 if git diff --cached --quiet 2>/dev/null; then

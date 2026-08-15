@@ -197,7 +197,7 @@ else
 fi
 
 # =============================================================================
-# [7/7] Archive d'exemples allégée (sans build, sans externals, sans Nkentseu)
+# [7/7] Archive d'exemples allégée (sans build, sans externals)
 # =============================================================================
 echo ""
 info "[7/7] Construction de l'archive d'exemples allégée ..."

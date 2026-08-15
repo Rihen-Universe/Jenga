@@ -131,7 +131,7 @@ if errorlevel 1 (
 
 REM ─────────────────────────────────────────────────────────────
 echo.
-echo [7/7] Construction de l'archive d'exemples allegee ^(sans Nkentseu^) ...
+echo [7/7] Construction de l'archive d'exemples allegee ...
 %PY% scripts\build_examples_archive.py dist
 if errorlevel 1 (
     echo [AVERTISSEMENT] Echec de la generation de l'archive d'exemples.

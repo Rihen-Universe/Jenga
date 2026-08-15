@@ -7,17 +7,17 @@ Produit, dans le dossier de sortie (defaut: <repo>/dist) :
     jenga-examples-<version>.zip
     jenga-examples-<version>.tar.gz
 
-Contenu : TOUS les exemples de Jenga/Exemples (y compris Nkentseu) MAIS sans
-les dossiers de build ni les sous-modules/externals lourds ni les binaires
-generes. C'est la source unique de verite des exclusions, reutilisee par
-cri.bat, cri.sh et .github/workflows/release.yml — pour que le local et le CI
-produisent exactement la meme archive.
+Contenu : TOUS les exemples de Jenga/Exemples MAIS sans les dossiers de build
+ni les externals lourds ni les binaires generes. C'est la source unique de
+verite des exclusions, reutilisee par cri.bat, cri.sh et
+.github/workflows/release.yml — pour que le local et le CI produisent
+exactement la meme archive.
 
 Usage :
     python scripts/build_examples_archive.py [OUTDIR]
 
 L'archive est ce que `jenga examples copy <id>` telecharge a la demande pour
-les exemples absents du wheel (ex. Nkentseu).
+les exemples absents du wheel.
 """
 from __future__ import annotations
 import fnmatch
@@ -38,10 +38,6 @@ EXCLUDE_DIRS = {
     "third_party", "ThirdParty", "vendor", "node_modules",
     ".git", ".github", ".vs", ".idea", ".vscode",
     "__pycache__", ".jenga_cache",
-    # Nkentseu : gros projet de reference, volontairement EXCLU de l'archive
-    # d'exemples. Il reste dans le depot git (Jenga/Exemples/Nkentseu) et est
-    # recuperable par clone pour qui le veut. Non supprime des sources.
-    "Nkentseu",
 }
 # --- Dossiers exclus par motif (glob sur le nom) ----------------------------
 EXCLUDE_DIR_GLOBS = ["cmake-build-*", "*.app", "*.egg-info"]
