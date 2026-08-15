@@ -26,6 +26,9 @@ class RebuildCommand:
         parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
+        parser.add_argument("--keep-going", "-k", action="store_true",
+                            help="Build everything that can be built instead of stopping at the "
+                                 "first failure (see `jenga build --keep-going`)")
         # Clean spécifique
         parser.add_argument("--clean-all", action="store_true", help="Clean all artifacts (including cache)")
         parsed = parser.parse_args(args)
@@ -50,7 +53,8 @@ class RebuildCommand:
             "--action", "rebuild",
             "--no-cache" if parsed.no_cache else "",
             "--verbose" if parsed.verbose else "",
-            "--no-daemon" if parsed.no_daemon else ""
+            "--no-daemon" if parsed.no_daemon else "",
+            "--keep-going" if parsed.keep_going else ""
         ]
         if parsed.platform:
             build_args += ["--platform", parsed.platform]

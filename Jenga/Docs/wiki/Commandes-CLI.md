@@ -29,7 +29,7 @@ Beaucoup de commandes acceptent un **alias court** (ex. `b` = `build`).
 
 | Commande | Alias | Rôle | Options clés |
 |----------|-------|------|--------------|
-| `build` | `b` | Compile le workspace ou un projet | `--config --platform --target --jobs/-j --no-cache --no-daemon`, options Android (`--android-build-system`, `--android-abis`, `--use-android-mk`, `--android-ndk-mk-mode`) |
+| `build` | `b` | Compile le workspace ou un projet | `--config --platform --target --jobs/-j --keep-going/-k --tests --no-cache --no-daemon`, options Android (`--android-build-system`, `--android-abis`, `--use-android-mk`, `--android-ndk-mk-mode`) |
 | `run` | `r` | Exécute un projet (build si besoin) | `project --args --build --target/--device` |
 | `gdb` | `g` (`debug`) | Débogue un projet avec GDB (ou LLDB) | `project --config --break/-b --run --batch --args --build --debugger (auto\|gdb\|lldb)` |
 | `test` | `t` | Compile et lance les suites de tests | `--project --no-build` |
@@ -44,7 +44,64 @@ jenga run MonApp --args --level hard --fullscreen
 jenga test --project Core_Tests --config Debug
 jenga build -j8                     # 8 jobs parallèles
 jenga build --platform jengaall     # toutes les plateformes déclarées
+jenga build --keep-going            # construit tout ce qui peut l'être
+jenga build --tests                 # inclut aussi les cibles de test
 ```
+
+#### `--keep-going` / `-k` — compter au lieu de s'arrêter
+
+Par défaut, le build **s'arrête** à la première cible en échec. Sur un workspace
+de plusieurs centaines de cibles, on ne découvre alors qu'**un** bloqueur à la
+fois : un correctif, un commit, on recommence — et on ignore combien de cibles
+sont réellement cassées.
+
+`--keep-going` construit tout ce qui peut l'être et distingue **quatre états** :
+
+| état | signification |
+|---|---|
+| **réussie** | construite |
+| **échouée** | cassée — c'est ici qu'est le travail |
+| **sautée** | *non tentée* : une de ses dépendances a échoué |
+| **non atteinte** | le build s'est arrêté avant (mode par défaut uniquement) |
+
+La catégorie **sautée** est celle qui fait la valeur du mode : une cible bloquée
+n'est **pas tentée**, parce que la tenter produit une erreur *dérivée* — un
+`no such file or directory` sur une archive absente — qui ressemble à un second
+défaut et fait réparer deux fois le même.
+
+```
+Projects Built:  3/5
+Failed:          1
+Skipped:         1  (dépendance échouée)
+
+Échecs (1) — à corriger :
+  ✗ LibBad
+Sautées (1) — bloquées par une dépendance, non tentées :
+  ⊘ en attente de LibBad : AppDep
+```
+
+> **Depuis la v2.3.0**, `--verbose` ne poursuit **plus** après un échec. C'était
+> un `--keep-going` accidentel, non documenté et à la mauvaise sémantique : il
+> *tentait* les cibles bloquées. Un drapeau de verbosité ne décide pas de la
+> politique d'échec.
+
+#### `--tests` — les cibles de test sont des **racines**
+
+**Une cible de test est une RACINE, jamais une dépendance.** Rien ne peut en
+dépendre — `dependson()` vers une cible de test lève une erreur nommant l'arête
+fautive. Elles sont donc **exclues du build par défaut** : sur un workspace réel
+de 272 cibles, 66 étaient des tests, soit **24 % de travail que personne n'avait
+demandé** quand on voulait simplement construire son application.
+
+```bash
+jenga build                      # les cibles de test sont ignorées
+jenga build --tests              # elles sont incluses
+jenga build --target Core_Tests  # nommée explicitement : construite dans tous les cas
+jenga test --project Core_Tests  # Core, ses tests, leur fermeture — rien d'autre
+```
+
+Le dernier point compte : `jenga test` ne construit **pas** les tests des
+dépendances de la cible, seulement les siens.
 
 #### Débogage avec `gdb`
 
@@ -171,7 +228,7 @@ Many commands accept a **short alias** (e.g. `b` = `build`).
 
 | Command | Alias | Purpose | Key options |
 |---------|-------|---------|-------------|
-| `build` | `b` | Compile workspace or a project | `--config --platform --target --jobs/-j --no-cache --no-daemon`, Android options (`--android-build-system`, `--android-abis`, `--use-android-mk`, `--android-ndk-mk-mode`) |
+| `build` | `b` | Compile workspace or a project | `--config --platform --target --jobs/-j --keep-going/-k --tests --no-cache --no-daemon`, Android options (`--android-build-system`, `--android-abis`, `--use-android-mk`, `--android-ndk-mk-mode`) |
 | `run` | `r` | Run a project (build if needed) | `project --args --build --target/--device` |
 | `gdb` | `g` (`debug`) | Debug a project with GDB (or LLDB) | `project --config --break/-b --run --batch --args --build --debugger (auto\|gdb\|lldb)` |
 | `test` | `t` | Build and run test suites | `--project --no-build` |
@@ -186,7 +243,62 @@ jenga run MyApp --args --level hard --fullscreen
 jenga test --project Core_Tests --config Debug
 jenga build -j8                     # 8 parallel jobs
 jenga build --platform jengaall     # every declared platform
+jenga build --keep-going            # build everything that can be built
+jenga build --tests                 # also build test targets
 ```
+
+#### `--keep-going` / `-k` — count instead of stopping
+
+By default the build **stops** at the first failing target. On a workspace with
+hundreds of targets you then discover **one** blocker at a time: one fix, one
+commit, start over — and nobody knows how many targets are actually broken.
+
+`--keep-going` builds everything it can and distinguishes **four states**:
+
+| state | meaning |
+|---|---|
+| **succeeded** | built |
+| **failed** | broken — this is where the work is |
+| **skipped** | *not attempted*: one of its dependencies failed |
+| **not reached** | the build stopped before it (default mode only) |
+
+**Skipped** is what makes the mode worth having: a blocked target is **not
+attempted**, because attempting it produces a *derived* error — a
+`no such file or directory` on a missing archive — that looks like a second
+defect and gets the same one fixed twice.
+
+```
+Projects Built:  3/5
+Failed:          1
+Skipped:         1  (failed dependency)
+
+Failures (1) — to fix:
+  ✗ LibBad
+Skipped (1) — blocked by a dependency, not attempted:
+  ⊘ waiting for LibBad: AppDep
+```
+
+> **Since v2.3.0**, `--verbose` no longer continues past a failure. It was an
+> accidental `--keep-going`, undocumented and with the wrong semantics: it
+> *attempted* blocked targets. A verbosity flag does not decide failure policy.
+
+#### `--tests` — test targets are **roots**
+
+**A test target is a ROOT, never a dependency.** Nothing may depend on one —
+`dependson()` pointing at a test target raises an error naming the offending
+edge. They are therefore **excluded from the default build**: on a real 272-target
+workspace, 66 were tests — **24 % of work nobody asked for** when all you wanted
+was to build your application.
+
+```bash
+jenga build                      # test targets are ignored
+jenga build --tests              # they are included
+jenga build --target Core_Tests  # named explicitly: always built
+jenga test --project Core_Tests  # Core, its tests, their closure — nothing else
+```
+
+That last point matters: `jenga test` does **not** build the tests of the
+target's dependencies, only its own.
 
 #### Debugging with `gdb`
 

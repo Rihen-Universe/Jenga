@@ -973,6 +973,10 @@ class AndroidBuilder(Builder):
         return super().BuildProject(project)
 
     def Build(self, targetProject: Optional[str] = None) -> int:
+        # `--keep-going` : la phase de COMPILATION passe par super().Build() et
+        # l'honore donc. La boucle d'empaquetage APK ci-dessous, non — une app
+        # dont le packaging echoue interrompt encore les suivantes. Lecture du
+        # code, PAS mesuree sur emulateur. Voir le contrat dans Builder.Build().
         if self._ShouldUseNdkMk():
             return self._BuildUsingNdkMk(targetProject)
 

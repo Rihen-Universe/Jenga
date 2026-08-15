@@ -3,6 +3,61 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.3.0
+
+> ⚠️ Ce fichier saute de `v2.0.5` à `v2.3.0` : les versions intermédiaires n'y
+> ont pas été consignées. L'entrée ci-dessous ne couvre donc **que** ce qui est
+> décrit, pas l'écart.
+
+### Ajouté
+
+- **`jenga build --keep-going` / `-k`** — construit tout ce qui peut l'être au
+  lieu de s'arrêter à la première cible en échec, et distingue **quatre états**
+  dans le compte-rendu final : *réussie*, *échouée* (avec son nom), **sautée**
+  (non tentée, une dépendance a échoué) et *non atteinte*.
+  - **« Sautée » est la catégorie utile** : elle sépare « cassé » de « bloqué
+    par autre chose ». Une cible bloquée n'est **pas tentée** — la tenter
+    produit une erreur *dérivée* (`no such file or directory` sur une archive
+    absente) qui ressemble à un second défaut et fait réparer deux fois le même.
+  - Relayé jusqu'au bout : `jenga rebuild -k`, chemin **daemon**, et événement
+    structuré `OnProjectSkipped(project, blocker)` pour les hôtes embarqués.
+- **`jenga build --tests`** — inclut les cibles de test dans le build du
+  workspace, d'où elles sont désormais exclues par défaut (voir ci-dessous).
+
+### Modifié
+
+- **Une cible de test est une RACINE, jamais une dépendance.** Les cibles de
+  test sont **exclues du build sans `--target`** : mesuré sur un workspace réel
+  de 272 cibles, 66 étaient des tests — **24 %** de travail non demandé. Les
+  nommer explicitement (`--target X_Tests`, `jenga test`) les construit
+  toujours. Le cadre `__Unitest__` devenu orphelin est élagué avec elles
+  (condition « plus aucun dépendant » vérifiée, pas supposée).
+- **`Projects Built` ne compte plus que les réussites.** Le compteur
+  s'incrémentait **même en échec** : le pied de page annonçait « 1/5 » là où
+  zéro cible avait abouti. Les chiffres d'avancement lus dans ce pied de page
+  **surestimaient**. Nouvelle ligne `Not reached` pour les cibles jamais
+  atteintes après un arrêt.
+
+### Corrigé
+
+- **`dependson()` vers une cible de test lève désormais une erreur** nommant
+  l'arête fautive. La propriété était vraie par accident d'usage — rien ne
+  l'imposait.
+
+### Changement de comportement
+
+- **`--verbose` ne poursuit plus après un échec.** C'était un `--keep-going`
+  accidentel (`if not self.verbose: break`), non documenté et à la mauvaise
+  sémantique : il *tentait* les cibles bloquées. Un drapeau de verbosité ne
+  décide pas de la politique d'échec. Utiliser `--keep-going`.
+
+### Limites connues
+
+- L'empaquetage **APK (Android)** et **HAP (HarmonyOS)** n'honore pas
+  `--keep-going` : ces builders redéfinissent `Build()` et ne délèguent à la
+  boucle générique que la phase de compilation. Constat de **lecture du code**,
+  non mesuré sur émulateur.
+
 ## v2.0.5
 
 ### Ajouté

@@ -160,6 +160,12 @@ class _CollectingSink:
     def OnProjectDone(self, success):
         self._Fwd("OnProjectDone", success)
 
+    def OnProjectSkipped(self, project, blocker):
+        # Cible NON TENTEE (dependance echouee, mode --keep-going). Relayee a
+        # part de OnProjectDone : un hote qui la compterait comme un echec
+        # accuserait du code qui n'a jamais ete compile.
+        self._Fwd("OnProjectSkipped", project, blocker)
+
     def OnFileTotal(self, project, total):
         self._Fwd("OnFileTotal", project, total)
 

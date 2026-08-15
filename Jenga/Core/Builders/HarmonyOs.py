@@ -2068,6 +2068,11 @@ class HarmonyOsBuilder(Builder):
         CONSOLE_APP   → compile ELF uniquement
 
         Équivalent Android : Build() → BuildAPK() dans AndroidBuilder.
+
+        `--keep-going` : l'étape 1 délègue à super().Build() et l'honore donc.
+        L'étape 2 (packaging HAP) ne l'honore pas, et un `code != 0` en étape 1
+        empêche même de l'atteindre. Lecture du code, PAS mesurée sur émulateur.
+        Voir le contrat dans Builder.Build().
         """
         # Multi-ABI demande (harmonyabis) : chemin dedie, qui compile lui-meme
         # une fois par ABI. On ne passe donc PAS par la compilation simple.
