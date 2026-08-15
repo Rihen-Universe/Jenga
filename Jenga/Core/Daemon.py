@@ -238,6 +238,7 @@ class Daemon:
         # la ligne de commande et ignore en silence, ce qui est precisement le
         # defaut que ce mode existe pour corriger.
         keep_going = bool(args.get('keep_going', False))
+        build_tests = bool(args.get('tests', False))   # meme raison que ci-dessus
         from ..Commands.Build import BuildCommand
         action = args.get('action', 'build')
         cli_custom_options = args.get('custom_options') or {}
@@ -274,14 +275,16 @@ class Daemon:
                 verbose=verbose,
                 action=action,
                 options=options,
-                keepGoing=keep_going
+                keepGoing=keep_going,
+                buildTests=build_tests
             )
         else:
             builder = BuildCommand.CreateBuilder(
                 self.workspace, config, platform, target, verbose,
                 action=action,
                 options=options,
-                keepGoing=keep_going
+                keepGoing=keep_going,
+                buildTests=build_tests
             )
             return_code = builder.Build(target)
         return {

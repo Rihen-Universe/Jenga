@@ -141,6 +141,16 @@ class Builder(abc.ABC):
         # La verbosite ne regle plus que la sortie ; l'arret se pilote ici.
         self.keepGoing = False  # Will be set by BuildCommand.CreateBuilder()
 
+        # ── Construire aussi les racines de test (--tests) ───────────────────
+        #
+        # False = le build SANS cible ignore les racines de test. Une suite de
+        # tests n'est pas ce qu'on demande quand on demande « construis le
+        # projet » : sur Nkentseu, elle representait 66 des 272 cibles
+        # ordonnancees (24 %). Demander explicitement une racine de test
+        # (`--target X_Tests`, ou `jenga test`) la construit toujours, quel que
+        # soit ce drapeau.
+        self.buildTests = False  # Will be set by BuildCommand.CreateBuilder()
+
         self._ValidateHostTarget()
         self._ResolveToolchain()
 
@@ -2440,6 +2450,22 @@ class Builder(abc.ABC):
         return [proj_name for proj_name in order if proj_name not in blocked_set]
 
     def Build(self, targetProject: Optional[str] = None) -> int:
+        """Construit les cibles, dans l'ordre topologique des dependances.
+
+        ⚠️ CONTRAT POUR TOUTE SOUS-CLASSE QUI REDEFINIT `Build()`.
+        Deux le font aujourd'hui — `AndroidBuilder` et `HarmonyOsBuilder` — et
+        il y en aura une troisieme. Elles delegent la phase de COMPILATION a
+        `super().Build()`, donc `self.keepGoing` y est honore ; mais leurs
+        boucles d'empaquetage (APK / HAP) leur sont propres et **ne le sont
+        pas** : une application dont l'empaquetage echoue y interrompt encore
+        les suivantes. Ce n'est pas verifie sur emulateur, c'est une lecture du
+        code — a mesurer avant de l'annoncer corrige.
+
+        Qui ajoute un `Build()` doit donc soit deleguer a `super()`, soit
+        reproduire les trois etats du compte-rendu (reussie / echouee /
+        SAUTEE-car-une-dependance-a-echoue). Un mode qui ne compte pas est un
+        mode qui rend compte de plus qu'il n'a fait.
+        """
         from ..Utils.Reporter import BuildCoordinator
 
         # Materialize all context-dependent filters before dependency resolution.
@@ -2448,7 +2474,8 @@ class Builder(abc.ABC):
 
         # Resolve build order
         try:
-            order = DependencyResolver.ResolveBuildOrder(self.workspace, targetProject)
+            order = DependencyResolver.ResolveBuildOrder(
+                self.workspace, targetProject, includeTests=self.buildTests)
         except ValueError as e:
             # Target introuvable : message actionnable listant les projets connus.
             available = sorted(self.workspace.projects.keys())
