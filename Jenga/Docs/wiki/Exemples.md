@@ -78,16 +78,6 @@ Copiez-en un avec `jenga examples copy <nom>` ou explorez-le directement.
 - **25_opengl_triangle** — rendu OpenGL multi-API (WGL/GLX/EGL+GLES3/WebGL).
 - **26_xbox_*** — projets Xbox GDK (`xboxmode("gdk")`) et UWP Dev Mode.
 
-### Nkentseu (projet de référence)
-
-[`Exemples/Nkentseu/`](../../Exemples/Nkentseu/) est un **framework C++ complet**
-(moteur graphique/sandbox) qui démontre Jenga en conditions réelles : ~20 modules
-(NKPlatform, NKCore, NKMath, NKMemory, NKImage, NKEvent, NKWindow, NKRHI,
-NKRenderer…), chacun avec son `.jenga` inclus via `include()`. Cible 9 OS
-(Windows, Linux, macOS, Android, iOS, Web, HarmonyOS, Xbox Series/One) et 3 archs
-(x86_64, ARM64, WASM32). Options `newoption("linux-backend", …)` (xlib/xcb/
-wayland/headless) et `windows-runtime` (desktop/uwp).
-
 ### Fichiers de synthèse
 
 - [`exemples.md`](../../Exemples/exemples.md) — doc détaillée des exemples.
@@ -163,15 +153,6 @@ wayland/headless) et `windows-runtime` (desktop/uwp).
   via filters. `jenga build --platform jengaall`.
 - **25_opengl_triangle** — multi-API OpenGL rendering (WGL/GLX/EGL+GLES3/WebGL).
 - **26_xbox_*** — Xbox GDK projects (`xboxmode("gdk")`) and UWP Dev Mode.
-
-### Nkentseu (reference project)
-
-[`Exemples/Nkentseu/`](../../Exemples/Nkentseu/) is a **complete C++ framework**
-(graphics engine/sandbox) showcasing Jenga in real conditions: ~20 modules each
-with its own `.jenga` included via `include()`. Targets 9 OSes (Windows, Linux,
-macOS, Android, iOS, Web, HarmonyOS, Xbox Series/One) and 3 archs (x86_64, ARM64,
-WASM32), with `newoption()` for Linux backend (xlib/xcb/wayland/headless) and
-Windows runtime (desktop/uwp).
 
 ### Summary files
 

@@ -1,9 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 REM ============================================================================
-REM gitpush.bat - add + commit + push du SEUL superprojet Jenga.
-REM               Le sous-module Nkentseu n'est JAMAIS pousse ici : il se gere
-REM               a part, dans son propre depot Rihen-Universe/Nkentseu.
+REM gitpush.bat - add + commit + push du depot Jenga.
 REM
 REM Deux declencheurs cote GitHub Actions :
 REM   - Push de la BRANCHE   -> sync-wiki.yml  -> met a jour le WIKI.
@@ -65,7 +63,6 @@ if not defined MSG    goto usage_err
 REM ---- Racine = dossier du script ----
 set "ROOT=%~dp0"
 pushd "%ROOT%" >nul 2>&1
-set "SUBMODULE_PATH=Jenga/Exemples/Nkentseu"
 
 echo ============================================================
 echo  gitpush (Jenga)  ^|  branche : %BRANCH%
@@ -82,13 +79,8 @@ if not "%CUR%"=="%BRANCH%" (
   call :run git checkout "%BRANCH%" || goto fail_checkout
 )
 
-REM ---- 2) Indexer Jenga, jamais le pointeur du sous-module Nkentseu ----
+REM ---- 2) Indexer Jenga ----
 call :run git add -A || goto fail_add
-git diff --cached --quiet -- "%SUBMODULE_PATH%" >nul 2>&1
-if errorlevel 1 (
-  echo    [ATTN] changement de pointeur Nkentseu detecte -^> EXCLU ^(se pousse a part^).
-  call :run git reset -q -- "%SUBMODULE_PATH%"
-)
 
 REM ---- 3) Committer s'il y a quelque chose d'indexe ----
 git diff --cached --quiet >nul 2>&1

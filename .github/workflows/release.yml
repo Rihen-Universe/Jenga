@@ -59,10 +59,10 @@ jobs:
           python -m build          # genere dist/*.whl et dist/jenga-<ver>.tar.gz
           ls -lh dist/
 
-      - name: Construire l'archive d'exemples allegee (sans Nkentseu)
+      - name: Construire l'archive d'exemples allegee
         run: |
           # Source unique de verite des exclusions (build, externals, gros
-          # assets, Nkentseu) -> meme resultat qu'en local via cri.bat/cri.sh.
+          # assets) -> meme resultat qu'en local via cri.bat/cri.sh.
           python scripts/build_examples_archive.py dist
           ls -lh dist/jenga-examples-* || true
 
