@@ -125,6 +125,22 @@ class Builder(abc.ABC):
         # Parallel compilation: 0 = auto-detect, 1 = sequential, N = N jobs
         self.jobs = 0  # Will be set by BuildCommand.CreateBuilder()
 
+        # ── Poursuivre apres un echec (--keep-going) ─────────────────────────
+        #
+        # False = arret a la premiere cible en echec (comportement historique).
+        # True  = on construit TOUT ce qui peut l'etre, et le compte-rendu final
+        #         separe « echouee » (cassee) de « sautee » (bloquee par une
+        #         autre) — c'est cette distinction qui dit ou est le travail.
+        #
+        # ATTENTION, changement de comportement assume : jusqu'a la v2.2.0,
+        # `--verbose` faisait office de keep-going ACCIDENTEL (`if not
+        # self.verbose: break`). Un drapeau de VERBOSITE ne doit pas decider de
+        # la politique d'echec, et cet effet de bord n'etait ni documente ni
+        # correct : il TENTAIT les cibles bloquees au lieu de les sauter, et
+        # produisait des erreurs derivees qui masquaient la panne d'origine.
+        # La verbosite ne regle plus que la sortie ; l'arret se pilote ici.
+        self.keepGoing = False  # Will be set by BuildCommand.CreateBuilder()
+
         self._ValidateHostTarget()
         self._ResolveToolchain()
 
@@ -2477,10 +2493,36 @@ class Builder(abc.ABC):
         # Build each project
         success_count = 0
         fail_count = 0
+        # ── Cibles INATTEIGNABLES parce qu'une dependance a echoue ────────────
+        #
+        # `order` est un tri topologique : une cible n'y apparait qu'apres
+        # toutes ses dependances. Il SUFFIT donc de regarder les dependances
+        # DIRECTES pour savoir si une cible est bloquee — si une dependance
+        # indirecte avait echoue, l'intermediaire serait deja dans `hors_jeu`.
+        # C'est ce qui evite de recalculer une fermeture transitive a chaque
+        # echec.
+        hors_jeu: Dict[str, str] = {}   # cible -> nom de la cible fautive
+        dans_le_lot = set(order)
+
         for proj_name in order:
             proj = self.workspace.projects.get(proj_name)
             if not proj:
                 continue
+
+            # Bloquee par une dependance cassee : on ne la TENTE pas. La tenter
+            # produirait une erreur DERIVEE ("no such file or directory" sur une
+            # archive absente) qui masque la vraie panne — mesure du banc :
+            # sous l'ancien mode `--verbose`, une application dependant d'une
+            # bibliotheque cassee comptait pour un second echec.
+            if self.keepGoing:
+                cassees = [d for d in proj.dependsOn
+                           if d in dans_le_lot and d in hors_jeu]
+                if cassees:
+                    coupable = hors_jeu.get(cassees[0], cassees[0])
+                    hors_jeu[proj_name] = coupable
+                    coordinator.MarkProjectSkipped(proj_name, coupable)
+                    continue
+
             run_cwd = proj.location or self.workspace.location
             for cmd in proj.preBuildCommands:
                 expanded_cmd = cmd
@@ -2489,7 +2531,7 @@ class Builder(abc.ABC):
                     expanded_cmd = self._expander.Expand(cmd, recursive=True)
                 Process.Run(expanded_cmd, shell=True, cwd=run_cwd)
             ok = self.BuildProject(proj)
-            coordinator.MarkProjectBuilt(ok)
+            coordinator.MarkProjectBuilt(ok, proj_name)
             # Accumulate per-project error/warning counts for global footer summary
             last_logger = getattr(self, '_last_logger', None)
             if last_logger:
@@ -2504,7 +2546,8 @@ class Builder(abc.ABC):
                 success_count += 1
             else:
                 fail_count += 1
-                if not self.verbose:
+                hors_jeu[proj_name] = proj_name   # fautive d'elle-meme
+                if not self.keepGoing:
                     break
 
         # Print footer

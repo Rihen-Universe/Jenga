@@ -233,6 +233,11 @@ class Daemon:
         platform = args.get('platform', 'Windows')
         target = args.get('target')
         verbose = args.get('verbose', False)
+        # Sans ce relais, `jenga build --keep-going` s'arreterait quand meme au
+        # premier echec des qu'un daemon tourne — le drapeau serait accepte par
+        # la ligne de commande et ignore en silence, ce qui est precisement le
+        # defaut que ce mode existe pour corriger.
+        keep_going = bool(args.get('keep_going', False))
         from ..Commands.Build import BuildCommand
         action = args.get('action', 'build')
         cli_custom_options = args.get('custom_options') or {}
@@ -268,13 +273,15 @@ class Daemon:
                 target=target,
                 verbose=verbose,
                 action=action,
-                options=options
+                options=options,
+                keepGoing=keep_going
             )
         else:
             builder = BuildCommand.CreateBuilder(
                 self.workspace, config, platform, target, verbose,
                 action=action,
-                options=options
+                options=options,
+                keepGoing=keep_going
             )
             return_code = builder.Build(target)
         return {

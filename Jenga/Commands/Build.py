@@ -223,7 +223,8 @@ class BuildCommand:
                       verbose: bool,
                       action: str = "build",
                       options: Optional[List[str]] = None,
-                      jobs: int = 0) -> Builder:
+                      jobs: int = 0,
+                      keepGoing: bool = False) -> Builder:
         """Crée un builder pour la configuration et la plateforme spécifiées."""
         # Déterminer la cible à partir de la plateforme
         target_os = None
@@ -338,6 +339,7 @@ class BuildCommand:
                 options=options or []
             )
             builder.jobs = jobs  # Set parallel jobs count
+            builder.keepGoing = bool(keepGoing)
             return builder
         except TypeError as e:
             # Backward compatibility: some concrete builders still expose the old __init__ signature.
@@ -356,6 +358,7 @@ class BuildCommand:
             builder.action = (action or "build").strip().lower()
             builder.options = sorted({str(opt).strip().lower() for opt in (options or []) if str(opt).strip()})
             builder.jobs = jobs  # Set parallel jobs count
+            builder.keepGoing = bool(keepGoing)
             if getattr(builder, "_expander", None) is not None:
                 cfg = dict(getattr(builder._expander, "_config", {}) or {})
                 cfg["action"] = builder.action
@@ -436,7 +439,8 @@ class BuildCommand:
                              target: Optional[str], verbose: bool,
                              action: str = "build",
                              options: Optional[List[str]] = None,
-                             jobs: int = 0) -> int:
+                             jobs: int = 0,
+                             keepGoing: bool = False) -> int:
         """
         Build séquentiel sur plusieurs plateformes.
         Continue même si une plateforme échoue, puis renvoie un code global.
@@ -459,7 +463,8 @@ class BuildCommand:
                     verbose=verbose,
                     action=action,
                     options=(options or []) + [f"platform:{platform_name}"],
-                    jobs=jobs
+                    jobs=jobs,
+                    keepGoing=keepGoing
                 )
             except Exception as e:
                 failures += 1
@@ -520,6 +525,10 @@ class BuildCommand:
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon even if available")
         parser.add_argument("--jobs", "-j", type=int, default=0,
                             help="Number of parallel compilation jobs (0 = auto-detect CPU cores, 1 = sequential)")
+        parser.add_argument("--keep-going", "-k", action="store_true",
+                            help="Build everything that can be built instead of stopping at the first "
+                                 "failure; the footer then reports succeeded / failed / skipped "
+                                 "(blocked by a failed dependency)")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
         parser.add_argument("--toolchain", default=None,
                             help="Force a specific detected toolchain by name (e.g. msvc, clang-cl, mingw). "
@@ -596,6 +605,7 @@ class BuildCommand:
                         'options': daemon_filter_options,
                         'custom_options': cli_custom_options,
                         'action': parsed.action,
+                        'keep_going': parsed.keep_going,
                     })
                     if response.get('status') == 'ok':
                         return response.get('return_code', 0)
@@ -687,7 +697,8 @@ class BuildCommand:
                 verbose=parsed.verbose,
                 action=parsed.action,
                 options=filter_options,
-                jobs=parsed.jobs
+                jobs=parsed.jobs,
+                keepGoing=parsed.keep_going
             )
 
         # 2. Créer le builder
@@ -700,7 +711,8 @@ class BuildCommand:
                 verbose=parsed.verbose,
                 action=parsed.action,
                 options=filter_options,
-                jobs=parsed.jobs
+                jobs=parsed.jobs,
+                keepGoing=parsed.keep_going
             )
         except Exception as e:
             Colored.PrintError(f"Cannot create builder: {e}")
@@ -733,7 +745,8 @@ class BuildCommand:
                     verbose=parsed.verbose,
                     action=parsed.action,
                     options=filter_options,
-                    jobs=parsed.jobs
+                    jobs=parsed.jobs,
+                    keepGoing=parsed.keep_going
                 )
             except Exception as e:
                 Colored.PrintError(f"Cannot create builder after cache refresh: {e}")
