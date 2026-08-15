@@ -9,7 +9,7 @@ All public methods are PascalCase.
 
 import json
 import time, sys, re as _re, threading
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
 from datetime import datetime
 
@@ -27,6 +27,7 @@ from .Process import ProcessResult
 # Methodes attendues (toutes optionnelles, PascalCase) :
 #   OnProjectTotal(total)                    # en-tete "Build Order (N projects)"
 #   OnProjectDone(success)                   # un projet fini (succes/echec)
+#   OnProjectSkipped(project, blocker)       # non TENTE : une dependance a echoue
 #   OnFileTotal(project, total)              # "Found N source file(s)"
 #   OnFileDone(project, index, total, file, ok, warned)   # "[k/n] Compiled..."
 #   OnCompileError(project, file, message)   # "Compilation failed: ..."
@@ -947,6 +948,12 @@ class BuildCoordinator:
         self._projects_failed = 0
         self._total_errors = 0
         self._total_warnings = 0
+        # Noms, pour un compte-rendu qui dit LESQUELLES et POURQUOI. Les
+        # compteurs ci-dessus ne disaient qu'un nombre : sur 272 cibles, savoir
+        # qu'il y a « 12 echecs » n'apprend rien tant qu'on ne sait pas si les
+        # 12 sont cassees ou si 11 attendent la meme.
+        self._failed_names: List[str] = []
+        self._skipped: List[Tuple[str, str]] = []   # (cible, cause)
 
     def PrintHeader(self, build_order: List[tuple], cache_status: str = None) -> None:
         """Print the global build header with build order visualization.
@@ -1018,6 +1025,23 @@ class BuildCoordinator:
         if self._projects_failed > 0:
             print(Colored.Colorize("Failed:        ", color='cyan') + f" {Colored.Colorize(str(self._projects_failed), color='red', bold=True)}")
 
+        if self._skipped:
+            print(Colored.Colorize("Skipped:       ", color='cyan')
+                  + f" {Colored.Colorize(str(len(self._skipped)), color='yellow', bold=True)}"
+                  + Colored.Colorize("  (dependance echouee)", color='yellow', dim=True))
+
+        # Cibles JAMAIS ATTEINTES : le build s'est arrete avant elles. Sans
+        # cette ligne, un « 68/203 » se lit comme « 135 cassees » alors qu'on
+        # n'en sait rien — c'est la lecture qui a cadre un chantier entier.
+        not_reached = self._projects_total - (
+            self._projects_built + self._projects_failed + len(self._skipped)
+        )
+        if not_reached > 0:
+            print(Colored.Colorize("Not reached:   ", color='cyan')
+                  + f" {Colored.Colorize(str(not_reached), color='yellow', bold=True)}"
+                  + Colored.Colorize("  (arret au premier echec — voir --keep-going)",
+                                     color='yellow', dim=True))
+
         if self._total_errors > 0:
             print(Colored.Colorize("Errors:        ", color='cyan') + f" {Colored.Colorize(str(self._total_errors), color='red', bold=True)}")
 
@@ -1033,14 +1057,62 @@ class BuildCoordinator:
 
         print(Colored.Colorize("Status:        ", color='cyan') + f" {status_text}")
         print(Colored.Colorize("═" * w, color='cyan', bold=True))
+
+        # ── Le detail : LESQUELLES, et pourquoi ──────────────────────────────
+        #
+        # Un compte seul oblige a remonter des milliers de lignes de journal
+        # pour retrouver les noms. Les deux listes sont separees a dessein : la
+        # premiere est du travail a faire, la seconde est du travail qui attend
+        # la premiere. Les confondre, c'est ouvrir douze tickets pour un defaut.
+        if self._failed_names:
+            print()
+            print(Colored.Colorize(f"Echecs ({len(self._failed_names)}) — a corriger :",
+                                   color='red', bold=True))
+            for nom in self._failed_names:
+                print("  " + Colored.Colorize("✗", color='red') + f" {nom}")
+
+        if self._skipped:
+            par_cause: Dict[str, List[str]] = {}
+            for cible, cause in self._skipped:
+                par_cause.setdefault(cause, []).append(cible)
+            print()
+            print(Colored.Colorize(
+                f"Sautees ({len(self._skipped)}) — bloquees par une dependance, non tentees :",
+                color='yellow', bold=True))
+            for cause in sorted(par_cause):
+                cibles = ", ".join(sorted(par_cause[cause]))
+                print("  " + Colored.Colorize("⊘", color='yellow')
+                      + f" en attente de {Colored.Colorize(cause, color='red', bold=True)} : {cibles}")
+
         print()
 
-    def MarkProjectBuilt(self, success: bool) -> None:
-        """Mark a project as built."""
-        self._projects_built += 1
-        if not success:
+    def MarkProjectBuilt(self, success: bool, name: str = "") -> None:
+        """Marque une cible comme TENTEE, et enregistre le resultat.
+
+        `_projects_built` ne compte QUE les reussites. Il incrementait jusqu'ici
+        a chaque tentative, echec compris : le pied de page annoncait
+        « Projects Built: 1/5 » sur un build ou zero cible avait abouti, et
+        « 5/5 » sur un build ou trois seulement etaient passees (mesure du
+        15/08). Un compteur nomme « Built » qui compte les echecs est
+        exactement le defaut que ce chantier corrige.
+        """
+        if success:
+            self._projects_built += 1
+        else:
             self._projects_failed += 1
+            if name:
+                self._failed_names.append(name)
         _SinkCall("OnProjectDone", success)
+
+    def MarkProjectSkipped(self, name: str, blocker: str) -> None:
+        """Marque une cible NON TENTEE parce qu'une dependance a echoue.
+
+        Troisieme etat, distinct des deux autres : la cible n'est ni reussie ni
+        cassee — on ne sait rien d'elle. La confondre avec un echec accuse du
+        code qui n'a jamais ete compile ; la confondre avec un succes est pire.
+        """
+        self._skipped.append((name, blocker))
+        _SinkCall("OnProjectSkipped", name, blocker)
 
     def AccumulateStats(self, errors: int, warnings: int) -> None:
         """Accumulate error/warning counts from a project build."""
