@@ -20,7 +20,7 @@ from ..Core import Api
 
 
 class BuildCommand:
-    """jenga build [--config NAME] [--platform NAME] [--target PROJECT] [--action NAME] [--no-cache] [--verbose]"""
+    """jenga build [--config NAME] [--platform NAME] [--target|--project PROJECT] [--action NAME] [--no-cache] [--verbose]"""
     ALL_PLATFORMS_TOKEN = "jengaall"
 
     @staticmethod
@@ -516,6 +516,13 @@ class BuildCommand:
         parser.add_argument("--config", default="Debug", help="Build configuration (Debug, Release, etc.)")
         parser.add_argument("--platform", default=None, help="Target platform (Windows, Linux, Android-arm64, etc.) or 'jengaall'")
         parser.add_argument("--target", default=None, help="Specific project to build")
+        # ALIAS de --target. Sans lui, `--project X` tombait dans parse_known_args,
+        # etait interprete comme une option personnalisee de workspace, et le build
+        # construisait TOUT en silence en imputant l'echec au mauvais module.
+        # `jenga test` acceptait deja --project : deux sous-commandes ne peuvent pas
+        # donner deux sens au meme drapeau.
+        parser.add_argument("--project", default=None,
+                            help="Alias of --target: specific project to build")
         parser.add_argument("--action", default="build", help="Action context for filters (default: build)")
         parser.add_argument("--android-build-system", choices=["native", "ndk-mk"], default=None,
                             help="Android build mode override (default: native)")
@@ -544,6 +551,15 @@ class BuildCommand:
                             help="Force a specific detected toolchain by name (e.g. msvc, clang-cl, mingw). "
                                  "Optional: omit to auto-resolve the best matching toolchain.")
         parsed, unknown_args = parser.parse_known_args(args)
+        # --project est un alias de --target. Les donner tous les deux avec des
+        # valeurs differentes est une erreur : on refuse plutot que d'en choisir un.
+        if parsed.project:
+            if parsed.target and parsed.target != parsed.project:
+                Colored.PrintError(
+                    "--target %s et --project %s se contredisent ; --project est un "
+                    "alias de --target." % (parsed.target, parsed.project))
+                return 1
+            parsed.target = parsed.project
         try:
             cli_custom_options = BuildCommand.ParseCustomOptionArgs(unknown_args)
         except ValueError as e:

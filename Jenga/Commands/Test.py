@@ -19,7 +19,7 @@ from .Build import BuildCommand
 
 
 class TestCommand:
-    """jenga test [--config NAME] [--platform NAME] [--project NAME] [--no-build]"""
+    """jenga test [--config NAME] [--platform NAME] [--project NAME] [--no-build] [--force]"""
 
     @staticmethod
     def Execute(args: List[str]) -> int:
@@ -28,6 +28,25 @@ class TestCommand:
         parser.add_argument("--platform", default=None, help="Target platform")
         parser.add_argument("--project", default=None, help="Specific test project to run")
         parser.add_argument("--no-build", action="store_true", help="Skip build step")
+        # --force leve la politique de workspace POUR CETTE INVOCATION.
+        #
+        # POURQUOI ELLE EXISTE : `dutc`/`dute` excluent les projets de test du
+        # build par defaut -- c'est legitime, un workspace de 100 projets ne doit
+        # pas payer ses tests a chaque compilation.
+        #
+        # POURQUOI ELLE DOIT POUVOIR SE LEVER : sans contournement, la politique
+        # ne rend pas les tests optionnels, elle les rend INEXISTANTS. Un banc qui
+        # ne peut jamais s'executer ne peut jamais contredire ce que le code
+        # affirme. Mesure sur Nkentseu le 2026-08-21 : un en-tete annoncait une
+        # capacite comme "non implementee" alors qu'elle l'etait, et l'erreur a
+        # survecu DEUX MOIS -- non par negligence, mais parce que rien dans le
+        # depot ne pouvait la refuter.
+        #
+        # Explicite par invocation : le defaut reste rapide, la preuve reste
+        # possible.
+        parser.add_argument("--force", action="store_true",
+                            help="Run tests even when the workspace disables unit-test "
+                                 "compilation/execution (dutc/dute). Per-invocation override.")
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
@@ -80,17 +99,18 @@ class TestCommand:
                 Colored.PrintError("Failed to load workspace.")
                 return 1
 
-        if bool(getattr(workspace, "disableUnitTestExecution", False)):
+        if (not parsed.force) and bool(getattr(workspace, "disableUnitTestExecution", False)):
             Colored.PrintError(
                 "Unit-test execution is disabled by workspace policy "
-                "(disableunittestexecution)."
+                "(disableunittestexecution). Use --force to override."
             )
             return 1
 
-        if (not parsed.no_build) and bool(getattr(workspace, "disableUnitTestCompilation", False)):
+        if (not parsed.no_build) and (not parsed.force) and bool(getattr(workspace, "disableUnitTestCompilation", False)):
             Colored.PrintError(
                 "Unit-test compilation is disabled by workspace policy "
-                "(disableunittestcompilation). Use --no-build to run existing binaries."
+                "(disableunittestcompilation). Use --force to build them anyway, "
+                "or --no-build to run existing binaries."
             )
             return 1
 

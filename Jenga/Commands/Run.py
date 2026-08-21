@@ -31,6 +31,12 @@ class RunCommand:
         parser.add_argument("--platform", default=None, help="Target platform")
         parser.add_argument("--args", nargs=argparse.REMAINDER, default=[], help="Arguments to pass to the executable")
         parser.add_argument("--build", action="store_true", help="Force rebuild before running (default: skip build)")
+        # Meme contournement que `jenga test --force`, et pour la meme raison :
+        # une politique qui ne peut pas se lever ne rend pas les tests optionnels,
+        # elle les rend inexistants -- donc incapables de contredire le code.
+        parser.add_argument("--force", action="store_true",
+                            help="Run/build a test project even when the workspace disables "
+                                 "unit tests (dutc/dute). Per-invocation override.")
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
         parser.add_argument("--target", help="Mobile only: device serial / UDID to run on (skip if a single device is connected)")
@@ -178,14 +184,14 @@ class RunCommand:
             or project.name == "__Unitest__"
         )
 
-        if is_test_project and bool(getattr(workspace, "disableUnitTestExecution", False)):
+        if is_test_project and (not parsed.force) and bool(getattr(workspace, "disableUnitTestExecution", False)):
             Colored.PrintError(
                 "Unit-test execution is disabled by workspace policy "
-                "(disableunittestexecution)."
+                "(disableunittestexecution). Use --force to override."
             )
             return 1
 
-        if parsed.build and is_test_project and bool(getattr(workspace, "disableUnitTestCompilation", False)):
+        if parsed.build and is_test_project and (not parsed.force) and bool(getattr(workspace, "disableUnitTestCompilation", False)):
             Colored.PrintError(
                 "Unit-test compilation is disabled by workspace policy "
                 "(disableunittestcompilation)."
