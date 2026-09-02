@@ -502,13 +502,47 @@ def ConfigurePyrightConfig(workspace_root: Path, force: bool = False,
 def DetectEditors(workspace_root: Path) -> List[str]:
     """
     Detecte quels editeurs sont configures dans le workspace.
-    Retourne une liste de tags : 'vscode', 'jetbrains', 'sublime', 'neovim',
-    'lsp-generic'. Si aucun marqueur n'est trouve, retourne ['vscode', 'lsp-generic']
-    par defaut (couvre la majorite des setups).
+    Retourne une liste de tags : 'vscode', 'nkcode', 'jetbrains', 'sublime',
+    'neovim', 'lsp-generic'.
+
+    ⚠️ ON N'ASSUME PLUS VSCODE QUAND RIEN N'EST DETECTE, et c'est la correction
+    de fond de cette fonction (2026-09-02, signalee par Rodolf : « le .vscode ne
+    devait etre la que quand on code sur vscode, pas sur nkcode »).
+
+    L'ancienne version finissait par :
+
+        if not any(e in found for e in (...)):
+            found.insert(0, "vscode")     # « le plus repandu »
+
+    Trois defauts, et le deuxieme est le pire :
+
+    1. ELLE CREAIT UN DOSSIER QUE PERSONNE N'AVAIT DEMANDE. Un utilisateur de
+       NKCode obtenait un `.vscode/settings.json` des la creation du workspace,
+       pour un editeur qu'il n'ouvre jamais.
+    2. LE DOSSIER CREE ETAIT ENSUITE DETECTE, dix lignes plus haut, par
+       `(workspace_root / ".vscode").exists()`. Une SUPPOSITION du premier
+       passage devenait un FAIT au second, definitivement. Un defaut qui se
+       consolide lui-meme ne se corrige jamais tout seul -- et il devient
+       indiscernable d'un choix de l'utilisateur.
+    3. Elle ecrivait dans un fichier que l'utilisateur partage avec ses propres
+       reglages, donc versionne, qui bougeait a chaque commande.
+
+    CE QUI REMPLACE : on n'ecrit que pour un editeur DONT LA TRACE EXISTE. Sans
+    trace, seul `pyrightconfig.json` est produit -- il n'appartient a aucun
+    editeur, il sert tous les clients LSP (NKCode compris), et il n'engage rien.
+
+    Un utilisateur de VSCode qui n'a pas encore de `.vscode/` le demande une
+    fois : `jenga ide-setup --editor vscode`. Un opt-in explicite vaut mieux
+    qu'un dossier apparu tout seul.
     """
     found: List[str] = []
     if (workspace_root / ".vscode").exists():
         found.append("vscode")
+    # NKCode marque son espace de travail par un dossier `.nkcode/`. Il consomme
+    # pyrightconfig.json comme n'importe quel client LSP : il n'a RIEN a faire
+    # d'un `.vscode/`, et c'est tout l'objet de cette detection.
+    if (workspace_root / ".nkcode").exists():
+        found.append("nkcode")
     if (workspace_root / ".idea").exists() or list(workspace_root.glob("*.iml")):
         found.append("jetbrains")
     if list(workspace_root.glob("*.sublime-project")):
@@ -517,13 +551,11 @@ def DetectEditors(workspace_root: Path) -> List[str]:
        (workspace_root / "init.lua").exists():
         found.append("neovim")
 
-    # Toujours generer pyrightconfig.json (universel LSP, ne nuit pas).
+    # Toujours generer pyrightconfig.json (universel LSP, ne nuit pas) : c'est
+    # le seul fichier que Jenga s'autorise a produire sans marqueur, parce
+    # qu'il n'appartient a aucun editeur en particulier.
     if "lsp-generic" not in found:
         found.append("lsp-generic")
-
-    # Si rien detecte, on assume VSCode (le plus repandu) en plus du LSP generique.
-    if not any(e in found for e in ("vscode", "jetbrains", "sublime", "neovim")):
-        found.insert(0, "vscode")
 
     return found
 
