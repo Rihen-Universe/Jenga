@@ -1269,6 +1269,74 @@ class TestXboxIntegration:
         ast.parse(example.read_text(encoding="utf-8"), filename=str(example))
 
 
+class TestIDEEditorDetection:
+    """
+    Jenga ne doit configurer QUE les editeurs dont la trace existe.
+
+    Historique : DetectEditors finissait par « si rien detecte, on assume
+    VSCode ». Le dossier ainsi cree etait ENSUITE detecte par le test
+    (root / ".vscode").exists() -- donc une supposition devenait un fait au
+    passage suivant, definitivement. Corrige le 2026-09-02.
+
+    Le quatrieme cas est l'ANTI-REGRESSION : sans lui, cette classe prouverait
+    seulement qu'on a desactive quelque chose.
+    """
+
+    def test_espace_vierge_ne_produit_pas_vscode(self):
+        from Jenga.Core.IDEConfigurator import DetectEditors
+        with tempfile.TemporaryDirectory() as d:
+            found = DetectEditors(Path(d))
+        assert "vscode" not in found, (
+            "un espace sans aucun marqueur ne doit pas reclamer VSCode ; "
+            "obtenu : %s" % found)
+
+    def test_espace_vierge_produit_quand_meme_le_lsp(self):
+        """Sans marqueur, pyrightconfig reste du : il n'appartient a personne."""
+        from Jenga.Core.IDEConfigurator import DetectEditors
+        with tempfile.TemporaryDirectory() as d:
+            found = DetectEditors(Path(d))
+        assert "lsp-generic" in found
+
+    def test_marqueur_nkcode_detecte(self):
+        """NKCode ecrit reellement <racine>/.nkcode/ (compile_commands, session)."""
+        from Jenga.Core.IDEConfigurator import DetectEditors
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".nkcode").mkdir()
+            found = DetectEditors(Path(d))
+        assert "nkcode" in found
+        assert "vscode" not in found, (
+            "un espace NKCode ne doit pas se voir attribuer VSCode")
+
+    def test_vscode_existant_reste_configure(self):
+        """ANTI-REGRESSION : on ne retire rien a qui utilise deja VSCode."""
+        from Jenga.Core.IDEConfigurator import DetectEditors
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".vscode").mkdir()
+            found = DetectEditors(Path(d))
+        assert "vscode" in found
+
+    def test_le_repli_vscode_n_est_pas_revenu(self):
+        """
+        Garde de source : le repli se reintroduit facilement en une ligne, et
+        sa reapparition serait invisible aux quatre cas ci-dessus le jour ou
+        quelqu'un le remet APRES une detection reussie.
+        """
+        import ast
+        src = (ROOT / "Jenga" / "Core" / "IDEConfigurator.py").read_text(encoding="utf-8")
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef) and n.name == "DetectEditors")
+        # On lit le CORPS, docstring exclue. Chercher la chaine dans le texte du
+        # fichier donne un FAUX POSITIF : la docstring cite l'ancien code pour
+        # expliquer ce qui a ete retire. Un garde-fou qui ne distingue pas le
+        # code de ce qui PARLE du code accuse la documentation.
+        corps = fn.body[1:] if (fn.body and isinstance(fn.body[0], ast.Expr)
+                                and isinstance(fn.body[0].value, ast.Constant)
+                                and isinstance(fn.body[0].value.value, str)) else fn.body
+        code = "".join(ast.unparse(n) for n in corps)
+        assert "insert(0, 'vscode')" not in code.replace('"', "'"), (
+            "le repli « on assume VSCode » est revenu dans DetectEditors")
+
+
 # ===========================================================================
 # Main entry point (for running without pytest)
 # ===========================================================================
