@@ -42,6 +42,58 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage 
     (`jenga examples copy Nkentseu` dans un clone), ce qui retourne désormais
     l'erreur « exemple introuvable » habituelle.
 
+### Changement de comportement
+
+- **Jenga ne crée plus de `.vscode/` quand aucun éditeur n'est détecté.**
+  Signalé par un utilisateur de NKCode : *« je croyais que le `.vscode` ne devait
+  être là que quand on code sur VSCode »*. Il avait raison — `DetectEditors`
+  finissait par :
+
+  ```python
+  # Si rien detecte, on assume VSCode (le plus repandu) [...]
+  if not any(e in found for e in ("vscode", "jetbrains", "sublime", "neovim")):
+      found.insert(0, "vscode")
+  ```
+
+  Trois défauts, et **le deuxième est celui qui rendait la chose durable** :
+
+  1. un dossier apparaissait pour un éditeur que l'utilisateur n'ouvre jamais ;
+  2. ce dossier était ensuite **détecté** par le test `(root / ".vscode").exists()`
+     dix lignes plus haut — donc une *supposition* du premier passage devenait un
+     *fait* au second, définitivement. Un défaut qui se confirme lui-même ne se
+     corrige jamais tout seul, et il devient indiscernable d'un choix de
+     l'utilisateur ;
+  3. il écrivait dans un fichier versionné que l'utilisateur partage avec ses
+     propres réglages.
+
+  **Ce qui remplace** : Jenga n'écrit que pour un éditeur **dont la trace
+  existe**. Sans trace, seul `pyrightconfig.json` est produit — il n'appartient à
+  aucun éditeur, tout client LSP le consomme (NKCode compris), et il n'engage
+  rien.
+
+  **`.nkcode/` est désormais reconnu** comme marqueur d'espace de travail. Ce
+  n'est pas décoratif : NKCode y écrit réellement `compile_commands.json`,
+  `session.nk`, `ui.cfg` et `last_build_fail.log`.
+
+  **Rien n'est retiré à VSCode.** Un espace qui a déjà un `.vscode/` continue
+  d'être configuré ; celui qui n'en a pas encore le demande une fois, par
+  `jenga ide-setup --editor vscode`. *Un opt-in explicite vaut mieux qu'un
+  dossier apparu tout seul.*
+
+  Vérifié par quatre cas, dont un d'anti-régression — sans lui on prouverait
+  seulement qu'on a désactivé quelque chose :
+
+  | cas | `.vscode/` | `pyrightconfig.json` |
+  |---|---|---|
+  | espace vierge, aucun marqueur | non | oui |
+  | espace avec `.nkcode/` | non | oui |
+  | espace avec `.vscode/` déjà là | **oui** | oui |
+  | `ide-setup --editor vscode` | **oui** | — |
+
+  ⚠️ **Et la contre-épreuve a été faite** : le défaut réinjecté, le premier cas
+  repasse à `.vscode/` créé. Un banc qui n'a jamais rougi est une intention, pas
+  un contrôle.
+
 ### Limites connues
 
 - **Jenga perd ici son seul exemple à grande échelle**, et c'est mesuré :
