@@ -7,11 +7,13 @@ AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import List
 
 from ..Core import Api
+from ..Utils.RuntimeDiag import RuntimeDiag
 from ..Core.Loader import Loader
 from ..Core.Cache import Cache
 from ..Core.Builder import Builder
@@ -48,6 +50,14 @@ class TestCommand:
         parser.add_argument("--force", action="store_true",
                             help="Run tests even when the workspace disables unit-test "
                                  "compilation/execution (dutc/dute). Per-invocation override.")
+        # Par defaut le runner met en tete du PATH le bin de la chaine et les
+        # dossiers des SharedLib de l'espace de travail : sans cela, une suite
+        # liee contre libstdc++-6.dll sort en 127 sans un mot (Nkentseu,
+        # 2026-09-04). Ce drapeau reproduit l'environnement d'un utilisateur —
+        # c'est ainsi qu'on verifie qu'un binaire est autonome.
+        parser.add_argument("--no-runtime-path", action="store_true",
+                            help="Do not prepend the toolchain/shared-lib directories to PATH "
+                                 "when running (checks the binary runs on its own).")
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
@@ -79,6 +89,7 @@ class TestCommand:
                         'project': parsed.project,
                         'no_build': parsed.no_build,
                         'force': parsed.force,
+                        'no_runtime_path': parsed.no_runtime_path,
                         'verbose': parsed.verbose
                     })
                     if response.get('status') == 'ok':
@@ -234,11 +245,39 @@ class TestCommand:
 
             # Exécuter avec les options de test
             cmd = [str(exe_path)] + proj.testOptions
-            result = Process.ExecuteCommand(cmd, captureOutput=False, silent=False)
+            env, prepended = TestCommand.RuntimeEnvironment(builder, proj, parsed.no_runtime_path)
+            if prepended and parsed.verbose:
+                Colored.PrintInfo("Runtime search path prepended: " + os.pathsep.join(prepended))
+            result = Process.ExecuteCommand(cmd, captureOutput=False, silent=False, env=env)
             if result.returnCode != 0:
                 overall = 1
-                Colored.PrintError(f"Tests failed for {name}.")
+                # Un binaire qui n'a PAS demarre n'est pas un test rouge : il
+                # faut le dire, avec la DLL soupconnee, sinon il passe pour
+                # un echec ordinaire — ou pour rien (127 muet).
+                why = RuntimeDiag.Explain(result.returnCode, exe_path,
+                                          (env or os.environ).get("PATH", ""), prepended)
+                if why:
+                    Colored.PrintError(why)
+                Colored.PrintError(f"Tests failed for {name} (exit code {RuntimeDiag.CodeName(result.returnCode)}).")
             else:
                 Colored.PrintSuccess(f"All tests passed for {name}.")
 
         return overall
+
+    @staticmethod
+    def RuntimeEnvironment(builder, project, noRuntimePath: bool):
+        """(env, prepended) pour lancer `project` : PATH avec, en tete, les
+        repertoires que Builder.RuntimeSearchPaths() a nommes. env=None quand
+        il n'y a rien a ajouter (ou --no-runtime-path) : l'environnement du
+        parent sert tel quel, comme avant 2.6.0."""
+        if noRuntimePath:
+            return None, []
+        try:
+            prepended = builder.RuntimeSearchPaths(project)
+        except Exception as e:  # noqa: BLE001 — ne jamais empecher l'execution
+            Colored.PrintWarning(f"Runtime search path unavailable ({e}); running with the parent PATH.")
+            return None, []
+        if not prepended:
+            return None, []
+        path = os.pathsep.join(prepended + [os.environ.get("PATH", "")])
+        return {"PATH": path}, prepended

@@ -786,6 +786,169 @@ class Builder(abc.ABC):
             return Path(binDir).resolve()
         return self.GetTargetDir(project)
 
+    # ------------------------------------------------------------------
+    # Execution d'une cible : ce qu'il faut sur le PATH pour qu'elle DEMARRE
+    # ------------------------------------------------------------------
+
+    def ResolveProjectToolchain(self, project: Project) -> Toolchain:
+        """La chaine qui construit CE projet (filtres appliques), sans
+        toucher a self.toolchain — meme regle que BuildProject()."""
+        self._ApplyProjectFilters(project)
+        if getattr(project, "_explicitToolchain", False) and project.toolchain:
+            tc = self.workspace.toolchains.get(project.toolchain)
+            if not tc:
+                tc = self.toolchainManager.GetToolchain(project.toolchain)
+            if tc:
+                return tc
+        return self.toolchain
+
+    def RuntimeSearchPaths(self, project: Project) -> List[str]:
+        """Repertoires a mettre EN TETE du PATH pour executer la cible.
+
+        Mesure sur Nkentseu le 2026-09-04 : `NKMath_Tests.exe`, lie contre
+        libstdc++-6.dll de la chaine clang-mingw, sortait en 127 sans un mot
+        des que ucrt64/bin n'etait pas sur le PATH — la suite etait verte, le
+        verdict n'arrivait pas. Le runner prepend donc :
+          - le repertoire des executables de la chaine du projet (celui de
+            cxx/cc/ld/ar, puis toolchainDir et toolchainDir/bin) ;
+          - le dossier de sortie de chaque SharedLib dont la cible depend,
+            transitivement (une DLL de l'espace de travail manque autant
+            qu'une DLL de la chaine).
+        Rien de tout cela ne remplace un lien statique du runtime : c'est ce
+        qu'il faut pour que le test PARLE, pas pour que le binaire soit livrable.
+        """
+        dirs: List[str] = []
+
+        def add(p) -> None:
+            if not p:
+                return
+            try:
+                s = str(Path(p).resolve())
+            except OSError:
+                return
+            if s not in dirs and Path(s).is_dir():
+                dirs.append(s)
+
+        tc = self.ResolveProjectToolchain(project)
+        for attr in ("cxxPath", "ccPath", "ldPath", "arPath"):
+            v = getattr(tc, attr, None)
+            if not v:
+                continue
+            pv = Path(str(v))
+            if pv.parent != Path("."):
+                add(pv.parent)
+            else:
+                w = shutil.which(str(v))
+                if w:
+                    add(Path(w).parent)
+        td = getattr(tc, "toolchainDir", None)
+        if td:
+            add(Path(td) / "bin")
+            add(td)
+
+        seen: Set[str] = set()
+        stack = list(getattr(project, "dependsOn", []) or [])
+        while stack:
+            name = stack.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            dep = self.workspace.projects.get(name)
+            if dep is None:
+                continue
+            self._ApplyProjectFilters(dep)
+            if dep.kind == ProjectKind.SHARED_LIB:
+                add(self.GetTargetPath(dep).parent)
+            stack.extend(getattr(dep, "dependsOn", []) or [])
+        return dirs
+
+    # ------------------------------------------------------------------
+    # Un seul main() par suite de tests
+    # ------------------------------------------------------------------
+
+    _MAIN_DEF_RE = re.compile(
+        r'^[ \t]*(?:extern\s+"C"\s+)?(?:int|auto|void)\s+(?:w?main|w?WinMain)\s*\(', re.M)
+    _COMMENT_RE = re.compile(r'/\*.*?\*/|//[^\n]*', re.S)
+    _MAIN_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".c++", ".m", ".mm"}
+
+    @classmethod
+    def FilesDefiningMain(cls, sources: List[str]) -> List[str]:
+        """Fichiers sources qui DEFINISSENT un point d'entree (main, wmain,
+        WinMain, wWinMain) — une accolade avant le point-virgule qui suit la
+        signature ; une simple declaration ne compte pas, un commentaire non
+        plus. Heuristique textuelle : un main() sous `#if 0` compte encore.
+        Elle est bruyante quand elle se trompe (une erreur, pas un silence) ;
+        dans l'autre sens, l'editeur de liens rattrape le doublon."""
+        found: List[str] = []
+        for src in sources:
+            p = Path(src)
+            if p.suffix.lower() not in cls._MAIN_SUFFIXES:
+                continue
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            text = cls._COMMENT_RE.sub(" ", text)
+            for m in cls._MAIN_DEF_RE.finditer(text):
+                rest = text[m.end():]
+                brace, semi = rest.find("{"), rest.find(";")
+                if brace != -1 and (semi == -1 or brace < semi):
+                    found.append(str(src))
+                    break
+        return found
+
+    def _CheckTestSuiteMain(self, project: Project, sources: List[str]) -> bool:
+        """Refuse, en le disant, une suite a zero ou deux main() (2.6.0).
+
+        - testownmain() et aucun main() dans ses sources -> erreur ;
+        - deux main() ou plus, quelle que soit la forme -> erreur qui nomme
+          les fichiers (NKSerialization en a 6 : six sous-suites, pas une) ;
+        - un main() sans testownmain() alors que Jenga en genere un -> erreur
+          qui dit le mot a ecrire — sauf si testmaintemplate() a ete pose a
+          la main (l'ancien contournement au fichier vide reste valide).
+        """
+        # Le gabarit automatique est pose par le DSL sous forme de variable,
+        # puis EXPANSE par le Loader en chemin absolu vers Unitest/Entry/Entry.cpp :
+        # les deux formes designent le gabarit de Jenga, pas celui de l'utilisateur.
+        own = bool(getattr(project, "testOwnMain", False))
+        tpl = str(getattr(project, "testMainTemplate", "") or "")
+        is_auto = (tpl == "%{Jenga.Unitest.AutoMainTemplate}"
+                   or (Path(tpl).name == "Entry.cpp" and "unitest" in tpl.lower()))
+        user_template = bool(tpl) and not is_auto
+        candidates = [s for s in sources
+                      if not (Path(s).name == "Entry.cpp" and "unitest" in str(s).lower())]
+        mains = self.FilesDefiningMain(candidates)
+
+        def rel(p: str) -> str:
+            try:
+                return os.path.relpath(p, self.workspace.location)
+            except ValueError:
+                return p
+
+        if len(mains) >= 2:
+            Reporter.Error(
+                f"Test suite '{project.name}' defines main() in {len(mains)} files: "
+                + ", ".join(rel(m) for m in mains)
+                + ". One suite, one main: declare one sub-suite per program "
+                  "(with test(\"Sub\"): testfiles([...]); testownmain()) "
+                  "or exclude the extra programs (excludefiles)."
+            )
+            return False
+        if own and not mains:
+            Reporter.Error(
+                f"Test suite '{project.name}' declares testownmain() but none of its "
+                f"{len(candidates)} source file(s) defines main()."
+            )
+            return False
+        if mains and not own and not user_template:
+            Reporter.Error(
+                f"Test suite '{project.name}' defines main() in {rel(mains[0])} while Jenga "
+                f"generates one (Unitest AutoMain): declare testownmain() in its test() block, "
+                f"or exclude the file (excludefiles)."
+            )
+            return False
+        return True
+
     def GetTargetPath(self, project: Project) -> Path:
         target_dir = self.GetTargetDir(project)
         target_name = project.targetName or project.name
@@ -2019,6 +2182,12 @@ class Builder(abc.ABC):
             self.state.MarkProjectCompiled(project.name, success=True, platform=self.platform,
                                         targetArch=self.targetArch.value if self.targetArch else "")
             return True
+        if (project.isTest or project.kind == ProjectKind.TEST_SUITE) \
+                and not self._CheckTestSuiteMain(project, sources):
+            self.state.MarkProjectCompiled(project.name, success=False, platform=self.platform,
+                                        targetArch=self.targetArch.value if self.targetArch else "")
+            logger.PrintResultBox(False)
+            return False
         if not self.PreparePCH(project, obj_dir):
             self.state.MarkProjectCompiled(project.name, success=False, platform=self.platform,
                                         targetArch=self.targetArch.value if self.targetArch else "")

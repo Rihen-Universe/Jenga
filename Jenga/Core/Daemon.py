@@ -323,6 +323,8 @@ class Daemon:
             argv.append('--build')
         if args.get('force'):
             argv.append('--force')
+        if args.get('no_runtime_path'):
+            argv.append('--no-runtime-path')
         argv.append('--no-daemon')  # on Y EST deja : ne pas se rappeler soi-meme
         extra = args.get('args') or []
         if extra:
@@ -348,6 +350,8 @@ class Daemon:
             argv.append('--no-build')
         if args.get('force'):
             argv.append('--force')
+        if args.get('no_runtime_path'):
+            argv.append('--no-runtime-path')
         argv.append('--no-daemon')  # on y est deja : ne pas se rappeler soi-meme
         return_code = TestCommand.Execute(argv)
         return {'status': 'ok' if return_code == 0 else 'error', 'return_code': return_code}

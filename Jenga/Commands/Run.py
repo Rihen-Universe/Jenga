@@ -6,11 +6,13 @@ AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 """
 
 import argparse
+import os
 import sys
 import time as _time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from ..Utils.RuntimeDiag import RuntimeDiag
 from ..Core.Loader import Loader
 from ..Core.Cache import Cache
 from ..Core.Builder import Builder
@@ -38,6 +40,10 @@ class RunCommand:
         parser.add_argument("--force", action="store_true",
                             help="Run/build a test project even when the workspace disables "
                                  "unit tests (dutc/dute). Per-invocation override.")
+        # Voir `jenga test --no-runtime-path` : meme raison, meme drapeau.
+        parser.add_argument("--no-runtime-path", action="store_true",
+                            help="Do not prepend the toolchain/shared-lib directories to PATH "
+                                 "when running (checks the binary runs on its own).")
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
         parser.add_argument("--target", help="Mobile only: device serial / UDID to run on (skip if a single device is connected)")
@@ -79,7 +85,8 @@ class RunCommand:
                         'platform': parsed.platform,
                         'args': parsed.args,
                         'build': parsed.build,
-                        'force': parsed.force
+                        'force': parsed.force,
+                        'no_runtime_path': parsed.no_runtime_path
                     })
                     if response.get('status') == 'ok':
                         return response.get('return_code', 0)
@@ -282,6 +289,11 @@ class RunCommand:
             Colored.PrintError(note)
             return 1
         largeur = 80
+        # PATH d'execution : bin de la chaine + SharedLib de l'espace de travail
+        # en tete (2.6.0). `env` reste None quand il n'y a rien a ajouter.
+        from .Test import TestCommand as _TestCommand
+        env, prepended = _TestCommand.RuntimeEnvironment(builder, project, parsed.no_runtime_path)
+        chemin_env = (env or os.environ).get("PATH", "")
         depart = _time.time()  # chronometre le PROGRAMME, pas la construction
         ligne_args = (" " + " ".join(parsed.args)) if parsed.args else ""
         Colored.Print("")
@@ -323,8 +335,14 @@ class RunCommand:
                     # CREATE_NEW_CONSOLE : fenetre console propre, entrees
                     # clavier fonctionnelles. On ATTEND la fin, pour que le code
                     # de sortie reste celui du programme.
-                    p = _sp.Popen(cmd, creationflags=0x00000010)  # CREATE_NEW_CONSOLE
-                    return RunCommand._Bilan(p.wait(), _time.time() - depart, largeur)
+                    env_complet = None
+                    if env:
+                        env_complet = dict(os.environ)
+                        env_complet.update(env)
+                    p = _sp.Popen(cmd, creationflags=0x00000010, env=env_complet)  # CREATE_NEW_CONSOLE
+                    code = p.wait()
+                    return RunCommand._Bilan(code, _time.time() - depart, largeur,
+                                             RuntimeDiag.Explain(code, exe_path, chemin_env, prepended))
             except Exception as e:
                 # Jamais bloquant : en cas de souci on retombe sur le
                 # comportement historique plutot que d'empecher l'execution.
@@ -340,7 +358,9 @@ class RunCommand:
             _s.stderr.flush()
         except Exception:  # noqa: BLE001
             pass
-        return RunCommand._Bilan(Process.Run(cmd), _time.time() - depart, largeur)
+        code = Process.Run(cmd, env=env)
+        return RunCommand._Bilan(code, _time.time() - depart, largeur,
+                                 RuntimeDiag.Explain(code, exe_path, chemin_env, prepended))
 
     @staticmethod
     def _CheminWsl(p: Path) -> Optional[str]:
@@ -483,12 +503,17 @@ class RunCommand:
         return RunCommand._Bilan(0, _time.time() - depart, largeur)
 
     @staticmethod
-    def _Bilan(code: int, duree: float, largeur: int) -> int:
+    def _Bilan(code: int, duree: float, largeur: int, explication: Optional[str] = None) -> int:
         """Ferme le cadre d'execution : code de sortie et duree du PROGRAMME
         seul (le temps de construction n'y entre pas). Retourne `code`, pour
-        s'inserer directement dans un `return`."""
+        s'inserer directement dans un `return`. `explication` (2.6.0) : le
+        texte de RuntimeDiag quand le programme n'a PAS demarre (DLL manquante,
+        127) — un code qui passe pour un echec ordinaire ne dit rien."""
         couleur = "brightgreen" if code == 0 else "brightred"
-        etat = "termine normalement" if code == 0 else f"termine avec le code {code}"
+        etat = "termine normalement" if code == 0 else f"termine avec le code {RuntimeDiag.CodeName(code)}"
+        if explication:
+            Colored.Print("")
+            Colored.PrintError(explication)
         Colored.Print("")
         Colored.Print("━" * largeur, color=couleur)
         Colored.Print(f"  ◀  FIN D'EXECUTION  —  {etat}  ({duree:.2f}s)", color=couleur, bold=True)

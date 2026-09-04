@@ -475,6 +475,9 @@ class Project:
     testFiles: List[str] = field(default_factory=list)
     testMainFile: str = ""
     testMainTemplate: str = ""
+    # True (2.6.0) = la suite fournit son propre main() ; Jenga n'en genere
+    # pas. Le Builder verifie qu'il y en a exactement UN dans ses sources.
+    testOwnMain: bool = False
 
     # Build options (generic)
     buildOptions: Dict[str, List[str]] = field(default_factory=dict)
@@ -975,10 +978,11 @@ class test:
             or bool(getattr(self._testProject, "_filteredFiles", {}))
         )
 
-        # Inject test main template only when test files actually exist.
+        # Inject test main template only when test files actually exist —
+        # and never when the suite provides its own main() (testownmain()).
         wks = _currentWorkspace
         if _has_any_test_files and wks and wks.unitestConfig:
-            if not self._testProject.testMainTemplate:
+            if not self._testProject.testMainTemplate and not self._testProject.testOwnMain:
                 self._testProject.testMainTemplate = "%{Jenga.Unitest.AutoMainTemplate}"
 
         # Add the template under the same filter that guarded testfiles(), if any.
@@ -2812,7 +2816,30 @@ def testmainfile(mainfile: str) -> None:
 
 def testmaintemplate(tmpl: str) -> None:
     if _currentProject and _currentProject.isTest:
+        if _currentProject.testOwnMain:
+            raise ValueError(
+                f"Test suite '{_currentProject.name}': testmaintemplate() contradicts "
+                f"testownmain() — a suite that provides its own main() has no template to fill."
+            )
         _currentProject.testMainTemplate = tmpl
+
+def testownmain(enable: bool = True) -> None:
+    """La suite fournit son propre main() ; Jenga n'en genere pas (2.6.0).
+
+    Avant, la seule forme etait un contournement : testmaintemplate() pointe
+    sur un fichier VIDE, pour que rien ne soit injecte. Ici le mot dit ce
+    qu'il fait, et le Builder verifie : exactement UN main() dans les sources
+    de la suite — zero ou deux, c'est une erreur dite, avec les fichiers. Deux
+    programmes dans un dossier tests/ sont deux sous-suites (`test("Sub")`),
+    pas une suite a fusionner.
+    """
+    if _currentProject and _currentProject.isTest:
+        if enable and _currentProject.testMainTemplate:
+            raise ValueError(
+                f"Test suite '{_currentProject.name}': testownmain() contradicts "
+                f"testmaintemplate() — choose one."
+            )
+        _currentProject.testOwnMain = bool(enable)
 
 # --- Toolchain advanced functions ---
 
@@ -4353,7 +4380,7 @@ __all__ = [
     'harmonykeystore', 'harmonykeyalias', 'harmonykeypwd', 'harmonyappicon',
     'harmonyresources', 'harmonyassets', 'harmonypermissions', 'harmonyets',
     'harmonyabis',
-    'testoptions', 'testfiles', 'testmainfile', 'testmaintemplate',
+    'testoptions', 'testfiles', 'testmainfile', 'testmaintemplate', 'testownmain',
     'settarget', 'sysroot', 'targettriple', 'ccompiler', 'cppcompiler',
     'linker', 'archiver', 'addcflag', 'addcxxflag', 'addldflag',
     'flags', 'cflags', 'cxxflags', 'ldflags', 'asmflags', 'arflags',
