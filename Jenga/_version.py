@@ -32,7 +32,10 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # 2.6.0 (2026-09-04) : le runner de test/run met le bin de la chaine en tete
 # du PATH et DIT un binaire qui n'a pas demarre (DLL manquante, 127) ;
 # testownmain() — la suite fournit son main, deux main() sont refuses.
-__version__ = "2.6.0"
+# 2.6.1 (2026-09-04) : test() rend le projet courant (plusieurs suites par
+# projet, les mots apres le bloc s'appliquent au parent) ; un mot du DSL hors
+# de sa portee se refuse en nommant le mot et la ligne.
+__version__ = "2.6.1"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

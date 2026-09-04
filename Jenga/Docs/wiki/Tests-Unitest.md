@@ -84,6 +84,29 @@ La détection est textuelle (`int|auto|void main|wmain|WinMain|wWinMain(` suivi
 d'une accolade avant tout `;`, commentaires retirés) : un `main()` sous
 `#if 0` compte encore. Elle est bruyante quand elle se trompe, jamais muette.
 
+#### Plusieurs suites par projet — `test("Sous-nom")` _(rendu effectif en 2.6.1)_
+
+Chaque bloc `test()` crée une suite ; `test("Bench")` crée `<Projet>_Bench_Tests`.
+Le bloc **rend le projet courant** en sortant : on peut en enchaîner plusieurs,
+et un mot écrit après s'applique au projet parent.
+
+```python
+with project("NKSerialization"):
+    staticlib()
+    files(["src/**.cpp"])
+    with test():                        # -> NKSerialization_Tests (TEST_CASE)
+        testfiles(["tests/test_*.cpp"])
+    with test("Binary"):                # -> NKSerialization_Binary_Tests (main propre)
+        testfiles(["tests/binary_main.cpp"]); testownmain()
+    with test("Json"):                  # -> NKSerialization_Json_Tests
+        testfiles(["tests/json_main.cpp"]); testownmain()
+    defines(["NK_SERIAL_STRICT"])       # s'applique à NKSerialization, pas aux suites
+```
+
+Avant 2.6.1, le second `test()` échouait et `defines([...])` était **ignoré en
+silence**. Désormais un mot du DSL hors de sa portée se refuse en nommant le
+mot et la ligne (`'testfiles()' used outside any test() block (at …:12)`).
+
 ### 3. Écrire un test
 
 ```cpp
@@ -294,6 +317,29 @@ The Builder checks **before compiling**: one suite, one `main()`.
 Detection is textual (`int|auto|void main|wmain|WinMain|wWinMain(` followed by
 a brace before any `;`, comments stripped): a `main()` under `#if 0` still
 counts. It is loud when wrong, never silent.
+
+#### Several suites per project — `test("Subname")` _(effective since 2.6.1)_
+
+Each `test()` block creates one suite; `test("Bench")` creates
+`<Project>_Bench_Tests`. The block **restores the current project** on exit:
+you can chain several, and a word written after it applies to the parent.
+
+```python
+with project("NKSerialization"):
+    staticlib()
+    files(["src/**.cpp"])
+    with test():                        # -> NKSerialization_Tests (TEST_CASE)
+        testfiles(["tests/test_*.cpp"])
+    with test("Binary"):                # -> NKSerialization_Binary_Tests (own main)
+        testfiles(["tests/binary_main.cpp"]); testownmain()
+    with test("Json"):                  # -> NKSerialization_Json_Tests
+        testfiles(["tests/json_main.cpp"]); testownmain()
+    defines(["NK_SERIAL_STRICT"])       # applies to NKSerialization, not to the suites
+```
+
+Before 2.6.1 the second `test()` failed and `defines([...])` was **silently
+ignored**. A DSL word outside its scope is now refused naming the word and the
+line (`'testfiles()' used outside any test() block (at …:12)`).
 
 ### 3. Write a test
 
