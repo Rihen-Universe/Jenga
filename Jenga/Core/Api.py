@@ -882,6 +882,11 @@ class test:
             )
 
         self._parent = _currentProject
+        # Le projet courant tel que le bloc l'a TROUVE : rendu a la sortie.
+        # Avant 2.6.1, __exit__ le remettait a None — un second `with test()`
+        # dans le meme projet echouait, et tout mot ecrit apres le bloc etait
+        # ignore en silence (mesure par l'agent Noge, Nkentseu, 2026-09-04).
+        self._restoreProject = _currentProject
 
         # Ensure Unitest is configured
         if _currentWorkspace.unitestConfig is None:
@@ -996,7 +1001,9 @@ class test:
             else:
                 self._testProject.files.append(self._testProject.testMainTemplate)
 
-        _currentProject = None
+        # Rendre le projet parent : plusieurs test() par projet = plusieurs
+        # suites, et les mots ecrits apres le bloc s'appliquent au parent.
+        _currentProject = self._restoreProject
         return False
 
 
@@ -4475,3 +4482,121 @@ with batchinclude([
 # ---------------------------------------------------------------------------
 # End of api.py
 # ---------------------------------------------------------------------------
+
+
+# ============================================================================
+# UN MOT DU DSL HORS DE SA PORTEE SE REFUSE, EN LE DISANT (2.6.1)
+# ============================================================================
+#
+# Mesure par l'agent Noge sur Nkentseu le 2026-09-04 : un mot ecrit apres un
+# bloc `test()` etait IGNORE EN SILENCE — `files()`, `defines()`, cent autres
+# commencent par `if _currentProject:` et ne font rien sinon. Un .jenga qui
+# declare et dont la declaration ne produit rien, sans un mot, est le pire des
+# deux. Les mots ci-dessous sont donc enveloppes : hors de leur portee, ils
+# levent une erreur qui nomme le mot et la ligne du .jenga. Les mots qui
+# portent deja leur propre refus (usetoolchain, firewallrule...) ou qui
+# s'appliquent a plusieurs portees avec un repli (defines, warnings) ne sont
+# pas touches. La classification vient de la forme de leur premiere
+# instruction (voir tests/test_dsl_scope.py pour le temoin).
+
+_PROJECT_ONLY_WORDS = (
+    "kind", "language", "cppdialect", "cdialect", "location", "files", "excludefiles",
+    "excludemainfiles", "includedirs", "removeincludedirs", "libdirs", "removelibdirs",
+    "objdir", "targetdir", "targetname", "links", "removelinks", "dependson",
+    "removedependson", "dependfiles", "embedresources", "removedefines", "optimize",
+    "symbols", "runtime", "staticruntime", "pchheader", "pchsource", "prebuild",
+    "postbuild", "prelink", "postlink", "androidapplicationid", "androidversioncode",
+    "androidversionname", "androidminsdk", "androidtargetsdk", "androidcompilesdk",
+    "androidabis", "androidproguard", "androidproguardrules", "androidassets",
+    "androidisgame", "androidpermissions", "androidstl", "androidnativeactivity",
+    "androidallowrotation", "androidlargeheap", "ndkversion", "androidsign",
+    "androidkeystore", "androidkeystorepass", "androidkeyalias", "androidjavafiles",
+    "androidjavalibs", "androidactivityclass", "emscriptenshellfile", "emscriptencanvasid",
+    "emscripteninitialmemory", "emscriptenstacksize", "emscriptenexportname",
+    "emscriptenextraflags", "iosbundleid", "iosversion", "iosminsdk", "iossigningidentity",
+    "iosentitlements", "iosappicon", "appicon", "androidappicon", "windowsicon",
+    "macosicon", "webfavicon", "licensefile", "createdesktopshortcut", "apppublisher",
+    "appversion", "signingcertificate", "signingpassword", "signingthumbprint",
+    "signingidentity", "signingtimestampurl", "signinggpgkey", "signingentitlements",
+    "signingrequireadmin", "installeroption", "networkenabled", "networkusagedescription",
+    "bonjourservices", "iosallowarbitraryloads", "iosbuildnumber", "iosteamid",
+    "iosprovisioningprofile", "tvosminsdk", "watchosminsdk", "ipadosminsdk",
+    "visionosminsdk", "harmonyminsdk", "harmonybundlename", "harmonyversioncode",
+    "harmonyversionname", "harmonytargetapi", "harmonysign", "harmonycertfile",
+    "harmonyabis", "harmonyprofile", "harmonykeystore", "harmonykeyalias", "harmonykeypwd",
+    "harmonyappicon", "harmonyresources", "harmonyassets", "harmonypermissions",
+    "harmonyets", "buildoption", "buildoptions",
+)
+_TEST_ONLY_WORDS = (
+    "testoptions", "testfiles", "testmainfile", "testmaintemplate", "testownmain",
+)
+_PROJECT_OR_TOOLCHAIN_WORDS = (
+    "cflags", "cxxflags", "ldflags",
+)
+_PROJECT_OR_WORKSPACE_WORDS = (
+    "emscriptenfullscreenshell",
+)
+
+_API_PACKAGE_DIR = str(Path(__file__).resolve().parent.parent)
+
+
+def _CallerLocation() -> str:
+    """`fichier:ligne` du premier cadre HORS du paquet Jenga — la ligne du
+    .jenga qui a ecrit le mot. Vide si tout vient de Jenga (appel interne)."""
+    import traceback as _tb
+    for fr in reversed(_tb.extract_stack()[:-2]):
+        fn = str(fr.filename)
+        try:
+            inside = str(Path(fn).resolve()).startswith(_API_PACKAGE_DIR)
+        except OSError:
+            inside = False
+        if fn.endswith(".jenga") or not inside:
+            return f"{fn}:{fr.lineno}"
+    return ""
+
+
+def _RefuseOutside(fn, scope: str):
+    """Enveloppe un mot du DSL : hors de `scope`, erreur dite au lieu du silence."""
+    import functools as _ft
+
+    def _in_scope() -> bool:
+        if scope == "project":
+            return _currentProject is not None
+        if scope == "test":
+            return _currentProject is not None and bool(getattr(_currentProject, "isTest", False))
+        if scope == "project-or-toolchain":
+            return _currentProject is not None or _currentToolchain is not None
+        if scope == "project-or-workspace":
+            return _currentProject is not None or _currentWorkspace is not None
+        return True
+
+    where = {
+        "project": "outside any project block — put it inside 'with project(...):'",
+        "test": "outside any test() block — put it inside 'with test():' (itself inside a project)",
+        "project-or-toolchain": "outside any project or toolchain block",
+        "project-or-workspace": "outside any project or workspace block",
+    }[scope]
+
+    @_ft.wraps(fn)
+    def _wrapper(*args, **kwargs):
+        if not _in_scope():
+            loc = _CallerLocation()
+            at = f" (at {loc})" if loc else ""
+            raise RuntimeError(
+                f"'{fn.__name__}()' used {where}{at}. It would have had no effect: "
+                f"refused rather than ignored."
+            )
+        return fn(*args, **kwargs)
+    _wrapper._jengaScope = scope
+    return _wrapper
+
+
+for _word in _PROJECT_ONLY_WORDS:
+    globals()[_word] = _RefuseOutside(globals()[_word], "project")
+for _word in _TEST_ONLY_WORDS:
+    globals()[_word] = _RefuseOutside(globals()[_word], "test")
+for _word in _PROJECT_OR_TOOLCHAIN_WORDS:
+    globals()[_word] = _RefuseOutside(globals()[_word], "project-or-toolchain")
+for _word in _PROJECT_OR_WORKSPACE_WORDS:
+    globals()[_word] = _RefuseOutside(globals()[_word], "project-or-workspace")
+del _word
