@@ -3,6 +3,55 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.6.2
+
+### Corrigé
+
+- **`%{Projet.location}` ne se résolvait pas sous `with filter(...)`.**
+  Mesuré par l'agent Noge sur Nkentseu le 2026-09-04 : dans la sous-suite
+  `ReflectPhase5` de `NKSerialization` (déclarée sous le filtre desktop, comme
+  toutes les suites de Nkentseu), `includedirs(["%{NKMath.location}/src"])`
+  arrivait **littéral** au compilateur — `-I%{NKMath.location}/src` —
+  parce que `includedirs()` sous filtre écrit dans `_filteredIncludeDirs`,
+  que l'expansion du Loader sautait (attribut privé) et que le Builder
+  fusionnait tel quel ; `ResolveProjectPath` rendait ensuite la chaîne
+  intacte dès qu'elle contenait `%{`. Ce n'était pas la sous-suite : hors
+  filtre, la même ligne se résolvait. Trois gestes, du bas vers le haut :
+  - `Variables.ExpandAll` expanse les formes filtrées (`_filtered*`) comme
+    les formes nues — même propriété, même expansion ;
+  - `Builder.ResolveProjectPath` **expanse avant de résoudre** : une variable
+    qui ne se lit qu'à la construction (`%{cfg.*}`) ou une forme filtrée d'un
+    espace construit sans Loader arrive absolue au compilateur ; une variable
+    inconnue reste intacte, jamais inventée ;
+  - le Loader rend les locations de projet **absolues avant l'expansion** :
+    en espace mono-fichier, `%{A.location}` lisait `location("libA")` tel
+    qu'écrit — relatif — puis le collait à la location du *lecteur*
+    (`<wks>/libB/libA/src`), faux en silence. C'est la forme « reste relatif »
+    du même signalement.
+
+  Les `.jenga` inclus (`with include(...)`) avaient déjà une location absolue
+  à la sortie de l'`include` : c'est pour cela que la forme nue de
+  `%{X.location}` marchait dans Nkentseu depuis toujours, et que seule la
+  forme sous filtre manquait.
+
+### Témoin
+
+`tests/test_filtered_variables.py` — 9 cas. Par le Loader : sous-suite sous
+filtre → `_filteredIncludeDirs` et `_filteredLibDirs` absolus ; sous-suite
+sans filtre et suite principale inchangées ; espace mono-fichier à locations
+relatives → `%{A.location}/src` absolu, sous filtre aussi ; une variable de
+construction (`%{cfg.buildcfg}`) est laissée au Builder. Par le Builder sans
+Loader : `ResolveProjectPath` expanse puis résout, les listes filtrées
+fusionnées se résolvent à l'usage, un projet inconnu reste intact. Espace
+réel compilé : une sous-suite sous filtre inclut un en-tête qui n'existe
+**que** sous `%{Far.location}/include` et `jenga test` la lance
+(`REACH RAN 9`) ; **mutation** — l'en-tête déplacé → rouge. Contre-épreuve
+sur le produit : `_filtered*` de nouveau sautés par `ExpandAll` → rouge ;
+`ResolveProjectPath` rendu sourd → rouge ; locations rendues absolues après
+l'expansion → rouge. Le chargement réel de `Nkentseu.jenga` (60 suites)
+passe inchangé, et ne laisse plus aucun `%{X.location}` littéral dans les
+listes filtrées.
+
 ## v2.6.1
 
 ### Corrigé

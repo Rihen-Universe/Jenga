@@ -107,6 +107,21 @@ Avant 2.6.1, le second `test()` échouait et `defines([...])` était **ignoré e
 silence**. Désormais un mot du DSL hors de sa portée se refuse en nommant le
 mot et la ligne (`'testfiles()' used outside any test() block (at …:12)`).
 
+Une sous-suite peut atteindre un module dont son parent ne dépend pas, **par
+son nom** — y compris sous `with filter(...)` _(2.6.2+)_ :
+
+```python
+    with filter("system:Windows || system:Linux || system:macOS"):
+        with test("ReflectPhase5"):
+            testfiles(["tests/test_reflect_phase5.cpp"]); testownmain()
+            includedirs(["%{NKMath.location}/src"])   # absolu, même sous filtre
+            links(["NKMath"])
+```
+
+Avant 2.6.2, sous filtre, `%{NKMath.location}` arrivait **littéral** au
+compilateur (`-I%{NKMath.location}/src`) ; hors filtre il se résolvait. Voir
+[DSL-Reference — Variables dynamiques](DSL-Reference.md#variables-dynamiques-).
+
 ### 3. Écrire un test
 
 ```cpp
@@ -340,6 +355,21 @@ with project("NKSerialization"):
 Before 2.6.1 the second `test()` failed and `defines([...])` was **silently
 ignored**. A DSL word outside its scope is now refused naming the word and the
 line (`'testfiles()' used outside any test() block (at …:12)`).
+
+A sub-suite may reach a module its parent does not depend on, **by name** —
+under `with filter(...)` too _(2.6.2+)_:
+
+```python
+    with filter("system:Windows || system:Linux || system:macOS"):
+        with test("ReflectPhase5"):
+            testfiles(["tests/test_reflect_phase5.cpp"]); testownmain()
+            includedirs(["%{NKMath.location}/src"])   # absolute, even under a filter
+            links(["NKMath"])
+```
+
+Before 2.6.2, under a filter, `%{NKMath.location}` reached the compiler
+**literally** (`-I%{NKMath.location}/src`); outside a filter it resolved. See
+[DSL-Reference — Dynamic variables](DSL-Reference.md#dynamic-variables-).
 
 ### 3. Write a test
 
