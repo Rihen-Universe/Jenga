@@ -1059,7 +1059,7 @@ class include:
 
         try:
             _currentWorkspace = self._tempWorkspace
-            exec(content, exec_globals)
+            exec(compile(content, str(self._jengaPath), 'exec'), exec_globals)
         finally:
             _currentWorkspace = self._parentWorkspace
             os.chdir(old_cwd)
@@ -1288,7 +1288,7 @@ def useconfig(*paths: str) -> None:
         if addedPath:
             sys.path.insert(0, cfgDir)
         try:
-            exec(cfgPath.read_text(encoding='utf-8-sig'), cfgGlobals)
+            exec(compile(cfgPath.read_text(encoding='utf-8-sig'), str(cfgPath), 'exec'), cfgGlobals)
         finally:
             if addedPath:
                 try:
@@ -3965,7 +3965,7 @@ class addtools:
 
     def _LoadFromPythonFile(self):
         exec_globals = {'__file__': str(self._resolvedPath), '__name__': '__tools__', 'Path': Path}
-        exec(self._resolvedPath.read_text(encoding='utf-8'), exec_globals)
+        exec(compile(self._resolvedPath.read_text(encoding='utf-8'), str(self._resolvedPath), 'exec'), exec_globals)
         for name, val in exec_globals.items():
             if not name.startswith('_') and isinstance(val, dict) and ('type' in val or 'path' in val):
                 val['name'] = name
