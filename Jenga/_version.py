@@ -26,7 +26,10 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # toolchain seulement, perdus en silence au niveau projet) + builder iOS
 # direct réparé (init _GetMinimumVersion, packaging Info.plist) — première
 # chaîne complète compile+link+bundle iOS/macOS prouvée en CI GitHub Actions.
-__version__ = "2.4.0"
+# 2.5.0 (2026-09-04) : dutc/dute acceptent une liste blanche `allow=[...]`
+# (politique de tests par PROJET) et --force traverse jusqu'au Builder
+# (jenga test/run --force, jenga build --force-tests).
+__version__ = "2.5.0"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer
