@@ -273,6 +273,15 @@ with filter("options:with-sdl3"): links(["SDL3"])
 Préfixes : `system:` `config:` `arch:` `options:` `action:`.
 Opérateurs : `&&` (ET), `||` (OU), `!` (NON), espace = ET implicite.
 
+### Portée des mots _(2.6.1+)_
+
+Un mot du DSL écrit **hors de sa portée** — `files()` hors de tout projet,
+`testfiles()` hors d'un `test()`, `ldflags()` hors projet et hors toolchain —
+est **refusé en nommant le mot et la ligne** du `.jenga`, au lieu d'être ignoré
+en silence : `'files()' used outside any project block (at …/Core.jenga:12)`.
+Le bloc `test()` rend le projet courant en sortant ; plusieurs `test("Sub")`
+par projet donnent plusieurs suites (voir [Tests Unitest](Tests-Unitest.md)).
+
 ### Bonnes pratiques
 
 - Patterns de fichiers explicites (`src/**.cpp`).
@@ -501,6 +510,16 @@ with filter("options:with-sdl3"): links(["SDL3"])
 
 Prefixes: `system:` `config:` `arch:` `options:` `action:`.
 Operators: `&&` (AND), `||` (OR), `!` (NOT), whitespace = implicit AND.
+
+### Word scope _(2.6.1+)_
+
+A DSL word written **outside its scope** — `files()` outside any project,
+`testfiles()` outside a `test()`, `ldflags()` outside both project and
+toolchain — is **refused naming the word and the line** of the `.jenga`,
+instead of being silently ignored: `'files()' used outside any project block
+(at …/Core.jenga:12)`. The `test()` block restores the current project on exit;
+several `test("Sub")` per project give several suites (see
+[Unitest Tests](Tests-Unitest.md)).
 
 ### Best practices
 

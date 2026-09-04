@@ -3,6 +3,50 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.6.1
+
+### Corrigé
+
+- **Le bloc `test()` remettait le projet courant à `None` en sortant**
+  (`Api.py`, `test.__exit__`). Deux conséquences, mesurées par l'agent Noge sur
+  Nkentseu le 2026-09-04 après usage de 2.6.0 : **un second `with test("…")`
+  dans le même projet échouait** (*« test context must be placed directly
+  inside a project block »*), et **tout mot du DSL écrit après un bloc `test()`
+  était ignoré en silence** — un `.jenga` qui déclare et dont la déclaration ne
+  produit rien. Les sous-suites que `testownmain()` rend possibles
+  (NKSerialization ×5, NKECS, NKXR, bancs NKLogger/NKTime) étaient nommées,
+  pas actives. Le bloc **rend le projet tel qu'il l'a trouvé** : plusieurs
+  `test()` par projet = plusieurs suites (`X_Tests`, `X_Sub_Tests`) ; un mot
+  après le bloc s'applique au parent.
+
+### Ajouté
+
+- **Un mot du DSL hors de sa portée se refuse, en le disant.** 128 mots
+  commençaient par `if _currentProject:` et ne faisaient rien sinon. Ils sont
+  désormais enveloppés (`_RefuseOutside`, fin de `Core/Api.py`) : hors portée,
+  `RuntimeError` qui nomme **le mot et la ligne du `.jenga`** —
+  `'files()' used outside any project block (at D:\…\Core.jenga:12). It would
+  have had no effect: refused rather than ignored.` Quatre portées : projet
+  (120 mots), `test()` (5 : `testfiles`, `testoptions`, `testmainfile`,
+  `testmaintemplate`, `testownmain`), projet-ou-toolchain (`cflags`,
+  `cxxflags`, `ldflags`), projet-ou-workspace (`emscriptenfullscreenshell`).
+  Les mots qui portent déjà leur refus (`usetoolchain`, `firewallrule`, …) ou
+  qui ont un repli d'une portée à l'autre (`defines`, `warnings`, …) ne
+  changent pas. À l'intérieur de leur portée, rien ne change.
+
+### Témoin
+
+`tests/test_dsl_scope.py` — 10 cas : deux `test()` dans un projet → deux
+suites (`Serial_Tests`, `Serial_Bench_Tests` avec `testownmain`) ; un mot après
+le bloc → honoré par le parent, pas par la suite ; le projet courant est le
+parent à la sortie ; `files()` hors projet → erreur nommant le mot et la
+ligne ; `testfiles()`/`testownmain()` hors `test()` → erreur ; `ldflags()`
+accepté dans une toolchain, refusé hors des deux ; noms conservés ; par le
+Loader : le `.jenga` à deux suites + mot après charge, le `.jenga` au mot hors
+projet est refusé avec `Wl.jenga:4`. Contre-épreuve sur le produit : `None`
+remis à la sortie de `test()` → rouge ; enveloppes retirées → rouge. Le
+chargement réel de `Nkentseu.jenga` (60 suites, 35+ fichiers) passe inchangé.
+
 ## v2.6.0
 
 ### Ajouté
