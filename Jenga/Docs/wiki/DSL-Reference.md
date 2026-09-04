@@ -1,3 +1,4 @@
+<!-- AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen -->
 # DSL Reference
 
 **Langues / Languages :** [Français](#français) · [English](#english)
@@ -57,9 +58,19 @@ with workspace("GameWorkspace"):
 
 `configurations(list)` · `targetoses(list)` · `targetarchs(list)` ·
 `targetos(x)` · `targetarch(x)` · `platform(x)` · `architecture(x)` ·
-`startproject(name)` · `disableunittestcompilation(bool)` / `dutc(bool)` ·
-`disableunittestexecution(bool)` / `dute(bool)` · `newoption(...)` (option CLI
-custom, style Premake).
+`startproject(name)` · `disableunittestcompilation(bool, allow=[...])` /
+`dutc(bool, allow=[...])` · `disableunittestexecution(bool, allow=[...])` /
+`dute(bool, allow=[...])` · `newoption(...)` (option CLI custom, style Premake).
+
+`allow` _(2.5.0+)_ : liste blanche de suites (`<Projet>_Tests`) qui **échappent**
+à la politique posée ; deux listes distinctes pour deux politiques distinctes ;
+un nom inconnu est une erreur à la fermeture du bloc `workspace`. Détail et
+exemple : [Tests Unitest §5](Tests-Unitest.md).
+
+```python
+dutc(enable=True, allow=["NKCore_Tests", "NKMath_Tests"])   # seuls ceux-ci se compilent
+dute(enable=True, allow=["NKCore_Tests"])                   # seul celui-ci se lance
+```
 
 ### Config partagée — `useconfig` _(2.0.5+)_
 
@@ -320,9 +331,19 @@ with workspace("GameWorkspace"):
 
 `configurations(list)` · `targetoses(list)` · `targetarchs(list)` ·
 `targetos(x)` · `targetarch(x)` · `platform(x)` · `architecture(x)` ·
-`startproject(name)` · `disableunittestcompilation(bool)` / `dutc(bool)` ·
-`disableunittestexecution(bool)` / `dute(bool)` · `newoption(...)` (custom CLI
-option, Premake-style).
+`startproject(name)` · `disableunittestcompilation(bool, allow=[...])` /
+`dutc(bool, allow=[...])` · `disableunittestexecution(bool, allow=[...])` /
+`dute(bool, allow=[...])` · `newoption(...)` (custom CLI option, Premake-style).
+
+`allow` _(2.5.0+)_: allow list of suites (`<Project>_Tests`) that **escape** the
+policy; two distinct lists for two distinct policies; an unknown name is an
+error when the `workspace` block closes. Details and example:
+[Unitest Tests §5](Tests-Unitest.md).
+
+```python
+dutc(enable=True, allow=["NKCore_Tests", "NKMath_Tests"])   # only these compile
+dute(enable=True, allow=["NKCore_Tests"])                   # only this one runs
+```
 
 ### Shared config — `useconfig` _(2.0.5+)_
 

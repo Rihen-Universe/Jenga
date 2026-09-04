@@ -1,3 +1,4 @@
+<!-- AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen -->
 # Commandes CLI / CLI Commands
 
 **Langues / Languages :** [Français](#français) · [English](#english)
@@ -29,10 +30,10 @@ Beaucoup de commandes acceptent un **alias court** (ex. `b` = `build`).
 
 | Commande | Alias | Rôle | Options clés |
 |----------|-------|------|--------------|
-| `build` | `b` | Compile le workspace ou un projet | `--config --platform --target --jobs/-j --keep-going/-k --tests --no-cache --no-daemon`, options Android (`--android-build-system`, `--android-abis`, `--use-android-mk`, `--android-ndk-mk-mode`) |
-| `run` | `r` | Exécute un projet (build si besoin) | `project --args --build --target/--device` |
+| `build` | `b` | Compile le workspace ou un projet | `--config --platform --target --jobs/-j --keep-going/-k --tests --force-tests --no-cache --no-daemon`, options Android (`--android-build-system`, `--android-abis`, `--use-android-mk`, `--android-ndk-mk-mode`) |
+| `run` | `r` | Exécute un projet (build si besoin) | `project --args --build --force --target/--device` |
 | `gdb` | `g` (`debug`) | Débogue un projet avec GDB (ou LLDB) | `project --config --break/-b --run --batch --args --build --debugger (auto\|gdb\|lldb)` |
-| `test` | `t` | Compile et lance les suites de tests | `--project --no-build` |
+| `test` | `t` | Compile et lance les suites de tests | `--project --no-build --force` |
 | `clean` | `c` | Supprime objets/binaires/cache | `--all --config --platform --project` |
 | `rebuild` | — | `clean` puis `build` | `--clean-all` + options build |
 | `watch` | `w` | Rebuild automatique sur changement | `--polling --no-daemon` |
@@ -42,6 +43,8 @@ Beaucoup de commandes acceptent un **alias court** (ex. `b` = `build`).
 jenga build --config Release --platform Linux-x86_64 --target CoreLib
 jenga run MonApp --args --level hard --fullscreen
 jenga test --project Core_Tests --config Debug
+jenga test --project Core_Tests --force        # malgré dutc/dute, cette fois-ci (Tests-Unitest §5)
+jenga build --target Core_Tests --force-tests  # construction seule, malgré dutc
 jenga build -j8                     # 8 jobs parallèles
 jenga build --platform jengaall     # toutes les plateformes déclarées
 jenga build --keep-going            # construit tout ce qui peut l'être
@@ -228,10 +231,10 @@ Many commands accept a **short alias** (e.g. `b` = `build`).
 
 | Command | Alias | Purpose | Key options |
 |---------|-------|---------|-------------|
-| `build` | `b` | Compile workspace or a project | `--config --platform --target --jobs/-j --keep-going/-k --tests --no-cache --no-daemon`, Android options (`--android-build-system`, `--android-abis`, `--use-android-mk`, `--android-ndk-mk-mode`) |
-| `run` | `r` | Run a project (build if needed) | `project --args --build --target/--device` |
+| `build` | `b` | Compile workspace or a project | `--config --platform --target --jobs/-j --keep-going/-k --tests --force-tests --no-cache --no-daemon`, Android options (`--android-build-system`, `--android-abis`, `--use-android-mk`, `--android-ndk-mk-mode`) |
+| `run` | `r` | Run a project (build if needed) | `project --args --build --force --target/--device` |
 | `gdb` | `g` (`debug`) | Debug a project with GDB (or LLDB) | `project --config --break/-b --run --batch --args --build --debugger (auto\|gdb\|lldb)` |
-| `test` | `t` | Build and run test suites | `--project --no-build` |
+| `test` | `t` | Build and run test suites | `--project --no-build --force` |
 | `clean` | `c` | Remove objects/binaries/cache | `--all --config --platform --project` |
 | `rebuild` | — | `clean` then `build` | `--clean-all` + build options |
 | `watch` | `w` | Auto-rebuild on change | `--polling --no-daemon` |
@@ -241,6 +244,8 @@ Many commands accept a **short alias** (e.g. `b` = `build`).
 jenga build --config Release --platform Linux-x86_64 --target CoreLib
 jenga run MyApp --args --level hard --fullscreen
 jenga test --project Core_Tests --config Debug
+jenga test --project Core_Tests --force        # despite dutc/dute, this once (Tests-Unitest §5)
+jenga build --target Core_Tests --force-tests  # build only, despite dutc
 jenga build -j8                     # 8 parallel jobs
 jenga build --platform jengaall     # every declared platform
 jenga build --keep-going            # build everything that can be built

@@ -3,6 +3,79 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.5.0
+
+### Ajouté
+
+- **`dutc(enable, allow=[...])` / `dute(enable, allow=[...])` — les politiques
+  de tests unitaires ont une liste blanche par projet.** Mesuré sur Nkentseu le
+  2026-09-04 : `Nkentseu.jenga` porte `dutc(enable=True)` / `dute(enable=True)`
+  depuis le 2026-03-12, et **aucun des 60 projets `*_Tests` ne pouvait rougir**
+  depuis six mois — la politique n'avait qu'une portée : tout l'espace de
+  travail. Rouvrir les tests « module par module » n'avait pas de forme.
+
+  ```python
+  dutc(enable=True, allow=["NKCore_Tests", "NKMath_Tests"])
+  dute(enable=True, allow=["NKCore_Tests", "NKMath_Tests"])
+  ```
+
+  La politique reste posée ; les suites nommées y échappent. Les deux listes
+  sont **distinctes**, comme les deux politiques : une suite peut être
+  compilable sans être exécutable, et inversement. `allow` remplace la liste
+  précédente (il ne l'étend pas) ; une chaîne seule vaut une liste d'un élément.
+  Lue par le Builder (`_ApplyUnitTestCompilationPolicy`), `jenga test` et
+  `jenga run`. `__Unitest__`, la bibliothèque du cadre de test, suit les
+  suites : elle se construit dès qu'une suite autorisée en dépend.
+
+  **Un nom inconnu est une erreur dite, pas un silence** — vérifiée à la
+  fermeture du bloc `with workspace(...)`, quand les projets des `include` sont
+  connus : `dutc(allow=...) : projet de test inconnu 'NKCore' dans l'espace de
+  travail 'Nkentseu' — vouliez-vous dire 'NKCore_Tests' ? Suites connues : …`.
+  Une liste blanche qui accepterait l'inconnu « autoriserait » une faute de
+  frappe et laisserait la vraie suite bloquée sans un mot.
+
+  Variables : `%{wks.unittestcompilationallow}` / `%{wks.unittestexecutionallow}`.
+
+- **`jenga build --force-tests`** — construit une cible de test malgré `dutc`,
+  pour cette invocation. C'est le relais que `jenga test --force` et
+  `jenga run --force` transmettent au Builder (voir Corrigé). Nommé
+  `--force-tests` et non `--force` : sur `build`, un `--force` nu se lirait
+  « recompile tout ».
+
+### Corrigé
+
+- **`jenga test --force` et `jenga run --force` n'avaient aucun effet.** Les
+  deux commandes levaient leurs propres contrôles (`Test.py`, `Run.py`) puis
+  appelaient `jenga build --target X_Tests` **sans rien transmettre** : le
+  Builder rebloquait la cible que la commande venait d'autoriser — mesuré sur
+  Nkentseu : *« Blocked target: 'NKPhysics_Tests' »* malgré `--force
+  --no-daemon`. Le drapeau traverse désormais jusqu'au Builder
+  (`Builder.forceUnitTests`), en direct comme via le daemon (`force` / `force_tests`
+  relayés dans les trois commandes).
+
+### Comportement inchangé
+
+- Un espace de travail **sans** `allow` et **sans** `--force` se comporte
+  exactement comme avant : tests exclus du build par défaut, cible de test
+  explicite bloquée avec le même message (complété d'une phrase qui dit comment
+  la lever), `jenga test` refusé par `dute`.
+
+### Témoin
+
+`tests/test_unittest_policy.py` — 23 cas. Sept sur la politique du Builder
+(liste blanche, `__Unitest__` conservé pour une suite autorisée, `--force`,
+politique éteinte), sept sur le DSL (forme, chaîne seule, erreur dite avec les
+suites connues et la suggestion `_Tests`, exception en vol non masquée), et
+**neuf sur un espace de travail réel** compilé par le compilateur de la machine
+(sautés, en le disant, s'il n'y en a pas) : suite listée compilée **et lancée**,
+suite non listée bloquée avec le message, `--force` qui débloque `test`, `run`
+et `build --force-tests`, puis **deux mutations qui font rougir** — la suite
+retirée de la liste redevient bloquée, et une assertion cassée dans le `.cpp`
+fait échouer `jenga test` (preuve que le binaire est lancé, pas seulement
+construit). Contre-épreuve faite sur le produit : le Builder rendu sourd à
+`forceUnitTests` → 4 rouges ; `jenga test` ne relayant plus `--force-tests` →
+1 rouge.
+
 ## v2.4.0
 
 ### Retiré
