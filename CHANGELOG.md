@@ -3,6 +3,79 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.6.0
+
+### Ajouté
+
+- **`testownmain()` — la suite fournit son propre `main()`, Jenga n'en génère
+  pas.** Jusqu'ici la seule forme était un contournement : `testmaintemplate()`
+  pointé sur un fichier **vide**, pour que rien ne soit injecté (Nkentseu :
+  NKPhysics, NKCollision, NKImage). Le mot dit ce qu'il fait, et le Builder
+  vérifie avant de compiler — **une suite, un `main()`** :
+  - `testownmain()` sans aucun `main()` dans ses sources → erreur ;
+  - **deux `main()` ou plus, quelle que soit la forme → refusé en nommant les
+    fichiers** (`Test suite 'X_Tests' defines main() in 2 files: a.cpp, b.cpp`)
+    et en disant la forme attendue : une sous-suite par programme
+    (`with test("Sub"):`). NKSerialization en a 6, NKXR 5, NKAudio 5 : ce sont
+    des sous-suites à déclarer, pas une suite à fusionner ;
+  - un `main()` sans le mot alors que Jenga en génère un → refusé **en disant
+    le mot** (`declare testownmain()`), plutôt qu'un `multiple definition of
+    main` du lieur. L'ancien contournement au gabarit vide reste accepté.
+  - `testownmain()` et `testmaintemplate()` dans la même suite se contredisent :
+    erreur au chargement.
+
+  Détection textuelle (`int|auto|void main|wmain|WinMain|wWinMain(` suivi d'une
+  accolade avant tout point-virgule, commentaires retirés) : bruyante quand
+  elle se trompe, jamais silencieuse ; dans l'autre sens le lieur rattrape.
+
+- **`jenga test` / `jenga run` mettent le `bin` de la chaîne en tête du
+  `PATH` au moment d'exécuter la cible** — et les dossiers de sortie des
+  `SharedLib` dont elle dépend, transitivement. Mesuré sur Nkentseu le
+  2026-09-04 : `NKMath_Tests.exe`, lié contre `libstdc++-6.dll` de clang-mingw,
+  sortait en **127 muet** dès que `ucrt64/bin` n'était pas sur le `PATH` de
+  l'appelant ; la suite était verte, le verdict n'arrivait pas. La chaîne est
+  celle **du projet** (filtres appliqués, `Builder.ResolveProjectToolchain`),
+  pas celle de l'espace de travail. `--no-runtime-path` reproduit
+  l'environnement d'un utilisateur — c'est ainsi qu'on vérifie qu'un binaire
+  est autonome.
+
+- **Un binaire qui n'a PAS démarré se dit.** `0xC0000135`
+  (`STATUS_DLL_NOT_FOUND`), `0xC0000139`, `0xC000007B` — sous leur forme signée
+  aussi, telle que Python les rend — et `127` ne sont plus des échecs
+  ordinaires : `jenga test`/`run` nomment la cible, le code, et **les DLL
+  importées introuvables** (table d'import PE lue sans dépendance externe ;
+  les API sets `api-ms-win-*` sont ignorés) à côté du binaire, sur le `PATH`
+  réellement utilisé et dans les répertoires système ; puis le remède
+  (`staticruntime()` / `-static-libstdc++ -static-libgcc`, ou livrer la DLL).
+  Sur le vrai `NKMath_Tests.exe` : `libgcc_s_seh-1.dll, libwinpthread-1.dll,
+  libstdc++-6.dll`. Nouveau module `Jenga/Utils/RuntimeDiag.py`.
+
+### Mesuré, et pas corrigé côté Jenga
+
+- **`config/toolchain.jenga:92-94` de Nkentseu (`-static`) n'atteint pas le
+  lien — parce qu'il n'est pas dans la branche exécutée.** Ces lignes sont dans
+  le bloc *« Cross-compilation Windows depuis Linux/WSL2 »* (`else:`). Le bloc
+  Windows natif (`if os.name == "nt":`, l. 34-55) promet en commentaire le
+  lien statique du runtime et ne passe que `--target=x86_64-w64-windows-gnu`.
+  Mesuré sur l'espace de travail chargé : `nk-windows-clang-mingw.ldflags ==
+  ['--target=x86_64-w64-windows-gnu']`, et `NKMath_Tests` résout bien vers
+  cette chaîne (`_explicitToolchain=True` après filtres). Jenga honore ce
+  qu'on lui donne ; le défaut est dans le `.jenga`, à corriger là.
+
+### Témoin
+
+`tests/test_unittest_runner.py` — 14 cas. Sans compilateur : définition contre
+déclaration contre commentaire, `WinMain`, deux fichiers ; codes du chargeur
+sous les deux signes ; un fichier qui n'est pas un PE. Avec compilateur : la
+suite démarre quand le `PATH` de l'appelant ignore la chaîne ; avec
+`--no-runtime-path` sur ce même `PATH`, `jenga test` et `jenga run` disent
+`STATUS_DLL_NOT_FOUND` et `libstdc++-6.dll` ; `testownmain()` compile et son
+`main` s'exécute (`OWN MAIN RAN 5`) ; deux `main()` refusés en nommant les deux
+fichiers ; un `main()` sans le mot refusé en disant le mot ; mutation : le mot
+retiré → rouge ; `testownmain()` + `testmaintemplate()` → contradiction dite.
+Contre-épreuve sur le produit : runner sans PATH d'exécution → 2 rouges ;
+Builder qui ne compte plus les `main()` → 3 rouges.
+
 ## v2.5.0
 
 ### Ajouté

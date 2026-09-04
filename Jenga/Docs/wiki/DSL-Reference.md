@@ -230,7 +230,9 @@ exe autonome sans DLL runtime ; défaut projet = dynamique) ·
 ### Tests
 
 `testoptions(opts)` · `testfiles(patterns)` · `testmainfile(f)` ·
-`testmaintemplate(tmpl)`. Voir [Tests Unitest](Tests-Unitest.md).
+`testmaintemplate(tmpl)` · `testownmain()` _(2.6.0+ : la suite fournit son
+`main()`, Jenga n'en génère pas ; deux `main()` dans une suite sont refusés)_.
+Voir [Tests Unitest](Tests-Unitest.md).
 
 ### Enums
 
@@ -466,7 +468,9 @@ function is available. See [HarmonyOS](HarmonyOS.md).
 ### Tests
 
 `testoptions(opts)` · `testfiles(patterns)` · `testmainfile(f)` ·
-`testmaintemplate(tmpl)`. See [Unitest Tests](Tests-Unitest.md).
+`testmaintemplate(tmpl)` · `testownmain()` _(2.6.0+: the suite provides its
+own `main()`, Jenga generates none; two `main()` in one suite are refused)_.
+See [Unitest Tests](Tests-Unitest.md).
 
 ### Enums
 

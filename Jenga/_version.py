@@ -29,7 +29,10 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # 2.5.0 (2026-09-04) : dutc/dute acceptent une liste blanche `allow=[...]`
 # (politique de tests par PROJET) et --force traverse jusqu'au Builder
 # (jenga test/run --force, jenga build --force-tests).
-__version__ = "2.5.0"
+# 2.6.0 (2026-09-04) : le runner de test/run met le bin de la chaine en tete
+# du PATH et DIT un binaire qui n'a pas demarre (DLL manquante, 127) ;
+# testownmain() — la suite fournit son main, deux main() sont refuses.
+__version__ = "2.6.0"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

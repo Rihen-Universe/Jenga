@@ -31,9 +31,9 @@ Beaucoup de commandes acceptent un **alias court** (ex. `b` = `build`).
 | Commande | Alias | Rôle | Options clés |
 |----------|-------|------|--------------|
 | `build` | `b` | Compile le workspace ou un projet | `--config --platform --target --jobs/-j --keep-going/-k --tests --force-tests --no-cache --no-daemon`, options Android (`--android-build-system`, `--android-abis`, `--use-android-mk`, `--android-ndk-mk-mode`) |
-| `run` | `r` | Exécute un projet (build si besoin) | `project --args --build --force --target/--device` |
+| `run` | `r` | Exécute un projet (build si besoin) | `project --args --build --force --no-runtime-path --target/--device` |
 | `gdb` | `g` (`debug`) | Débogue un projet avec GDB (ou LLDB) | `project --config --break/-b --run --batch --args --build --debugger (auto\|gdb\|lldb)` |
-| `test` | `t` | Compile et lance les suites de tests | `--project --no-build --force` |
+| `test` | `t` | Compile et lance les suites de tests | `--project --no-build --force --no-runtime-path` |
 | `clean` | `c` | Supprime objets/binaires/cache | `--all --config --platform --project` |
 | `rebuild` | — | `clean` puis `build` | `--clean-all` + options build |
 | `watch` | `w` | Rebuild automatique sur changement | `--polling --no-daemon` |
@@ -232,9 +232,9 @@ Many commands accept a **short alias** (e.g. `b` = `build`).
 | Command | Alias | Purpose | Key options |
 |---------|-------|---------|-------------|
 | `build` | `b` | Compile workspace or a project | `--config --platform --target --jobs/-j --keep-going/-k --tests --force-tests --no-cache --no-daemon`, Android options (`--android-build-system`, `--android-abis`, `--use-android-mk`, `--android-ndk-mk-mode`) |
-| `run` | `r` | Run a project (build if needed) | `project --args --build --force --target/--device` |
+| `run` | `r` | Run a project (build if needed) | `project --args --build --force --no-runtime-path --target/--device` |
 | `gdb` | `g` (`debug`) | Debug a project with GDB (or LLDB) | `project --config --break/-b --run --batch --args --build --debugger (auto\|gdb\|lldb)` |
-| `test` | `t` | Build and run test suites | `--project --no-build --force` |
+| `test` | `t` | Build and run test suites | `--project --no-build --force --no-runtime-path` |
 | `clean` | `c` | Remove objects/binaries/cache | `--all --config --platform --project` |
 | `rebuild` | — | `clean` then `build` | `--clean-all` + build options |
 | `watch` | `w` | Auto-rebuild on change | `--polling --no-daemon` |
