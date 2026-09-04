@@ -265,7 +265,7 @@ class Loader:
 
         try:
             _loadedFiles.append(filePath)
-            exec(filePath.read_text(encoding='utf-8-sig'), globals_dict)
+            exec(compile(filePath.read_text(encoding='utf-8-sig'), str(filePath), 'exec'), globals_dict)
             workspace = Api.getcurrentworkspace()
             if workspace is None:
                 raise RuntimeError("No workspace defined in the entry file.")
@@ -310,7 +310,7 @@ class Loader:
 
         try:
             _loadedFiles.append(fp)
-            exec(fp.read_text(encoding='utf-8-sig'), globals_dict)
+            exec(compile(fp.read_text(encoding='utf-8-sig'), str(fp), 'exec'), globals_dict)
             tempWks = Api._currentWorkspace
             if tempWks is None:
                 # Si le fichier ne définit pas de workspace, on en crée un factice
