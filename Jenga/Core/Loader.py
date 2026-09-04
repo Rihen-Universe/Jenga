@@ -368,7 +368,7 @@ class Loader:
 
         try:
             _loadedFiles.append(filePath)
-            exec(filePath.read_text(encoding='utf-8-sig'), globals_dict)
+            exec(compile(filePath.read_text(encoding='utf-8-sig'), str(filePath), 'exec'), globals_dict)
             # Récupérer le projet courant ou le premier du workspace
             proj = Api._currentProject
             if proj is None and wks.projects:
