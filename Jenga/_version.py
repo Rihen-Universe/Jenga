@@ -35,7 +35,10 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # 2.6.1 (2026-09-04) : test() rend le projet courant (plusieurs suites par
 # projet, les mots apres le bloc s'appliquent au parent) ; un mot du DSL hors
 # de sa portee se refuse en nommant le mot et la ligne.
-__version__ = "2.6.1"
+# 2.6.2 (2026-09-04) : `%{Projet.location}` se resout sous `with filter(...)`
+# (formes filtrees expansees au chargement, ResolveProjectPath expanse avant
+# de resoudre) et lit une location absolue en espace mono-fichier.
+__version__ = "2.6.2"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

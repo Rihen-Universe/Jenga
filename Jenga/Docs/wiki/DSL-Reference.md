@@ -259,6 +259,19 @@ Voir [Tests Unitest](Tests-Unitest.md).
 
 Exemple : `targetdir("%{wks.location}/Build/Bin/%{cfg.buildcfg}-%{cfg.system}/%{prj.name}")`.
 
+**Où et quand une variable se résout** _(2.6.2+)_ :
+- `%{Autre.location}` rend toujours un chemin **absolu** — la location de
+  chaque projet est rendue absolue **avant** l'expansion, qu'elle vienne d'un
+  `include(...)` ou d'un `location("libA")` relatif dans l'espace mono-fichier.
+- Les mots écrits **sous `with filter(...)`** (`includedirs`, `libdirs`,
+  `files`, …) sont expansés comme les mots nus. Avant 2.6.2 ils ne l'étaient
+  pas : `%{NKMath.location}` sous filtre arrivait littéral au compilateur.
+- Une variable de construction (`%{cfg.*}`, `%{toolchain.*}`) reste en place
+  au chargement et se résout au moment de compiler ; le Builder expanse
+  chaque chemin **avant** de le résoudre contre la location du projet.
+- Un nom de projet inconnu n'est pas inventé : `%{Nobody.location}` reste
+  tel quel — et se voit dans la commande de compilation.
+
 ### Système de filtres
 
 ```python
@@ -497,6 +510,19 @@ See [Unitest Tests](Tests-Unitest.md).
 Namespaces `wks`, `prj`, `cfg`, `toolchain`, `Jenga`, `env`, plus per-project
 name. Example:
 `targetdir("%{wks.location}/Build/Bin/%{cfg.buildcfg}-%{cfg.system}/%{prj.name}")`.
+
+**Where and when a variable resolves** _(2.6.2+)_:
+- `%{Other.location}` always yields an **absolute** path — every project
+  location is made absolute **before** expansion, whether it comes from an
+  `include(...)` or from a relative `location("libA")` in a single-file workspace.
+- Words written **under `with filter(...)`** (`includedirs`, `libdirs`,
+  `files`, …) are expanded like bare words. Before 2.6.2 they were not:
+  `%{NKMath.location}` under a filter reached the compiler literally.
+- A build-time variable (`%{cfg.*}`, `%{toolchain.*}`) stays in place at load
+  time and resolves when compiling; the Builder expands each path **before**
+  resolving it against the project location.
+- An unknown project name is never invented: `%{Nobody.location}` stays as
+  is — and shows in the compile command.
 
 ### Filter system
 
