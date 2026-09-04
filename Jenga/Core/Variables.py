@@ -442,9 +442,19 @@ class VariableExpander:
         # Pour les dataclasses ou objets avec __dict__
         if hasattr(obj, '__dict__'):
             for attr, val in obj.__dict__.items():
-                if not attr.startswith('_') and isinstance(val, (str, list, dict)):
-                    expanded = self.ExpandAll(val, recursive)
-                    setattr(obj, attr, expanded)
+                if not isinstance(val, (str, list, dict)):
+                    continue
+                # Les attributs prives sont sautes — SAUF les formes filtrees
+                # (`_filteredIncludeDirs`, `_filteredLibDirs`, ...) : ce sont
+                # les memes proprietes que `includeDirs`/`libDirs`, ecrites
+                # sous `with filter(...)`. Avant 2.6.2 elles n'etaient jamais
+                # expansees : un `%{NKMath.location}` sous filtre arrivait
+                # LITTERAL au compilateur (`-I%{NKMath.location}/src`) —
+                # mesure par l'agent Noge sur Nkentseu, 2026-09-04.
+                if attr.startswith('_') and not attr.startswith('_filtered'):
+                    continue
+                expanded = self.ExpandAll(val, recursive)
+                setattr(obj, attr, expanded)
             return obj
 
         # Autres types (int, float, bool, None) : inchangé
