@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Variables – Moteur d'expansion des variables pour le DSL Jenga.
+AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 
 Supporte :
   - %{wks.nom} ou %{workspace.nom} : propriétés du workspace courant
@@ -95,6 +96,8 @@ class VariableExpander:
             'defaulttoolchain': 'defaultToolchain',
             'disableunittestcompilation': 'disableUnitTestCompilation',
             'disableunittestexecution': 'disableUnitTestExecution',
+            'unittestcompilationallow': lambda w: ','.join(getattr(w, 'unitTestCompilationAllow', []) or []),
+            'unittestexecutionallow': lambda w: ','.join(getattr(w, 'unitTestExecutionAllow', []) or []),
         }
         if key in mapping:
             attr = mapping[key]

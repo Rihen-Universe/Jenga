@@ -3,6 +3,7 @@
 """
 Test command – Exécute les suites de tests.
 Recherche les projets de type TEST_SUITE, les compile et les exécute.
+AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 """
 
 import argparse
@@ -77,6 +78,7 @@ class TestCommand:
                         'platform': parsed.platform,
                         'project': parsed.project,
                         'no_build': parsed.no_build,
+                        'force': parsed.force,
                         'verbose': parsed.verbose
                     })
                     if response.get('status') == 'ok':
@@ -99,32 +101,80 @@ class TestCommand:
                 Colored.PrintError("Failed to load workspace.")
                 return 1
 
-        if (not parsed.force) and bool(getattr(workspace, "disableUnitTestExecution", False)):
-            Colored.PrintError(
-                "Unit-test execution is disabled by workspace policy "
-                "(disableunittestexecution). Use --force to override."
-            )
-            return 1
+        # Politiques d'espace de travail, PAR PROJET (2.5.0).
+        #   dutc/dute posent la politique ; leur `allow=[...]` en exempte des
+        #   suites nommees ; --force la leve pour cette invocation. Les deux
+        #   politiques sont distinctes et lues separement : une suite peut etre
+        #   compilable sans etre executable, et inversement.
+        # Sans liste blanche ni --force, le comportement est celui d'avant.
+        dutc_on = bool(getattr(workspace, "disableUnitTestCompilation", False))
+        dute_on = bool(getattr(workspace, "disableUnitTestExecution", False))
+        compile_allow = set(getattr(workspace, "unitTestCompilationAllow", []) or [])
+        exec_allow = set(getattr(workspace, "unitTestExecutionAllow", []) or [])
+        need_build = not parsed.no_build
 
-        if (not parsed.no_build) and (not parsed.force) and bool(getattr(workspace, "disableUnitTestCompilation", False)):
-            Colored.PrintError(
-                "Unit-test compilation is disabled by workspace policy "
-                "(disableunittestcompilation). Use --force to build them anyway, "
-                "or --no-build to run existing binaries."
-            )
-            return 1
+        def _CanCompile(name: str) -> bool:
+            return parsed.force or (not dutc_on) or name in compile_allow
+
+        def _CanExecute(name: str) -> bool:
+            return parsed.force or (not dute_on) or name in exec_allow
 
         # Collecter les projets de test
-        test_projects = []
-        for name, proj in workspace.projects.items():
-            if proj.isTest or proj.kind == Api.ProjectKind.TEST_SUITE:
-                if parsed.project and name != parsed.project:
-                    continue
-                test_projects.append((name, proj))
-
-        if not test_projects:
+        all_tests = [
+            (name, proj) for name, proj in workspace.projects.items()
+            if proj.isTest or proj.kind == Api.ProjectKind.TEST_SUITE
+        ]
+        if not all_tests:
             Colored.PrintError("No test projects found.")
             return 1
+
+        if parsed.project:
+            test_projects = [(n, p) for n, p in all_tests if n == parsed.project]
+            if not test_projects:
+                Colored.PrintError(f"No test project named '{parsed.project}'.")
+                Colored.PrintInfo("Known test projects: " + ", ".join(sorted(n for n, _ in all_tests)))
+                return 1
+            name = parsed.project
+            if need_build and not _CanCompile(name):
+                Colored.PrintError(
+                    f"Unit-test compilation is disabled by workspace policy "
+                    f"(disableunittestcompilation) and '{name}' is not in its allow list. "
+                    f"Allow it with dutc(True, allow=['{name}']), use --force for this "
+                    f"invocation, or --no-build to run existing binaries."
+                )
+                return 1
+            if not _CanExecute(name):
+                Colored.PrintError(
+                    f"Unit-test execution is disabled by workspace policy "
+                    f"(disableunittestexecution) and '{name}' is not in its allow list. "
+                    f"Allow it with dute(True, allow=['{name}']) or use --force for this invocation."
+                )
+                return 1
+        else:
+            test_projects = [
+                (n, p) for n, p in all_tests
+                if ((not need_build) or _CanCompile(n)) and _CanExecute(n)
+            ]
+            skipped = [n for n, _ in all_tests if n not in {m for m, _ in test_projects}]
+            if not test_projects:
+                if dute_on and not parsed.force:
+                    Colored.PrintError(
+                        "Unit-test execution is disabled by workspace policy "
+                        "(disableunittestexecution). Use --force to override, "
+                        "or name the suites to keep: dute(True, allow=[...])."
+                    )
+                    return 1
+                Colored.PrintError(
+                    "Unit-test compilation is disabled by workspace policy "
+                    "(disableunittestcompilation). Use --force to build them anyway, "
+                    "--no-build to run existing binaries, "
+                    "or name the suites to keep: dutc(True, allow=[...])."
+                )
+                return 1
+            if skipped:
+                Colored.PrintInfo(
+                    "Skipped by workspace policy (dutc/dute): " + ", ".join(sorted(skipped))
+                )
 
         # Builder les projets de test (et leurs dépendances)
         if not parsed.no_build:
@@ -132,6 +182,10 @@ class TestCommand:
                 Colored.PrintInfo(f"Building {name}...")
                 build_args = ["--config", parsed.config]
                 build_args += ["--action", "test"]
+                if parsed.force:
+                    # Sans ce relais, le Builder rebloque la cible que l'on
+                    # vient d'autoriser (mesure sur Nkentseu le 2026-09-04).
+                    build_args += ["--force-tests"]
                 if parsed.platform:
                     build_args += ["--platform", parsed.platform]
                 if parsed.jenga_file:

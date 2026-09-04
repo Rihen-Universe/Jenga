@@ -3,6 +3,7 @@
 """
 Builder – Classe de base pour tous les builders de plateforme.
 Coordonne le build : résolution des dépendances, compilation, link.
+AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 """
 
 import abc
@@ -150,6 +151,12 @@ class Builder(abc.ABC):
         # (`--target X_Tests`, ou `jenga test`) la construit toujours, quel que
         # soit ce drapeau.
         self.buildTests = False  # Will be set by BuildCommand.CreateBuilder()
+        # True = `jenga test --force` / `jenga run --force` / `jenga build
+        # --force-tests` : la politique disableunittestcompilation est levee
+        # POUR CETTE INVOCATION. Avant 2.5.0, les commandes levaient leurs
+        # propres controles mais ne transmettaient rien ici, et le Builder
+        # rebloquait : --force etait accepte et sans effet.
+        self.forceUnitTests = False  # Will be set by BuildCommand.CreateBuilder()
 
         self._ValidateHostTarget()
         self._ResolveToolchain()
@@ -2409,14 +2416,44 @@ class Builder(abc.ABC):
     def _ApplyUnitTestCompilationPolicy(self,
                                         order: List[str],
                                         targetProject: Optional[str]) -> Optional[List[str]]:
+        """Applique `disableunittestcompilation` a l'ordre de construction.
+
+        Trois portes de sortie, dans cet ordre :
+          1. la politique n'est pas posee                  -> ordre inchange ;
+          2. `forceUnitTests` (--force / --force-tests)    -> ordre inchange,
+             dit une fois ;
+          3. la liste blanche `unitTestCompilationAllow`   -> les suites
+             nommees ne sont pas bloquees ; les autres le restent.
+        `__Unitest__` (la bibliotheque du cadre de test) suit les suites : elle
+        n'est bloquee que si aucune suite non bloquee de l'ordre n'en depend.
+        Sans liste blanche ni --force, le resultat est celui d'avant 2.5.0.
+        """
         if not bool(getattr(self.workspace, "disableUnitTestCompilation", False)):
             return order
+        if bool(getattr(self, "forceUnitTests", False)):
+            Reporter.Info(
+                "Workspace policy disableunittestcompilation lifted for this "
+                "invocation (--force)."
+            )
+            return order
 
+        allowed = set(getattr(self.workspace, "unitTestCompilationAllow", []) or [])
         blocked = []
         for proj_name in order:
+            if proj_name == "__Unitest__":
+                continue  # decide ci-dessous, d'apres les suites qui restent
             proj = self.workspace.projects.get(proj_name)
-            if self._IsUnitTestProject(proj_name, proj):
+            if self._IsUnitTestProject(proj_name, proj) and proj_name not in allowed:
                 blocked.append(proj_name)
+
+        if "__Unitest__" in order:
+            needed = any(
+                "__Unitest__" in (getattr(self.workspace.projects.get(name), "dependsOn", []) or [])
+                for name in order
+                if name != "__Unitest__" and name not in blocked
+            )
+            if not needed:
+                blocked.append("__Unitest__")
 
         if not blocked:
             return order
@@ -2425,7 +2462,10 @@ class Builder(abc.ABC):
         if targetProject and targetProject in blocked_set:
             Reporter.Error(
                 f"Unit-test compilation is disabled by workspace policy. "
-                f"Blocked target: '{targetProject}'."
+                f"Blocked target: '{targetProject}'. "
+                f"Allow it with dutc(True, allow=['{targetProject}']) in the workspace, "
+                f"or lift the policy for this invocation with --force "
+                f"(jenga test/run) / --force-tests (jenga build)."
             )
             return None
 

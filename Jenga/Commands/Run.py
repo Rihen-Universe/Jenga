@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Run command – Exécute l'exécutable d'un projet (après build si nécessaire).
+AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 """
 
 import argparse
@@ -77,7 +78,8 @@ class RunCommand:
                         'config': parsed.config,
                         'platform': parsed.platform,
                         'args': parsed.args,
-                        'build': parsed.build
+                        'build': parsed.build,
+                        'force': parsed.force
                     })
                     if response.get('status') == 'ok':
                         return response.get('return_code', 0)
@@ -184,17 +186,29 @@ class RunCommand:
             or project.name == "__Unitest__"
         )
 
-        if is_test_project and (not parsed.force) and bool(getattr(workspace, "disableUnitTestExecution", False)):
+        # Politiques dutc/dute, PAR PROJET (2.5.0) : la liste blanche `allow`
+        # exempte des suites nommees ; --force leve la politique pour cette
+        # invocation. Sans l'un ni l'autre : comportement d'avant.
+        exec_allow = set(getattr(workspace, "unitTestExecutionAllow", []) or [])
+        compile_allow = set(getattr(workspace, "unitTestCompilationAllow", []) or [])
+
+        if (is_test_project and (not parsed.force)
+                and bool(getattr(workspace, "disableUnitTestExecution", False))
+                and project_name not in exec_allow):
             Colored.PrintError(
-                "Unit-test execution is disabled by workspace policy "
-                "(disableunittestexecution). Use --force to override."
+                f"Unit-test execution is disabled by workspace policy "
+                f"(disableunittestexecution) and '{project_name}' is not in its allow list. "
+                f"Allow it with dute(True, allow=['{project_name}']) or use --force for this invocation."
             )
             return 1
 
-        if parsed.build and is_test_project and (not parsed.force) and bool(getattr(workspace, "disableUnitTestCompilation", False)):
+        if (parsed.build and is_test_project and (not parsed.force)
+                and bool(getattr(workspace, "disableUnitTestCompilation", False))
+                and project_name not in compile_allow):
             Colored.PrintError(
-                "Unit-test compilation is disabled by workspace policy "
-                "(disableunittestcompilation)."
+                f"Unit-test compilation is disabled by workspace policy "
+                f"(disableunittestcompilation) and '{project_name}' is not in its allow list. "
+                f"Allow it with dutc(True, allow=['{project_name}']) or use --force for this invocation."
             )
             return 1
 
@@ -203,6 +217,8 @@ class RunCommand:
             Colored.PrintInfo(f"Building {project_name}...")
             build_args = ["--config", parsed.config]
             build_args += ["--action", "run"]
+            if parsed.force:
+                build_args += ["--force-tests"]  # sinon le Builder rebloque
             if parsed.platform:
                 build_args += ["--platform", parsed.platform]
             if parsed.jenga_file:

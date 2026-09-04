@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Daemon – Processus en arrière‑plan pour accélérer les commandes Jenga.
+AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 
 Architecture robuste :
   - Détachement complet du terminal (daemonization) sur Unix
@@ -239,6 +240,7 @@ class Daemon:
         # defaut que ce mode existe pour corriger.
         keep_going = bool(args.get('keep_going', False))
         build_tests = bool(args.get('tests', False))   # meme raison que ci-dessus
+        force_tests = bool(args.get('force_tests', False))  # idem : sinon --force se perd au daemon
         from ..Commands.Build import BuildCommand
         action = args.get('action', 'build')
         cli_custom_options = args.get('custom_options') or {}
@@ -276,7 +278,8 @@ class Daemon:
                 action=action,
                 options=options,
                 keepGoing=keep_going,
-                buildTests=build_tests
+                buildTests=build_tests,
+                forceTests=force_tests
             )
         else:
             builder = BuildCommand.CreateBuilder(
@@ -284,7 +287,8 @@ class Daemon:
                 action=action,
                 options=options,
                 keepGoing=keep_going,
-                buildTests=build_tests
+                buildTests=build_tests,
+                forceTests=force_tests
             )
             return_code = builder.Build(target)
         return {
@@ -317,6 +321,8 @@ class Daemon:
                 argv += [drapeau, str(v)]
         if args.get('build'):
             argv.append('--build')
+        if args.get('force'):
+            argv.append('--force')
         argv.append('--no-daemon')  # on Y EST deja : ne pas se rappeler soi-meme
         extra = args.get('args') or []
         if extra:
@@ -340,6 +346,8 @@ class Daemon:
                 argv += [drapeau, str(v)]
         if not args.get('build', True):
             argv.append('--no-build')
+        if args.get('force'):
+            argv.append('--force')
         argv.append('--no-daemon')  # on y est deja : ne pas se rappeler soi-meme
         return_code = TestCommand.Execute(argv)
         return {'status': 'ok' if return_code == 0 else 'error', 'return_code': return_code}
