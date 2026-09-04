@@ -960,7 +960,16 @@ class Builder(abc.ABC):
         if not value:
             return value
         if '%{' in value:
-            return value
+            # Expanser AVANT de renoncer : une variable qui ne se resout qu'a
+            # la construction (`%{cfg.*}`), ou une forme filtree qu'un
+            # chargement sans Loader n'a pas expansee, se lit ici. Avant
+            # 2.6.2 la chaine repartait telle quelle et le compilateur
+            # recevait `-I%{NKMath.location}/src`, litteral.
+            if self._expander is not None:
+                self._expander.SetProject(project)
+                value = self._expander.Expand(value, recursive=True)
+            if '%{' in value:
+                return value
         p = Path(value)
         if p.is_absolute():
             return str(p)

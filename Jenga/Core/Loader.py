@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Loader – Chargement des workspaces et projets Jenga.
+AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 
 Responsabilités :
   - Exécuter un fichier .jenga racine et construire l'objet Workspace.
@@ -173,6 +174,19 @@ class Loader:
                     proj.targetDir = "%{wks.location}/Build/Lib/%{cfg.buildcfg}-%{cfg.system}/%{prj.name}"
                 else:
                     proj.targetDir = "%{wks.location}/Build/Bin/%{cfg.buildcfg}-%{cfg.system}/%{prj.name}"
+
+        # ------------------------------------------------------------
+        # 1bis. Les locations de projet SANS variable deviennent absolues
+        #    AVANT l'expansion : `%{A.location}` lu par un autre projet
+        #    doit rendre un chemin absolu, pas le `location("libA")` relatif
+        #    tel qu'ecrit — qui serait ensuite colle a la location du
+        #    LECTEUR (`<wks>/libB/libA/src`), faux en silence (2.6.2).
+        #    Les locations a variable (`%{wks.location}/x`) s'expansent
+        #    a l'etape 2 et deviennent absolues a l'etape 3, comme avant.
+        # ------------------------------------------------------------
+        for proj in workspace.projects.values():
+            if proj.location and not proj.location.startswith('%{'):
+                proj.location = expander.ResolvePath(proj.location, baseDir)
 
         # ------------------------------------------------------------
         # 2. Expansion des variables dans TOUT le workspace.
