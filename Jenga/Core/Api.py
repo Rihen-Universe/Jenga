@@ -3,6 +3,7 @@
 """
 Jenga Build System - Core API
 Provides the DSL for configuring workspaces and projects
+AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 
 Naming conventions (strict):
 - PascalCase       : classes, enums, public methods/functions
@@ -14,7 +15,7 @@ Naming conventions (strict):
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any, Union, Tuple
+from typing import List, Dict, Optional, Any, Union, Tuple, Iterable
 from pathlib import Path
 from enum import Enum
 import copy
@@ -544,6 +545,13 @@ class Workspace:
     unitestConfig: Optional[UnitestConfig] = None
     disableUnitTestCompilation: bool = False
     disableUnitTestExecution: bool = False
+    # Listes blanches des politiques ci-dessus (2.5.0). Un projet de test nomme
+    # ici ECHAPPE a la politique correspondante ; la politique reste en place
+    # pour tous les autres. Vides = comportement d'avant 2.5.0, a l'identique.
+    # Deux listes, parce que dutc et dute sont deux politiques distinctes :
+    # on peut vouloir compiler une suite sans la lancer (ou l'inverse).
+    unitTestCompilationAllow: List[str] = field(default_factory=list)
+    unitTestExecutionAllow: List[str] = field(default_factory=list)
 
     # Android SDK/NDK paths
     androidSdkPath: str = ""
@@ -651,7 +659,16 @@ class workspace:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         global _currentWorkspace
-        # Keep workspace for later commands
+        # Keep workspace for later commands.
+        #
+        # Les listes blanches dutc/dute se verifient ICI et pas dans dutc() :
+        # dans un .jenga reel, `dutc(allow=[...])` est ecrit en tete du bloc,
+        # AVANT les `include` qui declarent les projets. A la fermeture du
+        # bloc, tout est connu. Ne pas masquer une exception deja en vol.
+        if exc_type is None and self._workspace is not None:
+            errors = ValidateUnitTestAllowLists(self._workspace)
+            if errors:
+                raise ValueError("\n".join(errors))
         return False
 
 
@@ -1343,23 +1360,99 @@ def startproject(name: str) -> None:
     if _currentWorkspace:
         _currentWorkspace.startProject = name
 
-def disableunittestcompilation(enable: bool = True) -> None:
-    """Disable compilation of unit-test projects at workspace scope."""
+def _UnitTestAllowList(allow: Optional[Union[str, Iterable[str]]]) -> Optional[List[str]]:
+    """Normalise l'argument `allow` de dutc/dute : None reste None (liste
+    inchangee), une chaine devient une liste d'un element, un iterable est
+    copie. Les doublons et les blancs sont retires, l'ordre est conserve."""
+    if allow is None:
+        return None
+    if isinstance(allow, str):
+        allow = [allow]
+    seen: List[str] = []
+    for item in allow:
+        name = str(item).strip()
+        if name and name not in seen:
+            seen.append(name)
+    return seen
+
+def disableunittestcompilation(enable: bool = True,
+                               allow: Optional[Union[str, Iterable[str]]] = None) -> None:
+    """Disable compilation of unit-test projects at workspace scope.
+
+    `allow` (2.5.0) : liste blanche de projets de TEST (`X_Tests`) qui echappent
+    a cette politique — ils se compilent comme si elle n'existait pas ; tous
+    les autres restent bloques. Remplace la liste precedente (ne l'etend pas).
+    Un nom qui ne designe aucun projet de test de l'espace de travail est une
+    ERREUR a la fermeture du bloc `with workspace(...)`, jamais un silence.
+    """
     if _currentWorkspace:
         _currentWorkspace.disableUnitTestCompilation = bool(enable)
+        allowed = _UnitTestAllowList(allow)
+        if allowed is not None:
+            _currentWorkspace.unitTestCompilationAllow = allowed
 
-def disableunittestexecution(enable: bool = True) -> None:
-    """Disable execution of unit tests at workspace scope."""
+def disableunittestexecution(enable: bool = True,
+                             allow: Optional[Union[str, Iterable[str]]] = None) -> None:
+    """Disable execution of unit tests at workspace scope.
+
+    `allow` (2.5.0) : memes regles que pour disableunittestcompilation(), pour
+    l'EXECUTION. Les deux listes sont independantes : une suite peut etre
+    autorisee a se compiler sans etre autorisee a se lancer, et inversement.
+    """
     if _currentWorkspace:
         _currentWorkspace.disableUnitTestExecution = bool(enable)
+        allowed = _UnitTestAllowList(allow)
+        if allowed is not None:
+            _currentWorkspace.unitTestExecutionAllow = allowed
 
-def dutc(enable: bool = True) -> None:
+def dutc(enable: bool = True,
+         allow: Optional[Union[str, Iterable[str]]] = None) -> None:
     """Shortcut for disableunittestcompilation()."""
-    disableunittestcompilation(enable)
+    disableunittestcompilation(enable, allow)
 
-def dute(enable: bool = True) -> None:
+def dute(enable: bool = True,
+         allow: Optional[Union[str, Iterable[str]]] = None) -> None:
     """Shortcut for disableunittestexecution()."""
-    disableunittestexecution(enable)
+    disableunittestexecution(enable, allow)
+
+
+def ValidateUnitTestAllowLists(workspace: Workspace) -> List[str]:
+    """Verifie les listes blanches dutc/dute contre les projets REELS.
+
+    Retourne une liste de messages d'erreur (vide = tout va bien). Un nom
+    absent de l'espace de travail, ou qui designe un projet qui n'est pas une
+    suite de tests, est une erreur : une liste blanche qui accepte l'inconnu
+    en silence ne protege de rien (une faute de frappe y « autoriserait »
+    un projet qui n'existe pas, et la suite visee resterait bloquee sans un
+    mot). Appelee a la fermeture du bloc `with workspace(...)`, quand tous les
+    projets — y compris ceux des `include` — sont connus.
+    """
+    if workspace is None:
+        return []
+    projects = workspace.projects or {}
+    test_names = sorted(
+        name for name, proj in projects.items()
+        if name != "__Unitest__"
+        and (getattr(proj, "isTest", False) or getattr(proj, "kind", None) == ProjectKind.TEST_SUITE)
+    )
+    errors: List[str] = []
+    for label, names in (("dutc(allow=...)", getattr(workspace, "unitTestCompilationAllow", []) or []),
+                         ("dute(allow=...)", getattr(workspace, "unitTestExecutionAllow", []) or [])):
+        for name in names:
+            if name in test_names:
+                continue
+            hint = ""
+            if name in projects:
+                hint = (f" — '{name}' existe mais n'est pas une suite de tests ; "
+                        f"la suite d'un projet s'appelle '<Projet>_Tests'")
+            elif f"{name}_Tests" in test_names:
+                hint = f" — vouliez-vous dire '{name}_Tests' ?"
+            known = ", ".join(test_names) if test_names else "(aucune)"
+            errors.append(
+                f"{label} : projet de test inconnu '{name}' dans l'espace de travail "
+                f"'{workspace.name}'{hint}. Suites connues : {known}."
+            )
+    return errors
 
 
 def newoption(option: Optional[Union[Dict[str, Any], str]] = None, **kwargs) -> None:

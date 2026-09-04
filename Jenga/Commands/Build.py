@@ -3,6 +3,7 @@
 """
 Build command – Compile le workspace ou un projet spécifique.
 Utilise le daemon s'il est actif, sinon exécute un build direct.
+AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 """
 
 import argparse
@@ -225,8 +226,13 @@ class BuildCommand:
                       options: Optional[List[str]] = None,
                       jobs: int = 0,
                       keepGoing: bool = False,
-                      buildTests: bool = False) -> Builder:
-        """Crée un builder pour la configuration et la plateforme spécifiées."""
+                      buildTests: bool = False,
+                      forceTests: bool = False) -> Builder:
+        """Crée un builder pour la configuration et la plateforme spécifiées.
+
+        `forceTests` : leve disableunittestcompilation pour ce builder
+        (`jenga test --force`, `jenga run --force`, `jenga build --force-tests`).
+        """
         # Déterminer la cible à partir de la plateforme
         target_os = None
         target_arch = None
@@ -342,6 +348,7 @@ class BuildCommand:
             builder.jobs = jobs  # Set parallel jobs count
             builder.keepGoing = bool(keepGoing)
             builder.buildTests = bool(buildTests)
+            builder.forceUnitTests = bool(forceTests)
             return builder
         except TypeError as e:
             # Backward compatibility: some concrete builders still expose the old __init__ signature.
@@ -362,6 +369,7 @@ class BuildCommand:
             builder.jobs = jobs  # Set parallel jobs count
             builder.keepGoing = bool(keepGoing)
             builder.buildTests = bool(buildTests)
+            builder.forceUnitTests = bool(forceTests)
             if getattr(builder, "_expander", None) is not None:
                 cfg = dict(getattr(builder._expander, "_config", {}) or {})
                 cfg["action"] = builder.action
@@ -444,7 +452,8 @@ class BuildCommand:
                              options: Optional[List[str]] = None,
                              jobs: int = 0,
                              keepGoing: bool = False,
-                             buildTests: bool = False) -> int:
+                             buildTests: bool = False,
+                             forceTests: bool = False) -> int:
         """
         Build séquentiel sur plusieurs plateformes.
         Continue même si une plateforme échoue, puis renvoie un code global.
@@ -469,7 +478,8 @@ class BuildCommand:
                     options=(options or []) + [f"platform:{platform_name}"],
                     jobs=jobs,
                     keepGoing=keepGoing,
-                    buildTests=buildTests
+                    buildTests=buildTests,
+                    forceTests=forceTests
                 )
             except Exception as e:
                 failures += 1
@@ -542,6 +552,15 @@ class BuildCommand:
                                  "from the default workspace build, because nothing depends on it. "
                                  "Naming one explicitly (--target X_Tests, or `jenga test`) always "
                                  "builds it, with or without this flag")
+        # Le relais de `jenga test --force` / `jenga run --force` : ces deux
+        # commandes construisent en appelant `jenga build --target X_Tests`, et
+        # sans ce drapeau le Builder rebloquait la cible que la commande venait
+        # d'autoriser (mesure sur Nkentseu le 2026-09-04 : « Blocked target »
+        # malgre --force). Nomme --force-tests, et pas --force, parce que sur
+        # `build` un --force nu se lirait « recompile tout ».
+        parser.add_argument("--force-tests", action="store_true",
+                            help="Build unit-test targets even when the workspace disables "
+                                 "their compilation (dutc). Per-invocation override.")
         parser.add_argument("--keep-going", "-k", action="store_true",
                             help="Build everything that can be built instead of stopping at the first "
                                  "failure; the footer then reports succeeded / failed / skipped "
@@ -633,6 +652,7 @@ class BuildCommand:
                         'action': parsed.action,
                         'keep_going': parsed.keep_going,
                         'tests': parsed.tests,
+                        'force_tests': parsed.force_tests,
                     })
                     if response.get('status') == 'ok':
                         return response.get('return_code', 0)
@@ -726,7 +746,8 @@ class BuildCommand:
                 options=filter_options,
                 jobs=parsed.jobs,
                 keepGoing=parsed.keep_going,
-                buildTests=parsed.tests
+                buildTests=parsed.tests,
+                forceTests=parsed.force_tests
             )
 
         # 2. Créer le builder
@@ -741,7 +762,8 @@ class BuildCommand:
                 options=filter_options,
                 jobs=parsed.jobs,
                 keepGoing=parsed.keep_going,
-                buildTests=parsed.tests
+                buildTests=parsed.tests,
+                forceTests=parsed.force_tests
             )
         except Exception as e:
             Colored.PrintError(f"Cannot create builder: {e}")
@@ -776,7 +798,8 @@ class BuildCommand:
                     options=filter_options,
                     jobs=parsed.jobs,
                     keepGoing=parsed.keep_going,
-                    buildTests=parsed.tests
+                    buildTests=parsed.tests,
+                    forceTests=parsed.force_tests
                 )
             except Exception as e:
                 Colored.PrintError(f"Cannot create builder after cache refresh: {e}")
