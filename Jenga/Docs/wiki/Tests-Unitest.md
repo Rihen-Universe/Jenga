@@ -50,6 +50,40 @@ with project("Calculator"):
         testoptions(["--verbose"])
 ```
 
+#### La suite fournit son propre `main()` — `testownmain()` _(2.6.0+)_
+
+Par défaut Jenga génère le point d'entrée (Unitest `AutoMain`). Une suite qui
+a **son** `main()` — un programme de test, un banc — le dit :
+
+```python
+    with test():
+        testfiles(["tests/**.cpp"])
+        testownmain()                   # ne pas générer de main : le mien est dans tests/
+```
+
+Le Builder vérifie **avant de compiler** : une suite, un `main()`.
+- `testownmain()` et aucun `main()` dans ses sources → erreur ;
+- **deux `main()` ou plus** (avec ou sans le mot) → refusé **en nommant les
+  fichiers** : `Test suite 'X_Tests' defines main() in 2 files: tests/a.cpp,
+  tests/b.cpp. One suite, one main: declare one sub-suite per program…`. Deux
+  programmes dans `tests/` sont deux sous-suites :
+
+  ```python
+      with test("Serial"):            # -> X_Serial_Tests
+          testfiles(["tests/serial_main.cpp"]); testownmain()
+      with test("Binary"):            # -> X_Binary_Tests
+          testfiles(["tests/binary_main.cpp"]); testownmain()
+  ```
+- un `main()` sans `testownmain()` alors que Jenga en génère un → refusé en
+  disant le mot (`declare testownmain() in its test() block, or exclude the
+  file`). L'ancien contournement — `testmaintemplate()` sur un fichier vide —
+  reste accepté ; `testownmain()` et `testmaintemplate()` ensemble se
+  contredisent (erreur au chargement).
+
+La détection est textuelle (`int|auto|void main|wmain|WinMain|wWinMain(` suivi
+d'une accolade avant tout `;`, commentaires retirés) : un `main()` sous
+`#if 0` compte encore. Elle est bruyante quand elle se trompe, jamais muette.
+
 ### 3. Écrire un test
 
 ```cpp
@@ -77,10 +111,19 @@ jenga test                              # compile + lance toutes les suites
 jenga test --project Calculator_Tests   # une suite précise
 jenga test --config Debug --no-build    # sans recompiler
 jenga test --project Calculator_Tests --force   # malgré dutc/dute (voir §5)
+jenga test --project Calculator_Tests --no-runtime-path   # sans le bin de la chaîne sur le PATH
 ```
 
 `jenga test` continue même si une suite échoue, et agrège les résultats dans un
 rapport console.
+
+**PATH d'exécution** _(2.6.0+)_ : au moment de lancer la cible, `jenga test` et
+`jenga run` mettent en tête du `PATH` le répertoire des exécutables de **la
+chaîne du projet** et les dossiers de sortie des `SharedLib` dont la cible
+dépend. Sans cela, une suite liée contre `libstdc++-6.dll` (clang-mingw)
+sortait en **127 sans un mot** dès que `ucrt64/bin` manquait au `PATH` de
+l'appelant. `--no-runtime-path` reproduit l'environnement d'un utilisateur :
+c'est le geste pour vérifier qu'un binaire est autonome (voir §6).
 
 ### 5. Politiques de workspace
 
@@ -154,6 +197,22 @@ réel, deux suites, une mutation qui fait rougir).
   `with test():` doit être imbriqué dans `with project(...):`.
 - Unitest non configuré → ajouter `with unitest() as u: u.Precompiled()` dans le
   workspace avant les projets qui utilisent `test()`.
+- **`'X_Tests.exe' did not start: exit code 0xC0000135 (STATUS_DLL_NOT_FOUND)`**
+  _(2.6.0+)_ → le binaire n'a **pas démarré** : ce n'est pas un test rouge. Jenga
+  nomme les DLL importées introuvables (`libstdc++-6.dll, libgcc_s_seh-1.dll,
+  libwinpthread-1.dll` = runtime MinGW lié dynamiquement). Remède durable :
+  lier le runtime statiquement — `staticruntime()` sur le projet, ou
+  `ldflags(["-static-libstdc++", "-static-libgcc"])` sur la chaîne — ou livrer
+  la DLL à côté du binaire. Sans `--no-runtime-path`, Jenga met le `bin` de la
+  chaîne sur le `PATH` et la suite parle ; ça ne rend pas le binaire livrable.
+  Même diagnostic pour `127` (bash / `ld.so`), `0xC0000139` (symbole absent :
+  mauvaise version de DLL sur le `PATH`) et `0xC000007B` (DLL de la mauvaise
+  architecture trouvée d'abord).
+- `Test suite 'X_Tests' defines main() in 2 files` → deux programmes dans une
+  suite : une sous-suite par programme (`with test("Sub"):` + `testownmain()`),
+  ou `excludefiles` pour ce qui n'est pas un test (§2).
+- `defines main() in tests/foo.cpp while Jenga generates one` → ajouter
+  `testownmain()` dans le bloc `test()` (§2).
 
 ---
 
@@ -202,6 +261,40 @@ with project("Calculator"):
         testoptions(["--verbose"])
 ```
 
+#### The suite provides its own `main()` — `testownmain()` _(2.6.0+)_
+
+By default Jenga generates the entry point (Unitest `AutoMain`). A suite that
+has **its own** `main()` — a test program, a benchmark — says so:
+
+```python
+    with test():
+        testfiles(["tests/**.cpp"])
+        testownmain()                   # generate no main: mine is in tests/
+```
+
+The Builder checks **before compiling**: one suite, one `main()`.
+- `testownmain()` with no `main()` in its sources → error;
+- **two or more `main()`** (with or without the word) → refused **naming the
+  files**: `Test suite 'X_Tests' defines main() in 2 files: tests/a.cpp,
+  tests/b.cpp. One suite, one main: declare one sub-suite per program…`. Two
+  programs under `tests/` are two sub-suites:
+
+  ```python
+      with test("Serial"):            # -> X_Serial_Tests
+          testfiles(["tests/serial_main.cpp"]); testownmain()
+      with test("Binary"):            # -> X_Binary_Tests
+          testfiles(["tests/binary_main.cpp"]); testownmain()
+  ```
+- a `main()` without `testownmain()` while Jenga generates one → refused
+  saying the word (`declare testownmain() in its test() block, or exclude the
+  file`). The old workaround — `testmaintemplate()` on an empty file — is still
+  accepted; `testownmain()` and `testmaintemplate()` together contradict each
+  other (error at load).
+
+Detection is textual (`int|auto|void main|wmain|WinMain|wWinMain(` followed by
+a brace before any `;`, comments stripped): a `main()` under `#if 0` still
+counts. It is loud when wrong, never silent.
+
 ### 3. Write a test
 
 ```cpp
@@ -229,10 +322,19 @@ jenga test                              # build + run all suites
 jenga test --project Calculator_Tests   # a specific suite
 jenga test --config Debug --no-build    # without rebuilding
 jenga test --project Calculator_Tests --force   # despite dutc/dute (see §5)
+jenga test --project Calculator_Tests --no-runtime-path   # without the toolchain bin on PATH
 ```
 
 `jenga test` keeps going even if a suite fails, and aggregates results into a
 console report.
+
+**Runtime PATH** _(2.6.0+)_: when launching the target, `jenga test` and
+`jenga run` prepend to `PATH` the executables directory of **the project's
+toolchain** and the output directories of the `SharedLib`s the target depends
+on. Without it, a suite linked against `libstdc++-6.dll` (clang-mingw) exited
+**127 without a word** whenever `ucrt64/bin` was missing from the caller's
+`PATH`. `--no-runtime-path` reproduces a user's environment: that is how you
+check a binary is self-contained (see §6).
 
 ### 5. Workspace policies
 
@@ -305,5 +407,21 @@ two suites, a mutation that turns it red).
   `with test():` block must be nested inside `with project(...):`.
 - Unitest not configured → add `with unitest() as u: u.Precompiled()` to the
   workspace before any project that uses `test()`.
+- **`'X_Tests.exe' did not start: exit code 0xC0000135 (STATUS_DLL_NOT_FOUND)`**
+  _(2.6.0+)_ → the binary did **not start**: this is not a red test. Jenga names
+  the imported DLLs it could not find (`libstdc++-6.dll, libgcc_s_seh-1.dll,
+  libwinpthread-1.dll` = MinGW runtime linked dynamically). Durable fix: link
+  the runtime statically — `staticruntime()` on the project, or
+  `ldflags(["-static-libstdc++", "-static-libgcc"])` on the toolchain — or ship
+  the DLL next to the binary. Without `--no-runtime-path`, Jenga puts the
+  toolchain `bin` on `PATH` and the suite speaks; that does not make the binary
+  shippable. Same diagnosis for `127` (bash / `ld.so`), `0xC0000139` (missing
+  symbol: wrong DLL version on `PATH`) and `0xC000007B` (DLL of the wrong
+  architecture found first).
+- `Test suite 'X_Tests' defines main() in 2 files` → two programs in one suite:
+  one sub-suite per program (`with test("Sub"):` + `testownmain()`), or
+  `excludefiles` for what is not a test (§2).
+- `defines main() in tests/foo.cpp while Jenga generates one` → add
+  `testownmain()` to the `test()` block (§2).
 
 See example `04_unit_tests`.
