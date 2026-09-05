@@ -66,6 +66,7 @@ def print_global_help():
         ("file, add", "Ajoute des fichiers/dépendances à un projet"),
         ("examples, e", "Liste et copie des projets d'exemple"),
         ("install", "Installe dépendances et toolchains locales"),
+        ("kit", "Extrait un kit redistribuable (en-tetes + libs construites)"),
         ("keygen", "Génère une keystore Android"),
         ("sign", "Signe un APK ou IPA"),
         ("docs", "Génère la documentation du projet"),
