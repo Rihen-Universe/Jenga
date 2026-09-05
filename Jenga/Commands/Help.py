@@ -47,6 +47,7 @@ class HelpCommand:
             ("project, create", "Crée un nouveau projet"),
             ("file, add", "Ajoute des fichiers/dépendances à un projet"),
             ("install", "Installe dépendances et toolchains locales"),
+            ("kit", "Extrait un kit redistribuable (en-tetes + libs construites)"),
             ("keygen", "Génère une keystore Android"),
             ("sign", "Signe un APK ou IPA"),
             ("docs", "Génère la documentation du projet"),

@@ -35,10 +35,12 @@ from .Config import ConfigCommand
 from .Examples import ExamplesCommand
 from .IdeSetup import IdeSetupCommand
 from .CompileFlags import CompileFlagsCommand
+from .Kit import KitCommand
 
 # Enregistrement des commandes
 COMMANDS.update({
     'compile-flags': CompileFlagsCommand,   # flags de compilation (JSON) pour diagnostics IDE
+    'kit': KitCommand,          # extrait un kit redistribuable (en-tetes + libs construites)
     'build': BuildCommand,
     'run': RunCommand,
     'gdb': GdbCommand,
@@ -98,5 +100,5 @@ __all__ = [
     'KeygenCommand', 'SignCommand', 'DocsCommand', 'HelpCommand',
     'PackageCommand', 'DeployCommand', 'PublishCommand',
     'ProfileCommand', 'BenchCommand', 'ConfigCommand', 'ExamplesCommand',
-    'IdeSetupCommand',
+    'IdeSetupCommand', 'KitCommand',
 ]
