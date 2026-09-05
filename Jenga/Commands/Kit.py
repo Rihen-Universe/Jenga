@@ -640,30 +640,55 @@ class KitCommand:
 
     @staticmethod
     def _FilterMatches(expression: str, config: str, os_name: str) -> bool:
-        """Vrai si une expression de filtre SIMPLE s'applique a (config, systeme).
+        """Vrai si une expression de filtre s'applique a (config, systeme).
 
-        On ne traite que les conjonctions de `system:` et `configurations:`.
-        Toute negation, alternative ou condition d'un autre genre fait renoncer.
+        On evalue reellement l'expression, negations et alternatives comprises.
+        C'est necessaire : les liens systeme de Windows sont poses sous
+
+            system:Windows && !options:windows-runtime=uwp
+                           && !system:XboxSeries && !system:XboxOne
+
+        et un evaluateur qui renonce devant un `!` laisserait un kit Windows
+        sans user32 ni gdi32, donc incapable d'ouvrir une fenetre.
+
+        Une option n'est jamais posee au moment de fabriquer un kit : on
+        fabrique la configuration par defaut. `options:x` est donc faux, et
+        `!options:x` vrai. Un atome d'un genre qu'on ne sait pas lire rend
+        toute l'expression fausse, pour ne jamais emporter un lien de trop.
         """
         text = (expression or "").strip()
-        if not text or "||" in text or "!" in text:
+        if not text:
             return False
-        for atom in text.split("&&"):
-            atom = atom.strip().lower()
-            if ":" not in atom:
-                return False
-            key, _, value = atom.partition(":")
-            key = key.strip()
-            value = value.strip()
-            if key in ("system", "systems"):
-                if value != os_name.lower():
-                    return False
-            elif key in ("configurations", "configuration", "config", "cfg"):
-                if value != config.lower():
-                    return False
-            else:
-                return False
-        return True
+        # `&&` lie plus fort que `||`, comme dans Builder._ParseFilterOr.
+        for alternative in text.split("||"):
+            if not alternative.strip():
+                continue
+            if all(KitCommand._AtomMatches(atom, config, os_name)
+                   for atom in alternative.split("&&") if atom.strip()):
+                return True
+        return False
+
+    @staticmethod
+    def _AtomMatches(atom: str, config: str, os_name: str) -> bool:
+        atom = atom.strip()
+        negated = atom.startswith("!")
+        if negated:
+            atom = atom[1:].strip()
+        if ":" not in atom:
+            return False
+        key, _, value = atom.partition(":")
+        key = key.strip().lower()
+        value = value.strip().lower()
+
+        if key in ("system", "systems"):
+            result = (value == os_name.lower())
+        elif key in ("configurations", "configuration", "config", "cfg"):
+            result = (value == config.lower())
+        elif key in ("options", "option"):
+            result = False          # aucune option posee a la fabrication
+        else:
+            return False            # genre inconnu : on renonce, sans negation
+        return (not result) if negated else result
 
     # ------------------------------------------------------------------
     # Fichier de configuration Jenga
