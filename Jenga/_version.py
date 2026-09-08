@@ -38,7 +38,12 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # 2.6.2 (2026-09-04) : `%{Projet.location}` se resout sous `with filter(...)`
 # (formes filtrees expansees au chargement, ResolveProjectPath expanse avant
 # de resoudre) et lit une location absolue en espace mono-fichier.
-__version__ = "2.6.2"
+# 2.6.3 (2026-09-08) : `jenga kit` extrait un kit redistribuable d'un
+# workspace (fermeture transitive des modules, en-tetes publics,
+# bibliotheques construites, fichier de configuration charge par
+# useconfig()) ; l'evaluateur de filtres traite &&, || et ! -- sans quoi
+# un kit Windows sortait sans user32 ni gdi32.
+__version__ = "2.6.3"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

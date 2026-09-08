@@ -3,6 +3,30 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.6.3
+
+### Ajouté
+
+- **`jenga kit` — extraire un kit redistribuable d'un workspace.**
+  `jenga kit --target M --config all --platform P --output D` récolte les
+  en-têtes publics et les bibliothèques déjà construites des modules demandés,
+  puis écrit un fichier de configuration Jenga que le consommateur charge par
+  `useconfig()`. La commande résout la **fermeture transitive** : une archive
+  statique ne contient pas ses dépendances, elle garde ses trous — demander
+  `NKLogger` emporte les six modules, sans quoi le kit compile et ne lie pas.
+
+### Corrigé
+
+- **L'évaluateur de filtres renonçait devant `!` et `||`.** Un kit Windows
+  sortait donc **sans `user32` ni `gdi32`** — impossible d'ouvrir une fenêtre
+  chez celui qui le reçoit — parce que les liens Windows sont posés sous
+  `system:Windows && !options:windows-runtime=uwp && !system:XboxSeries && !system:XboxOne`.
+  L'évaluateur traite maintenant `&&`, `||` et `!`. Une option n'est jamais
+  posée au moment de fabriquer un kit : `options:x` est faux, `!options:x` vrai.
+  Un atome de genre inconnu rend l'expression fausse, **sans** négation — on
+  préfère un lien manquant, qui se voit, à un lien de trop, qui ne se voit pas.
+  Le kit NKWindow passe de 0 à 15 bibliothèques système.
+
 ## v2.6.2
 
 ### Corrigé
