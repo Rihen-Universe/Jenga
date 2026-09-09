@@ -455,14 +455,23 @@ externe. Code : [Jenga/Tools/Installer/](../Tools/Installer/). Spec :
 > sa vraie force). On n'écrit **pas** un DSL C++ (perte d'expressivité + langage à
 > réapprendre) : on **embarque l'interpréteur**.
 
-| # | Chantier | Détail |
-|---|----------|--------|
-| 1 | **Embarquer CPython avec Jenga** | Bundler le *CPython embeddable* (~10–15 Mo) dans la distribution → **zéro install côté user**, plus de conflits de version, DSL Python inchangé. |
-| 2 | **Embarquer libpython dans NKCode (in-process)** | Jenga s'exécute **dans** l'IDE via `libpython`/`pybind`, **sans spawn de `jenga.exe`** → intégration « totale et fiable », plus rapide (pas de process externe), remontée directe des erreurs/logs. |
-| 3 | **(Optionnel) Cœur natif C++** | Graphe de build + cache incrémental en C++ natif ; le `.jenga` reste le **frontend Python** exécuté par l'interpréteur embarqué. Découple la performance du langage utilisateur. |
+| # | Chantier | État | Détail |
+|---|----------|------|--------|
+| 1 | **Embarquer CPython avec Jenga** | ✅ | *CPython 3.12.7 embeddable* vendorisé et posé à côté de l'exe NKCode (`tools/python-embed/`) → **zéro install côté utilisateur**, plus de conflits de version, DSL Python inchangé. |
+| 2 | **Embarquer libpython dans NKCode (in-process)** | ✅ | `Jenga/Core/Embed.py` (API programmatique + sink de progression dans `Utils/Reporter.py`) côté Jenga ; `NkEmbeddedJenga` côté NKCode (thread worker dédié, `pybind11::scoped_interpreter`, `PyConfig` isolé → **jamais** le Python système). Plus de spawn de `jenga.exe`, remontée directe des erreurs/logs. |
+| 3 | **(Optionnel) Cœur natif C++** | ⬜ | Graphe de build + cache incrémental en C++ natif ; le `.jenga` reste le **frontend Python** exécuté par l'interpréteur embarqué. Découple la performance du langage utilisateur. |
 
 **Bénéfices :** distribution auto-suffisante, démarrage plus rapide, intégration
-IDE fiable, aucune régression du DSL. **À planifier** (lié à l'intégration NKCode).
+IDE fiable, aucune régression du DSL.
+
+**État (30 juil 2026)** : chantiers 1 et 2 **faits sur Windows**. `Embed.py`
+est stable (`Reporter` n'émet vers le sink qu'**après** les `print()` existants →
+le comportement du CLI est inchangé bit pour bit sans sink). Détail du montage,
+pièges et suite dans `Applications/NKCode/ROADMAP.md` (Phases 12 et 13) du dépôt
+Nkentseu. **Reste** : test sur une machine sans Python (jalon final), puis
+Linux/macOS — pas d'équivalent officiel du paquet *embeddable* hors Windows,
+approche à trancher (python-build-standalone vendorisé, ou détection du Python
+système avec `python3-dev`).
 
 ---
 
