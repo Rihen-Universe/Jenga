@@ -15,16 +15,19 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from Jenga.Core.Api import CompilerFamily, Project, ProjectKind, TargetArch, TargetEnv, TargetOS
-from ...Utils import Colored, FileSystem, Process, ProcessResult
+from ...Utils import Colored, FileSystem, Process, ProcessResult, Reporter
 from ..Builder import Builder
 from ..Platform import Platform
 from ..IconConverter import ResolveIconFor, PLATFORM_IOS
+from .AppleUniversal import AppleUniversalMixin, NormaliserArchsApple
 
 
-class DirectIOSBuilder(Builder):
+class DirectIOSBuilder(AppleUniversalMixin, Builder):
     """
     Apple mobile builder (direct clang/xcrun mode).
     """
+
+    APPLE_OS_TAG = "iOS"
 
     _TARGETS: Dict[TargetOS, Dict[str, object]] = {
         TargetOS.IOS: {
@@ -136,6 +139,64 @@ class DirectIOSBuilder(Builder):
         self._CheckCompiler()
         self.min_version = self._GetMinimumVersion()
         self.target_triple = self._GetTargetTriple()
+
+    # -------------------------------------------------------------------------
+    #  Binaire universel
+    # -------------------------------------------------------------------------
+    def _BuildUneArchitecture(self, targetProject: Optional[str] = None) -> int:
+        """Une passe ordinaire, pour UNE architecture."""
+        return Builder.Build(self, targetProject)
+
+    def _OnAppleArchChanged(self) -> None:
+        """Recalcule le triplet cible, qui contient l'architecture.
+
+        `target_triple` est calcule UNE FOIS au constructeur. Sans ce rappel,
+        la seconde architecture serait compilee avec le triplet de la premiere,
+        et `lipo` refuserait deux tranches identiques avec un message qui ne
+        nomme jamais le triplet.
+        """
+        self.target_triple = self._GetTargetTriple()
+
+    def Build(self, targetProject: Optional[str] = None) -> int:
+        """Compile normalement, sauf si le projet demande plusieurs architectures.
+
+        SUR iOS, CELA NE CONCERNE QUE LE SIMULATEUR, et ce n'est pas une
+        limitation de Jenga : `lipo` refuse deux tranches de la meme
+        architecture, or l'appareil et le simulateur sont tous deux en arm64
+        depuis les Mac Apple Silicon. Un simulateur universel
+        (arm64 + x86_64) tourne sur les Mac Intel comme sur les Apple Silicon,
+        ce qui est exactement le besoin d'une equipe aux machines melangees.
+
+        Pour livrer appareil ET simulateur dans un seul paquet, le format est
+        le .xcframework, qui empile des binaires au lieu de les fusionner.
+        """
+        projet = None
+        if targetProject:
+            projet = self.workspace.projects.get(targetProject)
+        else:
+            for nom, ctx in self.workspace.projects.items():
+                if nom.startswith("__"):
+                    continue
+                if len(NormaliserArchsApple(getattr(ctx, "appleArchs", []))) >= 2:
+                    projet = ctx
+                    break
+
+        if projet is not None:
+            archs = NormaliserArchsApple(getattr(projet, "appleArchs", []))
+            if len(archs) >= 2:
+                if not self.is_simulator:
+                    # On ne construit pas silencieusement autre chose que ce qui
+                    # est demande : on dit pourquoi, et on continue en mono-arch.
+                    Reporter.Warning(
+                        "iosarchs() est ignore pour une cible APPAREIL : il n'existe "
+                        "pas d'iPhone Intel, et lipo refuse deux tranches arm64. "
+                        "Pour couvrir appareil et simulateur, produisez un "
+                        ".xcframework."
+                    )
+                else:
+                    return 0 if self.BuildUniversalApple(projet, archs) else 1
+
+        return Builder.Build(self, targetProject)
 
     @staticmethod
     def _IsDirectLibPath(lib: str) -> bool:

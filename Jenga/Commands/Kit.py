@@ -245,15 +245,19 @@ class KitCommand:
 
         # ---- fichier de configuration et manifeste --------------------
         syslibs: Dict[Tuple[str, str], List[str]] = {}
+        extdirs: Dict[Tuple[str, str], List[str]] = {}
         for (config, os_name) in libs:
             syslibs[(config, os_name)] = KitCommand._SystemLinks(
+                workspace, modules, config, os_name)
+            extdirs[(config, os_name)] = KitCommand._ExternalLibDirs(
                 workspace, modules, config, os_name)
 
         config_file = kit_root / f"{kit_name}.jenga"
         KitCommand._WriteKitConfig(config_file, kit_name, workspace,
-                                   modules, link_order, libs, syslibs)
+                                   modules, link_order, libs, syslibs, extdirs)
         KitCommand._WriteManifest(kit_root / "KIT.txt", kit_name, workspace,
-                                  modules, link_order, libs, syslibs, header_count)
+                                  modules, link_order, libs, syslibs, extdirs,
+                                  header_count)
 
         # ---- resume ---------------------------------------------------
         print()
@@ -623,6 +627,7 @@ class KitCommand:
             # 1. Liens inconditionnels.
             add(project.links)
 
+
             # 2. Liens poses sous un `filter("system:X")` : Jenga les range aussi
             #    dans systemLinks, indexes par systeme.
             system_links = getattr(project, "systemLinks", None) or {}
@@ -636,6 +641,50 @@ class KitCommand:
                 if KitCommand._FilterMatches(expression, config, os_name):
                     add(values)
 
+        return collected
+
+    @staticmethod
+    def _ExternalLibDirs(workspace, modules: List[str], config: str,
+                         platform: str) -> List[str]:
+        """Les dossiers de bibliotheques QUI NE SONT PAS dans le workspace.
+
+        Un module peut se lier a un SDK installe ailleurs sur la machine :
+        `NKCanvas` pose `libdirs([VULKAN_LIB])` a cote de `links(["vulkan-1"])`.
+        Emporter le nom sans le dossier donne un kit qui echoue au lien sur
+        `cannot find -lvulkan-1`. On emporte donc aussi le chemin.
+
+        Les dossiers internes au workspace sont ignores : ce sont les
+        bibliotheques du kit, deja rangees dans lib/<Config>-<OS>/.
+        """
+        root = Path(workspace.location).resolve()
+        collected: List[str] = []
+
+        for name in modules:
+            project = workspace.projects.get(name)
+            if project is None:
+                continue
+            expander = KitCommand._MakeExpander(workspace, project, config, platform)
+
+            candidates = list(project.libDirs or [])
+            for expression, values in (getattr(project, "_filteredLibDirs", None) or {}).items():
+                if KitCommand._FilterMatches(expression, config, platform.split("-")[0]):
+                    candidates.extend(values)
+
+            for raw in candidates:
+                if not raw:
+                    continue
+                try:
+                    path = Path(expander.Expand(str(raw), recursive=True))
+                    if not path.is_absolute():
+                        continue        # relatif au projet : interne, donc deja pris
+                    path = path.resolve()
+                except (OSError, ValueError):
+                    continue
+                if KitCommand._IsInside(path, root):
+                    continue            # une sortie du workspace : c'est le kit
+                entry = str(path).replace("\\", "/")
+                if entry not in collected:
+                    collected.append(entry)
         return collected
 
     @staticmethod
@@ -702,7 +751,8 @@ class KitCommand:
     def _WriteKitConfig(path: Path, kit_name: str, workspace,
                         modules: List[str], link_order: List[str],
                         libs: Dict[Tuple[str, str], Dict[str, str]],
-                        syslibs: Dict[Tuple[str, str], List[str]]) -> None:
+                        syslibs: Dict[Tuple[str, str], List[str]],
+                        extdirs: Dict[Tuple[str, str], List[str]]) -> None:
         """Ecrit le .jenga que le workspace consommateur charge par useconfig().
 
         Le fichier ne declare AUCUN projet : il n'a pas de sources, un projet
@@ -817,7 +867,13 @@ class KitCommand:
             files = libs[(config, os_name)]
             ordered = [n for n in link_order if n in files]
             add(f'    with filter("system:{os_name} && configurations:{config}"):')
-            add(f'        libdirs([KIT_ROOT + "/lib/{config}-{os_name}"])')
+            external = extdirs.get((config, os_name)) or []
+            if external:
+                add("        # Dossiers de SDK exterieurs au kit : ils doivent exister")
+                add("        # sur la machine qui construit. Voir KIT.txt.")
+                add(f'        libdirs([KIT_ROOT + "/lib/{config}-{os_name}"] + {external!r})')
+            else:
+                add(f'        libdirs([KIT_ROOT + "/lib/{config}-{os_name}"])')
             add("        _archives = []")
             add("        for _m in selection:")
             add("            _f = {")
@@ -845,6 +901,7 @@ class KitCommand:
                        modules: List[str], link_order: List[str],
                        libs: Dict[Tuple[str, str], Dict[str, str]],
                        syslibs: Dict[Tuple[str, str], List[str]],
+                       extdirs: Dict[Tuple[str, str], List[str]],
                        header_count: int) -> None:
         """Un kit sans date ment en silence : le moteur avance, le kit non, et
         un rapport de bug ne dit plus contre quoi il a ete constate."""
@@ -868,6 +925,27 @@ class KitCommand:
             suffix = f", + systeme : {', '.join(system)}" if system else ""
             lines.append(
                 f"    {config}-{os_name} : {len(libs[(config, os_name)])} bibliotheques{suffix}")
+        externes = sorted({d for values in extdirs.values() for d in values})
+        if externes:
+            lines += [
+                "",
+                "A INSTALLER SUR LA MACHINE QUI CONSTRUIT :",
+                "",
+                "Ces dossiers ne sont PAS dans le kit. Ils appartiennent a des SDK",
+                "installes a part, et le kit ne fait que dire ou ils etaient chez son",
+                "producteur. Si les votres sont ailleurs, corrigez les chemins dans le",
+                "fichier de configuration du kit.",
+                "",
+            ]
+            for d in externes:
+                lines.append(f"    {d}")
+            lines += [
+                "",
+                "Leurs EN-TETES ne sont pas necessaires : les modules du kit les",
+                "encapsulent et n'en exposent rien dans leurs en-tetes publics. Seules",
+                "les bibliotheques sont reclamees, a l'edition de liens.",
+            ]
+
         lines += [
             "",
             "Pour une cible absente de cette liste, il faut refaire le kit depuis le",

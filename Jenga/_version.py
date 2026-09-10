@@ -43,7 +43,18 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # bibliotheques construites, fichier de configuration charge par
 # useconfig()) ; l'evaluateur de filtres traite &&, || et ! -- sans quoi
 # un kit Windows sortait sans user32 ni gdi32.
-__version__ = "2.6.3"
+# 2.7.0 (2026-09-10) : binaires universels Apple. `macosarchs([...])` et
+# `iosarchs([...])` compilent une fois PAR architecture puis assemblent avec
+# `lipo` — equivalent Apple de androidabis/harmonyabis. Sans eux, un
+# executable macOS ne tournait que sur la moitie du parc, Apple Silicon OU
+# Intel. Corrige au passage un defaut latent : l'edition de liens macOS ne
+# recevait pas `-arch`, ce qui ne se voyait que le jour ou l'on croise les
+# architectures. La chaine d'outils HarmonyOS s'enregistre desormais toute
+# seule apres `jenga install harmony-sdk` (la branche installait le SDK sans
+# jamais appeler `_UpsertToolchains`, donc aucune construction HarmonyOS ne
+# demarrait). `jenga kit` emporte les dossiers de bibliotheques externes au
+# workspace.
+__version__ = "2.7.0"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

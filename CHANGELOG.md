@@ -3,6 +3,68 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.7.0
+
+### Ajouté
+
+- **Binaires universels macOS et iOS.** `macosarchs(["arm64", "x86_64"])` et
+  `iosarchs([...])` sont l'équivalent Apple de `androidabis` et `harmonyabis` :
+  Jenga compile une fois **par architecture**, chacune dans son propre dossier
+  d'objets, puis assemble le résultat avec `lipo`. Sans eux, un exécutable
+  macOS ne tourne que sur la moitié du parc : Apple Silicon **ou** Intel, et
+  jamais les deux. Le mécanisme est dans `Core/Builders/AppleUniversal.py`, qui
+  reprend délibérément la structure du chemin multi-ABI d'Android pour qu'on
+  puisse lire les trois côte à côte.
+
+  Un seul appel `clang -arch arm64 -arch x86_64` aurait été plus court, et
+  c'est ce que fait Xcode. Il est inutilisable ici : clang refuse de combiner
+  plusieurs `-arch` avec la génération des dépendances (`-MD -MF`), donc avec
+  la compilation incrémentale.
+
+  **Sur iOS, cela ne concerne que le simulateur.** Ce n'est pas une limitation
+  de Jenga : `lipo` refuse deux tranches de la même architecture, et depuis les
+  Mac Apple Silicon l'appareil et le simulateur sont tous deux en `arm64`. Sur
+  une cible appareil, `iosarchs` est ignoré avec un message qui le dit. Pour
+  livrer appareil **et** simulateur dans un même paquet, le format est le
+  `.xcframework`, qui empile des binaires au lieu de les fusionner.
+
+- **`jenga kit` emporte les dossiers de bibliothèques externes au workspace.**
+  Un kit dont un module dépendait d'une bibliothèque rangée hors de l'espace de
+  travail se montait sans elle, et l'édition de liens échouait chez celui qui
+  recevait le kit.
+
+### Corrigé
+
+- **L'édition de liens macOS ne recevait pas `-arch`.** La compilation, si.
+  Tant que la cible était l'architecture de la machine, clang devinait juste et
+  le défaut restait invisible. Dès qu'on croise les architectures, pour un
+  binaire universel ou pour un Mac Intel qui construit vers Apple Silicon, le
+  lieur prend sa valeur par défaut et refuse les objets :
+
+  ```
+  ld: building for macOS-x86_64 but attempting to link file built for macOS-arm64
+  ```
+
+  Le message accuse les objets, alors que c'est la ligne de liaison qui est
+  incomplète. Compilation et liaison lisent maintenant la même fonction.
+
+- **`jenga install harmony-sdk` n'enregistrait aucune chaîne d'outils.** La
+  branche `android-ndk` appelait `_UpsertToolchains` après installation, la
+  branche `harmony-sdk` ne le faisait pas. Le SDK s'installait donc
+  correctement, `OHOS_SDK` était posée, et **toute construction HarmonyOS
+  échouait sans dire pourquoi**. La chaîne s'enregistre désormais sous le nom
+  `ohos-ndk`, celui que `Core/Builder.py` demande.
+
+### Documentation
+
+- L'URL d'installation du guide complet pointait sur `github.com/votre-org/jenga.git`,
+  un texte à remplacer que personne n'avait remplacé. Elle pointe maintenant sur
+  le vrai dépôt, avec la mise en garde qui manquait : **le dépôt est public, donc
+  si Git réclame un mot de passe, c'est que l'URL est fausse.** GitHub répond la
+  même chose pour un dépôt privé et pour un dépôt inexistant, et le message parle
+  d'authentification alors que le problème est l'adresse. S'y ajoutent les deux
+  sorties de `externally-managed-environment` sur macOS et Linux récents.
+
 ## v2.6.3
 
 ### Ajouté

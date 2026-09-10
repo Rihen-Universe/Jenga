@@ -5,12 +5,13 @@ Mac, en s'appuyant sur **Zig** (compilateur) et **`ld.lld -flavor darwin`**
 (linker Mach-O, fourni par le NDK Android). C'est **additif et opt-in** : les
 builders natifs (Xcode/clang sur un vrai Mac) ne sont jamais modifiés.
 
-| Cible | Compile | Link | Bundle | Activation |
-|---|---|---|---|---|
-| **macOS** | Zig 0.13 | Zig 0.13 | `.app` | `--macos-backend=zig` |
-| **iOS** | Zig 0.13 | `ld.lld -flavor darwin` | `.app` + `.ipa` | `--ios-backend=zig` |
-| **tvOS** | Zig 0.13 | `ld.lld -flavor darwin` | `.app` + `.ipa` | `--ios-backend=zig` |
-| **watchOS** | Zig 0.13 | `ld.lld -flavor darwin` | `.app` + `.ipa` | `--ios-backend=zig` |
+
+| Cible       | Compile  | Link                    | Bundle          | Activation            |
+| ----------- | -------- | ----------------------- | --------------- | --------------------- |
+| **macOS**   | Zig 0.13 | Zig 0.13                | `.app`          | `--macos-backend=zig` |
+| **iOS**     | Zig 0.13 | `ld.lld -flavor darwin` | `.app` + `.ipa` | `--ios-backend=zig`   |
+| **tvOS**    | Zig 0.13 | `ld.lld -flavor darwin` | `.app` + `.ipa` | `--ios-backend=zig`   |
+| **watchOS** | Zig 0.13 | `ld.lld -flavor darwin` | `.app` + `.ipa` | `--ios-backend=zig`   |
 
 > ⚠️ **Exécuter** un binaire Apple exige toujours du matériel Apple (Windows
 > **produit** le `.app`/`.ipa`, ne le lance pas). La **signature/notarisation**
@@ -35,6 +36,7 @@ builders natifs (Xcode/clang sur un vrai Mac) ne sont jamais modifiés.
 python Jenga/scripts/setup_apple_toolchain.py --root C:\apple-sdks ^
     --ios-sdk-url <URL_d_un_SDK_iOS_complet.tar.gz>
 ```
+
 Le script : installe Zig 0.13, télécharge/répare les SDK (jonctions frameworks +
 `.tbd`), crée les wrappers `zig-cc`/`zig-c++`, détecte `ld.lld` du NDK, **vérifie**
 par un compile+link macOS **et** iOS, puis affiche les variables à définir.
@@ -52,6 +54,7 @@ set MACOS_SDK=C:\apple-sdks\MacOSX11.3.sdk
 set IOS_SDK=C:\apple-sdks\iPhoneOS12.2.sdk
 set LD64=C:\Android\ndk\<ver>\toolchains\llvm\prebuilt\windows-x86_64\bin\ld.lld.exe
 ```
+
 (Alternative au `set` : DSL `macossdkpath()`, `iossdkpath()`, `tvossdkpath()`,
 `watchossdkpath()` dans le `.jenga`.)
 
@@ -62,16 +65,19 @@ jenga build --platform macOS --macos-backend=zig
 jenga build --platform iOS   --ios-backend=zig
 jenga build --platform tvOS  --ios-backend=zig
 ```
+
 Produit `Build/Bin/.../<App>.app` (+ `.ipa` non signé pour iOS/tvOS/watchOS).
 Ajouter `MACOS_ARCH=x86_64` pour du macOS Intel.
 
 ## 5. Comment ça marche (recette)
 
 **Compile** (toutes cibles) :
+
 ```
 zig cc/c++ -target <arch>-<os> --sysroot <SDK> -isysroot <SDK>
            -isystem <SDK>/usr/include -F <SDK>/System/Library/Frameworks
 ```
+
 `-isystem` (pas `-I`) pour préserver l'ordre des headers libc++.
 
 **Link macOS** : `zig` gère le link Mach-O nativement (avec `--sysroot`).
@@ -79,6 +85,7 @@ zig cc/c++ -target <arch>-<os> --sysroot <SDK> -isysroot <SDK>
 **Link iOS/tvOS/watchOS** : le driver `zig cc` **ne sait pas** linker ces cibles
 (sa libSystem/libc interne est câblée pour `.macos` uniquement). On contourne
 avec un vrai ld64 :
+
 ```
 ld.lld -flavor darwin -arch <arch> -platform_version <plat> <min> <sdk>
        -syslibroot <SDK> (-dylib|-execute) -o <out> <objs>
@@ -91,13 +98,14 @@ La signature est **câblée dans le builder** via [`rcodesign`](https://github.c
 (un binaire Rust qui signe des Mach-O **depuis Windows**, sans Mac). Par défaut le
 `.app` est **non signé** ; on l'active par variables d'environnement :
 
-| Env | Rôle |
-|-----|------|
-| `RCODESIGN` | chemin de `rcodesign.exe` (sinon cherché dans le `PATH`) |
-| `IOS_SIGN=adhoc` | signature **ad-hoc** (dev/local, pas d'installation device) |
-| `IOS_SIGN=<cert.p12>` | signature avec **certificat Apple** (`.p12`) |
-| `IOS_SIGN_PASS` | mot de passe du `.p12` |
-| `IOS_PROVISION` | profil de provisionnement (`.mobileprovision`) pour l'install device |
+
+| Env                   | Rôle                                                                |
+| --------------------- | -------------------------------------------------------------------- |
+| `RCODESIGN`           | chemin de`rcodesign.exe` (sinon cherché dans le `PATH`)             |
+| `IOS_SIGN=adhoc`      | signature**ad-hoc** (dev/local, pas d'installation device)           |
+| `IOS_SIGN=<cert.p12>` | signature avec**certificat Apple** (`.p12`)                          |
+| `IOS_SIGN_PASS`       | mot de passe du`.p12`                                                |
+| `IOS_PROVISION`       | profil de provisionnement (`.mobileprovision`) pour l'install device |
 
 ```powershell
 # Ad-hoc (local) — s'affiche « [ios-zig] signé (ad-hoc) : NKCode.app » en fin de build
@@ -111,8 +119,9 @@ jenga build --platform iOS --ios-backend=zig --target NKCode
 ```
 
 **Installation :**
+
 - **macOS** : ad-hoc suffit en local ; distribution = Developer ID + **notarisation**
-  (`rcodesign notary-submit`).
+  (`rcodesign notary-submit`). 657657422
 - **iOS** : `.p12` + provisioning (compte Apple) → install USB via `ideviceinstaller`,
   ou **AltStore/Sideloadly** (compte gratuit, resignature 7 jours).
 - ⚠️ `rcodesign verify` affiche un **warning CMS connu** (bug documenté de l'outil) :

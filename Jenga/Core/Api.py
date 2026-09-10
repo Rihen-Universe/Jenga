@@ -398,6 +398,16 @@ class Project:
     # le manifeste genere pointe cette Activity au lieu de android.app.NativeActivity.
     androidActivityClass: str = ""
 
+    # Architectures Apple d'un binaire UNIVERSEL (macOS, et iOS simulateur).
+    #
+    # Vide = une seule architecture, celle de la machine ou du toolchain, comme
+    # avant. Deux entrees ou plus = compilation une fois PAR architecture, puis
+    # assemblage par `lipo`. C'est l'equivalent Apple de androidAbis et de
+    # harmonyAbis, et le mecanisme est dans Core/Builders/AppleUniversal.py.
+    #
+    # Valeurs acceptees : "arm64", "x86_64" (alias "aarch64", "x64").
+    appleArchs: List[str] = field(default_factory=list)
+
     # iOS specifics (extended)
     iosBundleId: str = ""
     iosVersion: str = "1.0"
@@ -2229,6 +2239,30 @@ def emscriptenextraflags(flags: List[str]) -> None:
         if not hasattr(_currentProject, 'emscriptenExtraFlags'):
             _currentProject.emscriptenExtraFlags = []
         _currentProject.emscriptenExtraFlags.extend(flags)
+
+# --- Binaires universels Apple ---------------------------------------------
+# Un binaire universel contient plusieurs architectures dans un seul fichier ;
+# le systeme choisit la bonne au lancement. Sans cela, une application macOS ne
+# tourne que sur la moitie du parc : Apple Silicon OU Intel.
+#
+#   with filter("system:macOS"):
+#       macosarchs(["arm64", "x86_64"])
+#
+# ATTENTION SUR iOS : `lipo` refuse deux tranches de MEME architecture, et
+# depuis les Mac Apple Silicon l'appareil et le simulateur sont tous deux en
+# arm64. `iosarchs` sert donc a produire un SIMULATEUR universel
+# (arm64 + x86_64), utilisable sur les Mac Intel comme sur les Apple Silicon.
+# Pour livrer appareil ET simulateur dans un meme paquet, il faut un
+# .xcframework, qui est un autre format et non un binaire gras.
+def macosarchs(archs: List[str]) -> None:
+    if _currentProject:
+        _currentProject.appleArchs = list(archs)
+
+
+def iosarchs(archs: List[str]) -> None:
+    if _currentProject:
+        _currentProject.appleArchs = list(archs)
+
 
 # --- iOS specific (extended) ---
 def iosbundleid(bid: str) -> None:
@@ -4366,6 +4400,7 @@ __all__ = [
     'ndkversion', 'androidsign', 'androidkeystore', 'androidkeystorepass', 'androidkeyalias',
     'emscriptenshellfile', 'emscriptenfullscreenshell', 'emscriptencanvasid', 'emscripteninitialmemory',
     'emscriptenstacksize', 'emscriptenexportname', 'emscriptenextraflags',
+    'macosarchs', 'iosarchs',
     'iosbundleid', 'iosversion', 'iosminsdk', 'tvosminsdk', 'watchosminsdk', 'ipadosminsdk', 'visionosminsdk',
     'iossigningidentity', 'iosentitlements', 'iosappicon', 'iosbuildnumber',
     'iosbuildsystem', 'iosdistributiontype', 'iosteamid', 'iosprovisioningprofile',
@@ -4513,7 +4548,8 @@ _PROJECT_ONLY_WORDS = (
     "androidkeystore", "androidkeystorepass", "androidkeyalias", "androidjavafiles",
     "androidjavalibs", "androidactivityclass", "emscriptenshellfile", "emscriptencanvasid",
     "emscripteninitialmemory", "emscriptenstacksize", "emscriptenexportname",
-    "emscriptenextraflags", "iosbundleid", "iosversion", "iosminsdk", "iossigningidentity",
+    "emscriptenextraflags", "macosarchs", "iosarchs",
+    "iosbundleid", "iosversion", "iosminsdk", "iossigningidentity",
     "iosentitlements", "iosappicon", "appicon", "androidappicon", "windowsicon",
     "macosicon", "webfavicon", "licensefile", "createdesktopshortcut", "apppublisher",
     "appversion", "signingcertificate", "signingpassword", "signingthumbprint",

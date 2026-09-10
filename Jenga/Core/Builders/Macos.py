@@ -12,24 +12,66 @@ import plistlib
 import shutil
 
 from Jenga.Core.Api import Project, ProjectKind, CompilerFamily, TargetArch
-from ...Utils import Process, FileSystem, ProcessResult, Colored
+from ...Utils import Process, FileSystem, ProcessResult, Colored, Reporter
 from ..Builder import Builder
+from .AppleUniversal import AppleUniversalMixin, NormaliserArchsApple
 from ..IconConverter import (
     ResolveIconFor, DetectIconFormat, ConvertPngToIcns, HasPillow,
     PLATFORM_MACOS, FORMAT_PNG, FORMAT_JPG, FORMAT_ICNS,
 )
 
 
-class MacOSBuilder(Builder):
+class MacOSBuilder(AppleUniversalMixin, Builder):
     """
     Builder pour macOS.
     """
+
+    APPLE_OS_TAG = "macOS"
 
     def __init__(self, workspace, config, platform, targetOs, targetArch, targetEnv=None, verbose=False):
         super().__init__(workspace, config, platform, targetOs, targetArch, targetEnv, verbose)
         # Apple Clang ou Clang standard
         self.is_apple_clang = self.toolchain.compilerFamily == CompilerFamily.APPLE_CLANG
         self._objcxxProbeCache = {}
+
+    # -------------------------------------------------------------------------
+    #  Binaire universel
+    # -------------------------------------------------------------------------
+    def _BuildUneArchitecture(self, targetProject: Optional[str] = None) -> int:
+        """Une passe ordinaire, pour UNE architecture.
+
+        Le mixin ne connaît pas la hiérarchie de classes : c'est ici qu'on lui
+        donne accès au Build de la classe de base, sans repasser par notre
+        propre Build (qui reboucle).
+        """
+        return Builder.Build(self, targetProject)
+
+    def Build(self, targetProject: Optional[str] = None) -> int:
+        """Compile normalement, sauf si le projet demande plusieurs architectures.
+
+        `macosarchs(["arm64", "x86_64"])` déclenche le chemin universel : une
+        compilation par architecture, puis `lipo`. Sans cet appel, rien ne
+        change par rapport à avant.
+        """
+        projet = None
+        if targetProject:
+            projet = self.workspace.projects.get(targetProject)
+        else:
+            # Sans cible explicite, on cherche le premier projet qui demande
+            # plusieurs architectures. Les autres suivront le chemin ordinaire.
+            for nom, ctx in self.workspace.projects.items():
+                if nom.startswith("__"):
+                    continue
+                if len(NormaliserArchsApple(getattr(ctx, "appleArchs", []))) >= 2:
+                    projet = ctx
+                    break
+
+        if projet is not None:
+            archs = NormaliserArchsApple(getattr(projet, "appleArchs", []))
+            if len(archs) >= 2:
+                return 0 if self.BuildUniversalApple(projet, archs) else 1
+
+        return Builder.Build(self, targetProject)
 
     @staticmethod
     def _IsDirectLibPath(lib: str) -> bool:
@@ -40,6 +82,18 @@ class MacOSBuilder(Builder):
     @staticmethod
     def _EnumValue(v):
         return v.value if hasattr(v, "value") else v
+
+    def _GetArchFlags(self) -> List[str]:
+        """Le `-arch` de l'architecture courante, pour la compilation ET la liaison.
+
+        Une seule source, appelee des deux cotes : c'est ce qui garantit que le
+        lieur recoit exactement ce qu'a recu le compilateur.
+        """
+        if self.targetArch == TargetArch.ARM64:
+            return ["-arch", "arm64"]
+        if self.targetArch == TargetArch.X86_64:
+            return ["-arch", "x86_64"]
+        return []
 
     def GetObjectExtension(self) -> str:
         return ".o"
@@ -112,6 +166,21 @@ class MacOSBuilder(Builder):
         else:
             linker = self.toolchain.cxxPath
             args = [linker, "-o", str(out)]
+            # L'ARCHITECTURE, A LA LIAISON AUSSI.
+            #
+            # Elle etait absente ici : la compilation recevait bien son -arch,
+            # pas l'edition de liens. Tant que la cible etait celle de la
+            # machine, clang devinait juste et personne ne voyait rien. Des
+            # qu'on croise les architectures, pour un binaire universel ou pour
+            # un Mac Intel qui construit pour Apple Silicon, le lieur prend sa
+            # valeur par defaut et refuse les objets :
+            #
+            #   ld: building for macOS-x86_64 but attempting to link file built
+            #       for macOS-arm64
+            #
+            # Le message accuse les objets, alors que c'est la ligne de liaison
+            # qui est incomplete.
+            args.extend(self._GetArchFlags())
             if project.kind == ProjectKind.SHARED_LIB:
                 args.append("-dynamiclib")
             # Put objects first so following libraries/frameworks can satisfy symbols.
@@ -328,9 +397,6 @@ class MacOSBuilder(Builder):
             flags.append("-fPIC")
 
         # Architecture
-        if self.targetArch == TargetArch.ARM64:
-            flags.extend(["-arch", "arm64"])
-        elif self.targetArch == TargetArch.X86_64:
-            flags.extend(["-arch", "x86_64"])
+        flags.extend(self._GetArchFlags())
 
         return flags
