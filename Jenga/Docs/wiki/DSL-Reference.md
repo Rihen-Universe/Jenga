@@ -185,6 +185,25 @@ exe autonome sans DLL runtime ; défaut projet = dynamique) ·
 
 ### Apple (iOS / tvOS / watchOS / visionOS)
 
+**Binaires universels** (depuis 2.7.0) : `macosarchs` · `iosarchs`.
+
+```python
+with filter("system:macOS"):
+    macosarchs(["arm64", "x86_64"])   # Apple Silicon ET Intel
+```
+
+Jenga compile alors une fois **par architecture** puis assemble avec `lipo`.
+C'est l'équivalent Apple de `androidabis` et de `harmonyabis`. Sans ces appels,
+rien ne change : une seule architecture, comme avant, et l'exécutable ne tourne
+que sur la moitié du parc.
+
+Sur iOS, cela ne concerne **que le simulateur** : `lipo` refuse deux tranches
+de la même architecture, et depuis les Mac Apple Silicon l'appareil et le
+simulateur sont tous deux en `arm64`. Sur une cible appareil, `iosarchs` est
+ignoré avec un message qui le dit ; pour livrer appareil et simulateur
+ensemble, le format est le `.xcframework`, qui empile des binaires au lieu de
+les fusionner.
+
 `iosbundleid` · `iosversion` · `iosminsdk` · `iossigningidentity` ·
 `iosentitlements` · `iosappicon` · `iosbuildnumber` · `iosbuildsystem`
 (`direct`/`xcode`) · `iosdistributiontype` · `iosteamid` ·
