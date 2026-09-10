@@ -517,6 +517,39 @@ class InstallCommand:
 
         if name == "harmony-sdk":
             registry.setdefault("sdk", {})["harmonySdkPath"] = str(target_dir)
+            # Symetrique du bloc android-ndk ci-dessus. Sans lui, le SDK est
+            # enregistre mais AUCUNE chaine ne l'est, et la construction
+            # repond « No suitable toolchain found for HarmonyOS » alors que
+            # tout est installe. Le nom doit etre exactement « ohos-ndk » :
+            # c'est celui que Core/Builder.py demande dans son prefer.
+            harmony_native = target_dir / "native"
+            harmony_llvm = harmony_native / "llvm" / "bin"
+            harmony_sysroot = harmony_native / "sysroot"
+            h_cc = InstallCommand._FindExecutable(harmony_llvm, ["clang"])
+            h_cxx = InstallCommand._FindExecutable(harmony_llvm, ["clang++"])
+            h_ar = InstallCommand._FindExecutable(harmony_llvm, ["llvm-ar"])
+            if h_cc and h_cxx:
+                h_triple = "aarch64-linux-ohos"
+                h_flags = ["--target=" + h_triple, "-fPIC", "-D__OHOS__"]
+                InstallCommand._UpsertToolchains(registry, [{
+                    "name": "ohos-ndk",
+                    "compilerFamily": "clang",
+                    "targetOs": "HarmonyOS",
+                    "targetArch": "arm64",
+                    "targetTriple": h_triple,
+                    "sysroot": str(harmony_sysroot) if harmony_sysroot.exists() else "",
+                    "ccPath": str(h_cc),
+                    "cxxPath": str(h_cxx),
+                    "arPath": str(h_ar) if h_ar else "",
+                    "toolchainDir": str(target_dir),
+                    "cflags": h_flags,
+                    "cxxflags": h_flags,
+                    "ldflags": ["--target=" + h_triple],
+                }])
+            else:
+                Colored.PrintError(
+                    "SDK HarmonyOS trouve, mais clang/clang++ introuvables "
+                    "dans " + str(harmony_llvm))
             return True
 
         if name == "macos-tools":

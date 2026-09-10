@@ -55,10 +55,34 @@
 ### Depuis le dépôt source
 
 ```bash
-git clone https://github.com/votre-org/jenga.git
-cd jenga
+git clone https://github.com/Rihen-Universe/Jenga.git
+cd Jenga
 pip install -e .
 ```
+
+Le dépôt est public : aucune authentification n'est demandée. Si Git réclame un
+nom d'utilisateur puis un mot de passe, c'est que l'URL est fausse. GitHub
+n'accepte plus les mots de passe pour les opérations Git depuis 2021, et une
+adresse inexistante déclenche exactement la même demande qu'un dépôt privé :
+le message d'erreur parle d'authentification alors que le problème est l'URL.
+
+**Sur macOS et sur les Linux récents**, `pip install -e .` peut s'arrêter sur
+`error: externally-managed-environment` : le Python du système refuse qu'on
+installe dedans. Deux sorties, dans cet ordre de préférence :
+
+```bash
+# 1. Un environnement virtuel (recommandé)
+python3 -m venv ~/.venvs/jenga
+source ~/.venvs/jenga/bin/activate
+pip install -e .
+
+# 2. Ou une installation utilisateur
+pip3 install --user -e .
+```
+
+Avec la seconde, `jenga` atterrit dans `~/.local/bin` (Linux) ou
+`~/Library/Python/3.x/bin` (macOS), qui n'est pas toujours dans le `PATH` :
+ajoutez-le si la commande reste introuvable.
 
 ### Vérification
 
@@ -889,6 +913,44 @@ with workspace("AndroidApp"):
 | `armeabi-v7a` | ARM 32 bits | Appareils anciens |
 | `x86` | x86 32 bits | Émulateurs anciens |
 | `x86_64` | x86 64 bits | Émulateurs modernes (MEmu, BlueStacks) |
+
+### Binaires universels macOS et iOS
+
+L'équivalent Apple des ABIs Android. Sans lui, un exécutable macOS ne tourne
+que sur la moitié du parc : Apple Silicon **ou** Intel.
+
+```python
+with project("MonApp"):
+    windowedapp()
+
+    with filter("system:macOS"):
+        macosarchs(["arm64", "x86_64"])   # binaire universel
+
+    with filter("system:iOS"):
+        iosarchs(["arm64", "x86_64"])     # simulateur universel
+```
+
+Jenga compile alors **une fois par architecture**, chacune dans son propre
+dossier d'objets, puis assemble le résultat avec `lipo`. Sans ces appels, rien
+ne change : une seule architecture, comme avant.
+
+| Valeur | Machines couvertes |
+|--------|--------------------|
+| `arm64` | Mac Apple Silicon (M1 et suivants), iPhone, iPad |
+| `x86_64` | Mac Intel, simulateur iOS sur Mac Intel |
+
+**Sur iOS, cela ne concerne que le simulateur.** Ce n'est pas une limitation de
+Jenga : `lipo` refuse deux tranches de la même architecture, et depuis les Mac
+Apple Silicon l'appareil et le simulateur sont tous deux en `arm64`. Un
+simulateur universel sert à une équipe dont les machines sont mélangées ; pour
+livrer appareil **et** simulateur dans un seul paquet, le format est le
+`.xcframework`, qui empile des binaires au lieu de les fusionner. Sur une cible
+appareil, `iosarchs` est ignoré avec un message qui le dit.
+
+**Pourquoi pas un seul appel avec plusieurs `-arch`** : Apple clang l'accepte,
+mais refuse de le combiner avec la génération des dépendances (`-MD -MF`), donc
+avec la compilation incrémentale. Le détail est en tête de
+`Core/Builders/AppleUniversal.py`.
 
 ### Build et signature
 
