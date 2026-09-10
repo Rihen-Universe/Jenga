@@ -398,6 +398,30 @@ class Project:
     # le manifeste genere pointe cette Activity au lieu de android.app.NativeActivity.
     androidActivityClass: str = ""
 
+    # ── Signature des applications de BUREAU ────────────────────────────
+    # Android et iOS avaient leur signature ; Windows, macOS et Linux non, et
+    # cela se payait : Windows Defender met en quarantaine les executables sans
+    # auteur connu. Voir Core/Signing.py.
+    #
+    # Les trois systemes ne font PAS la meme chose. Windows et macOS ecrivent la
+    # signature DANS le fichier ; Linux n'a aucun equivalent et publie des
+    # signatures DETACHEES (.asc) plus des sommes de controle.
+    windowsSign: bool = False
+    windowsCertificate: str = ""        # .pfx, ou nom du sujet dans le magasin
+    windowsCertificatePass: str = ""    # preferer JENGA_WINDOWS_CERT_PASSWORD
+    windowsTimestampUrl: str = ""       # sans horodatage, la signature expire
+
+    macosSign: bool = False
+    macosSigningIdentity: str = ""      # « Developer ID Application: … »
+    macosEntitlements: str = ""
+    macosNotaryProfile: str = ""        # profil `notarytool store-credentials`
+
+    linuxSign: bool = False
+    linuxGpgKey: str = ""               # identifiant de la cle de signature
+
+    # URL de l'editeur, posee dans la signature Authenticode (signtool /du).
+    appUrl: str = ""
+
     # Architectures Apple d'un binaire UNIVERSEL (macOS, et iOS simulateur).
     #
     # Vide = une seule architecture, celle de la machine ou du toolchain, comme
@@ -2239,6 +2263,82 @@ def emscriptenextraflags(flags: List[str]) -> None:
         if not hasattr(_currentProject, 'emscriptenExtraFlags'):
             _currentProject.emscriptenExtraFlags = []
         _currentProject.emscriptenExtraFlags.extend(flags)
+
+# --- Signature des applications de bureau -----------------------------------
+# Une signature ne rend pas un programme sur. Elle repond a une question plus
+# modeste : QUI l'a produit, et le fichier a-t-il change depuis. C'est ce que
+# les systemes demandent, et c'est ce que son absence fait echouer.
+#
+#   with filter("system:Windows"):
+#       windowssign()
+#       windowscertificate("certs/rihen.pfx")   # ou le nom du sujet
+#
+#   with filter("system:macOS"):
+#       macossign()
+#       macossigningidentity("Developer ID Application: Rihen (XXXXXXXXXX)")
+#       macosnotaryprofile("rihen")
+#
+#   with filter("system:Linux"):
+#       linuxsign()
+#       linuxgpgkey("rihen.universe@gmail.com")
+#
+# NE METTEZ PAS LES MOTS DE PASSE ICI : un secret dans un .jenga finit dans
+# git. Employez JENGA_WINDOWS_CERT_PASSWORD et JENGA_GPG_PASSPHRASE.
+def windowssign(enable: bool = True) -> None:
+    if _currentProject:
+        _currentProject.windowsSign = enable
+
+
+def windowscertificate(path: str) -> None:
+    if _currentProject:
+        _currentProject.windowsCertificate = path
+
+
+def windowscertificatepass(password: str) -> None:
+    if _currentProject:
+        _currentProject.windowsCertificatePass = password
+
+
+def windowstimestampurl(url: str) -> None:
+    if _currentProject:
+        _currentProject.windowsTimestampUrl = url
+
+
+def macossign(enable: bool = True) -> None:
+    if _currentProject:
+        _currentProject.macosSign = enable
+
+
+def macossigningidentity(identity: str) -> None:
+    if _currentProject:
+        _currentProject.macosSigningIdentity = identity
+
+
+def macosentitlements(path: str) -> None:
+    if _currentProject:
+        _currentProject.macosEntitlements = path
+
+
+def macosnotaryprofile(profile: str) -> None:
+    if _currentProject:
+        _currentProject.macosNotaryProfile = profile
+
+
+def linuxsign(enable: bool = True) -> None:
+    if _currentProject:
+        _currentProject.linuxSign = enable
+
+
+def linuxgpgkey(key: str) -> None:
+    if _currentProject:
+        _currentProject.linuxGpgKey = key
+
+
+def appurl(url: str) -> None:
+    """L'adresse de l'editeur, posee dans la signature Authenticode."""
+    if _currentProject:
+        _currentProject.appUrl = url
+
 
 # --- Binaires universels Apple ---------------------------------------------
 # Un binaire universel contient plusieurs architectures dans un seul fichier ;
@@ -4401,6 +4501,10 @@ __all__ = [
     'emscriptenshellfile', 'emscriptenfullscreenshell', 'emscriptencanvasid', 'emscripteninitialmemory',
     'emscriptenstacksize', 'emscriptenexportname', 'emscriptenextraflags',
     'macosarchs', 'iosarchs',
+    'windowssign', 'windowscertificate', 'windowscertificatepass',
+    'windowstimestampurl', 'macossign', 'macossigningidentity',
+    'macosentitlements', 'macosnotaryprofile', 'linuxsign', 'linuxgpgkey',
+    'appurl',
     'iosbundleid', 'iosversion', 'iosminsdk', 'tvosminsdk', 'watchosminsdk', 'ipadosminsdk', 'visionosminsdk',
     'iossigningidentity', 'iosentitlements', 'iosappicon', 'iosbuildnumber',
     'iosbuildsystem', 'iosdistributiontype', 'iosteamid', 'iosprovisioningprofile',
@@ -4549,6 +4653,10 @@ _PROJECT_ONLY_WORDS = (
     "androidjavalibs", "androidactivityclass", "emscriptenshellfile", "emscriptencanvasid",
     "emscripteninitialmemory", "emscriptenstacksize", "emscriptenexportname",
     "emscriptenextraflags", "macosarchs", "iosarchs",
+    "windowssign", "windowscertificate", "windowscertificatepass",
+    "windowstimestampurl", "macossign", "macossigningidentity",
+    "macosentitlements", "macosnotaryprofile", "linuxsign", "linuxgpgkey",
+    "appurl",
     "iosbundleid", "iosversion", "iosminsdk", "iossigningidentity",
     "iosentitlements", "iosappicon", "appicon", "androidappicon", "windowsicon",
     "macosicon", "webfavicon", "licensefile", "createdesktopshortcut", "apppublisher",
