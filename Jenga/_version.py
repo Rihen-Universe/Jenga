@@ -54,7 +54,16 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # jamais appeler `_UpsertToolchains`, donc aucune construction HarmonyOS ne
 # demarrait). `jenga kit` emporte les dossiers de bibliotheques externes au
 # workspace.
-__version__ = "2.7.0"
+# 2.8.0 (2026-09-10) : signature des applications de BUREAU. Android et iOS
+# avaient la leur, Windows/macOS/Linux non, et cela se payait : Defender met en
+# quarantaine les executables sans auteur connu. windowssign(),
+# macossign()+macosnotaryprofile(), linuxsign() ; `jenga sign --platform <os>
+# --file A --file B`. Les trois systemes ne font PAS la meme chose : Windows et
+# macOS ecrivent la signature dans le fichier, Linux n'a aucun equivalent ELF
+# et publie des signatures detachees .asc plus un SHA256SUMS. Les secrets
+# viennent de JENGA_WINDOWS_CERT_PASSWORD et JENGA_GPG_PASSPHRASE, jamais du
+# .jenga, et rien de secret n'est journalise.
+__version__ = "2.8.0"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

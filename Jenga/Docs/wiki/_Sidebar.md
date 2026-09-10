@@ -11,6 +11,7 @@
 - [Tests Unitest / Unitest Tests](Tests-Unitest.md)
 - [Documentation Automatique / Automatic Documentation](Documentation-Automatique.md)
 - [Packaging, Déploiement, Publication](Packaging-Deploiement-Publication.md)
+- [Signature des applications / Code signing](Signature-Applications.md)
 - [Réseau et Pare-feu / Networking & Firewall](Reseau-et-Pare-feu.md)
 - [HarmonyOS / OpenHarmony](HarmonyOS.md)
 - [Exemples / Examples](Exemples.md)

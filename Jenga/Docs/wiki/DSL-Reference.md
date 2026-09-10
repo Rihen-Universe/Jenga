@@ -183,6 +183,21 @@ exe autonome sans DLL runtime ; défaut projet = dynamique) ·
 `androidsign` · `androidkeystore` · `androidkeystorepass` · `androidkeyalias` ·
 `androidjavafiles` · `androidjavalibs`.
 
+### Signature des applications de bureau
+
+`windowssign` · `windowscertificate` · `windowscertificatepass` ·
+`windowstimestampurl` · `macossign` · `macossigningidentity` ·
+`macosentitlements` · `macosnotaryprofile` · `linuxsign` ·
+`linuxgpgkey` · `appurl`.
+
+Les trois systèmes ne font pas la même chose : Windows et macOS
+écrivent la signature **dans** le fichier, Linux n'a aucun équivalent
+et publie des signatures **détachées** (`.asc`) plus un `SHA256SUMS`.
+Voir [Signature des applications](Signature-Applications.md).
+
+**Les mots de passe ne vont pas dans le `.jenga`** : Jenga lit
+`JENGA_WINDOWS_CERT_PASSWORD` et `JENGA_GPG_PASSPHRASE` d'abord.
+
 ### Apple (iOS / tvOS / watchOS / visionOS)
 
 **Binaires universels** (depuis 2.7.0) : `macosarchs` · `iosarchs`.

@@ -3,6 +3,65 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.0
+
+### Ajouté
+
+- **Signature des applications de bureau : Windows, macOS et Linux.** Android
+  et iOS avaient la leur ; le bureau non, et cela avait un coût mesurable.
+  Windows Defender met en quarantaine les exécutables sans auteur connu, et
+  d'autant plus volontiers qu'ils installent une chaîne de compilation.
+
+  ```python
+  with filter("system:Windows"):
+      windowssign()
+      windowscertificate("certs/rihen.pfx")
+
+  with filter("system:macOS"):
+      macossign()
+      macossigningidentity("Developer ID Application: Rihen (XXXXXXXXXX)")
+      macosnotaryprofile("rihen")
+
+  with filter("system:Linux"):
+      linuxsign()
+      linuxgpgkey("rihen.universe@gmail.com")
+  ```
+
+  ```bash
+  jenga sign --platform windows --file dist/App.exe --file dist/App-setup.exe
+  ```
+
+  **Les trois systèmes ne font pas la même chose, et le module ne fait pas
+  semblant.** Windows et macOS écrivent la signature *dans* le fichier ; Linux
+  n'a **aucun équivalent pour un ELF**, le noyau ne vérifie rien au lancement.
+  Ce que le monde Linux attend est ailleurs : des signatures **détachées** GPG
+  (`.asc`) et un `SHA256SUMS`, publiés à côté du téléchargement. C'est ce que
+  Jenga produit.
+
+  Détails qui coûtent cher quand on les découvre en production, et que le
+  module traite par défaut : l'**horodatage** est toujours posé, sans quoi
+  toute la production déjà distribuée devient non fiable à l'expiration du
+  certificat ; sur macOS le *hardened runtime* est activé, sans quoi la
+  notarisation est acceptée puis rejetée par courriel ; et le ticket est
+  **agrafé** au fichier, sans quoi un utilisateur hors ligne voit encore
+  l'avertissement.
+
+  Deux outils par système, parce qu'ils ne vivent pas au même endroit :
+  `signtool` du SDK Windows ou `osslsigncode`, qui permet de signer un binaire
+  Windows **depuis un CI Linux** ; `codesign` ou `rcodesign`.
+
+  **Les mots de passe ne vont pas dans le fichier de projet** : Jenga lit
+  `JENGA_WINDOWS_CERT_PASSWORD` et `JENGA_GPG_PASSPHRASE` d'abord, avertit
+  quand un secret vient du `.jenga`, et ne journalise jamais un secret.
+
+  Jenga **relit** la signature après l'avoir posée : une signature écrite n'est
+  pas une signature valide, et c'est justement la différence qui compte pour
+  l'utilisateur final. Un certificat auto-signé se pose parfaitement et ne vaut
+  rien chez lui ; le message le dit.
+
+  Neuf tests, dont un de bout en bout qui signe un vrai PE avec un certificat
+  jetable et relit l'en-tête.
+
 ## v2.7.0
 
 ### Ajouté

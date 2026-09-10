@@ -24,7 +24,8 @@ class SignCommand:
     def Execute(args: List[str]) -> int:
         parser = argparse.ArgumentParser(
             prog="jenga sign",
-            description="Sign an Android APK or iOS IPA."
+            description="Sign an application: Android APK, iOS IPA, or a desktop "
+                        "artifact for Windows, macOS or Linux."
         )
         parser.add_argument("--apk", help="Android APK file to sign")
         parser.add_argument("--ipa", help="iOS IPA file to sign")
@@ -35,16 +36,147 @@ class SignCommand:
         parser.add_argument("--project", help="Project name (to get signing config)")
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
+        # ── Bureau ───────────────────────────────────────────────────────
+        # Les fichiers sont donnes explicitement : une release contient
+        # l'executable ET son installeur, et on veut les deux signes.
+        parser.add_argument("--file", action="append", default=[],
+                            help="Desktop file to sign (repeatable): .exe, .msi, "
+                                 ".app, .dylib, or any Linux artifact")
+        parser.add_argument("--platform", choices=["windows", "macos", "linux"],
+                            help="Desktop platform (default: the host)")
+        parser.add_argument("--certificate", help="Windows .pfx, or subject name in the store")
+        parser.add_argument("--identity", help="macOS signing identity")
+        parser.add_argument("--gpg-key", help="Linux GPG key id, for detached signatures")
+        parser.add_argument("--notary-profile", help="macOS notarytool keychain profile")
+        parser.add_argument("--timestamp-url", help="Authenticode timestamp server")
         parsed = parser.parse_args(args)
 
-        if not parsed.apk and not parsed.ipa:
-            Colored.PrintError("Specify either --apk or --ipa.")
+        if not parsed.apk and not parsed.ipa and not parsed.file:
+            Colored.PrintError("Specify --apk, --ipa, or --file.")
             return 1
 
+        if parsed.file:
+            return SignCommand._SignDesktop(parsed)
         if parsed.apk:
             return SignCommand._SignAndroid(parsed)
-        else:
-            return SignCommand._SignIOS(parsed)
+        return SignCommand._SignIOS(parsed)
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def _SignDesktop(args) -> int:
+        """Signe des artefacts de bureau : Windows, macOS ou Linux.
+
+        Les options de la ligne de commande l'emportent sur ce que le projet
+        declare. C'est l'ordre attendu d'un outil : le fichier de projet porte
+        la configuration habituelle, la ligne de commande tranche pour ce
+        lancement-ci, ce dont un CI a besoin.
+        """
+        from ..Core import Signing
+
+        systeme = args.platform
+        if not systeme:
+            hote = Platform.GetHostOS()
+            systeme = {
+                Api.TargetOS.WINDOWS: "windows",
+                Api.TargetOS.MACOS: "macos",
+                Api.TargetOS.LINUX: "linux",
+            }.get(hote, "")
+            if not systeme:
+                Colored.PrintError("Unsupported host; pass --platform explicitly.")
+                return 1
+
+        projet = SignCommand._ChargerProjet(args)
+
+        def choisir(depuis_ligne, attribut, defaut=""):
+            if depuis_ligne:
+                return depuis_ligne
+            if projet is not None:
+                return getattr(projet, attribut, defaut) or defaut
+            return defaut
+
+        fichiers = [f for f in args.file]
+        manquants = [f for f in fichiers if not Path(f).exists()]
+        if manquants:
+            # On refuse tot plutot que de signer la moitie du lot : une release
+            # a moitie signee est pire qu'une release non signee, parce que
+            # personne ne va la verifier fichier par fichier.
+            for f in manquants:
+                Colored.PrintError(f"File not found: {f}")
+            return 1
+
+        if systeme == "windows":
+            ok = Signing.SignerWindows(
+                fichiers,
+                certificat=choisir(args.certificate, "windowsCertificate"),
+                motdepasse=choisir(None, "windowsCertificatePass"),
+                horodatage=choisir(args.timestamp_url, "windowsTimestampUrl"),
+                nom_affiche=(projet.name if projet is not None else ""),
+                url=choisir(None, "appUrl"),
+            )
+            if ok:
+                # On relit ce qu'on vient d'ecrire. Une signature posee n'est
+                # pas une signature valide, et c'est justement la difference
+                # qui compte pour l'utilisateur final.
+                echecs = [f for f in fichiers if not Signing.VerifierWindows(f)]
+                if echecs:
+                    for f in echecs:
+                        Colored.PrintError(f"Signed, but verification failed: {f}")
+                    Colored.PrintWarning(
+                        "La cause la plus frequente est un certificat dont la "
+                        "racine n'est pas de confiance sur cette machine : un "
+                        "certificat auto-signe se pose parfaitement et ne "
+                        "vaudra rien chez l'utilisateur. Seul un certificat "
+                        "delivre par une autorite reconnue leve l'alerte de "
+                        "Windows."
+                    )
+                    ok = False
+            return 0 if ok else 1
+
+        if systeme == "macos":
+            ok = Signing.SignerMacos(
+                fichiers,
+                identite=choisir(args.identity, "macosSigningIdentity"),
+                entitlements=choisir(None, "macosEntitlements"),
+            )
+            profil = choisir(args.notary_profile, "macosNotaryProfile")
+            if ok and profil:
+                for f in fichiers:
+                    if Path(f).suffix in (".zip", ".dmg", ".pkg"):
+                        ok = Signing.NotariserMacos(f, profil) and ok
+            return 0 if ok else 1
+
+        ok = Signing.SignerLinux(
+            fichiers,
+            cle_gpg=choisir(args.gpg_key, "linuxGpgKey"),
+            sommes=True,
+        )
+        return 0 if ok else 1
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def _ChargerProjet(args):
+        """Le projet nomme par --project, ou None. Jamais fatal.
+
+        Signer des fichiers sans espace de travail est un usage legitime : on
+        signe une release deja construite, parfois sur une autre machine.
+        """
+        if not args.project:
+            return None
+        try:
+            if args.jenga_file:
+                entry = Path(args.jenga_file).resolve()
+            else:
+                entry = FileSystem.FindWorkspaceEntry(Path.cwd())
+            if not entry or not Path(entry).exists():
+                return None
+            loader = Loader()
+            cache = Cache(Path(entry).parent, workspaceName=Path(entry).stem)
+            workspace = cache.LoadWorkspace(Path(entry), loader)
+            if workspace and args.project in workspace.projects:
+                return workspace.projects[args.project]
+        except Exception as e:
+            Colored.PrintWarning(f"Could not load workspace ({e}); using CLI options only.")
+        return None
 
     @staticmethod
     def _SignAndroid(args) -> int:
