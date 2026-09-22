@@ -287,49 +287,7 @@ class Loader:
             self._currentWorkspace = workspace
             return workspace
         except Exception as e:
-            # ── DIRE OU, ET POURQUOI ────────────────────────────────────
-            #
-            # « name 'PkgExists' is not defined » n'apprend rien : ni le
-            # fichier, ni la ligne, ni la cause. Or un .jenga est du Python
-            # execute, donc la pile porte le fichier et la ligne fautifs.
             Colored.PrintError(f"Error loading workspace: {e}")
-
-            _tb, _coupable = e.__traceback__, None
-            while _tb is not None:
-                _nom = _tb.tb_frame.f_code.co_filename
-                if _nom.endswith(".jenga"):
-                    _coupable = (_nom, _tb.tb_lineno)
-                _tb = _tb.tb_next
-
-            if _coupable is not None:
-                Colored.PrintError(
-                    f"  dans {_coupable[0]}, ligne {_coupable[1]}")
-                try:
-                    with open(_coupable[0], "r", encoding="utf-8-sig") as _f:
-                        _src = _f.readlines()
-                    if 0 < _coupable[1] <= len(_src):
-                        Colored.PrintError(
-                            f"    {_src[_coupable[1] - 1].rstrip()}")
-                except OSError:
-                    pass
-
-            if isinstance(e, NameError):
-                _quoi = str(e).split("'")[1] if "'" in str(e) else "ce nom"
-                Colored.PrintWarning(
-                    f"  {_quoi} n'est pas un mot de Jenga : c'est une "
-                    "fonction que le workspace D'ORIGINE de ce fichier")
-                Colored.PrintWarning(
-                    "  definit lui-meme, en general dans un config/*.jenga "
-                    "charge par useconfig.")
-                if _coupable is not None and not str(_coupable[0]).startswith(
-                        str(filePath.parent)):
-                    Colored.PrintWarning(
-                        "  Ce fichier vient d'un AUTRE projet. Si vous "
-                        "employez un kit, ne l'incluez pas : le kit")
-                    Colored.PrintWarning(
-                        "  contient deja ce module compile. Retirez son "
-                        "include() et appelez la fonction du kit.")
-
             if self.verbose:
                 traceback.print_exc()
             return None

@@ -100,9 +100,7 @@ class KitCommand:
         parser.add_argument("--output", "-o", default="", metavar="DOSSIER",
                             help="Dossier du kit. Defaut : Build/Kit/<nom>.")
         parser.add_argument("--name", "-n", default="", metavar="NOM",
-                            help="Nom du kit : il donne <NOM>.jenga et use<nom>(). "
-                                 "Defaut : le nom du dossier de --output, "
-                                 "sinon <Workspace>Kit.")
+                            help="Nom du kit. Defaut : <Workspace>Kit.")
         parser.add_argument("--jenga-file", default="", metavar="FICHIER",
                             help="Fichier .jenga du workspace (defaut : detecte).")
         parser.add_argument("--build", "-b", action="store_true",
@@ -168,21 +166,7 @@ class KitCommand:
         if not platforms:
             return 1
 
-        # Le nom du kit, dans cet ordre : --name, puis le dossier de
-        # --output, puis <Workspace>Kit.
-        #
-        # Le dossier compte, parce que c'est le nom que l'utilisateur a
-        # ecrit lui-meme. `jenga kit --output ../MonKit` doit produire
-        # MonKit.jenga et usemonkit(), et non NkentseuKit.jenga et
-        # usenkentseukit() : un kit est une chose nouvelle, qui porte son
-        # nom a elle et non celui du workspace d'ou on l'a tire. Sans
-        # cela, deux kits extraits du meme workspace declarent la meme
-        # fonction, et le second ecrase le premier chez le consommateur.
-        if parsed.name:
-            kit_name = parsed.name
-        else:
-            kit_name = (KitCommand._NameFromOutput(parsed.output)
-                        or f"{workspace.name}Kit")
+        kit_name = parsed.name or f"{workspace.name}Kit"
         if parsed.output:
             kit_root = Path(parsed.output)
         else:
@@ -292,10 +276,7 @@ class KitCommand:
         Colored.PrintInfo("Pour l'utiliser depuis un autre workspace :")
         print()
         print(f'    with workspace("MonJeu"):')
-        # Le dossier reel, et non le nom du kit : avec --output les deux
-        # peuvent differer, et une instruction fausse se recopie telle
-        # quelle dans le workspace du consommateur.
-        print(f'        useconfig("{kit_root.name}/{kit_name}.jenga")')
+        print(f'        useconfig("{kit_name}/{kit_name}.jenga")')
         print()
         print(f'        with project("Jeu"):')
         print(f'            consoleapp()')
@@ -762,24 +743,8 @@ class KitCommand:
     # Fichier de configuration Jenga
     # ------------------------------------------------------------------
     @staticmethod
-    def _NameFromOutput(output: str) -> str:
-        """Le nom du kit, deduit du dossier de sortie.
-
-        Rend une chaine vide si le dossier ne donne rien d'utilisable :
-        l'appelant retombe alors sur le nom du workspace.
-        """
-        if not output:
-            return ""
-        name = Path(output).resolve().name
-        return "".join(ch for ch in name if ch.isalnum() or ch in "-_")
-
-    @staticmethod
     def _FunctionName(kit_name: str) -> str:
         safe = "".join(ch for ch in kit_name if ch.isalnum())
-        # Un nom de fonction ne commence pas par un chiffre, et un kit
-        # appele « 2026 » est parfaitement legitime.
-        if not safe or safe[0].isdigit():
-            safe = "kit" + safe
         return f"use{safe.lower()}"
 
     @staticmethod
@@ -821,15 +786,6 @@ class KitCommand:
         add("#")
         add("# L'ordre des archives est celui que l'editeur de liens exige (du plus")
         add("# dependant au plus fondamental) ; ne le changez pas.")
-        add("#")
-        add("# /!\\ N'INCLUEZ AUCUN .jenga DU PROJET D'ORIGINE.")
-        add("#")
-        add("#     with include(\".../UnModule/UnModule.jenga\"):   <-- NON")
-        add("#")
-        add("# Ces fichiers appellent des fonctions que leur propre workspace")
-        add("# definit par useconfig, et qui n'existent pas chez vous : la lecture")
-        add("# echoue sur un « name '...' is not defined ». C'est aussi inutile, le")
-        add("# module etant deja dans ce kit, compile, avec ses dependances.")
         add("# =============================================================================")
         add("")
         add("from pathlib import Path as _Path")
@@ -994,11 +950,6 @@ class KitCommand:
             "",
             "Pour une cible absente de cette liste, il faut refaire le kit depuis le",
             "depot : un kit ne contient que ce qui a ete construit avant lui.",
-            "",
-            "N'incluez aucun .jenga du projet d'origine dans votre",
-            "workspace : ces fichiers dependent de la configuration de LEUR",
-            "workspace et casseront a la lecture. Tout ce dont vous avez",
-            "besoin est deja ici.",
             "",
             "Citez la date de construction dans vos retours.",
             "",
