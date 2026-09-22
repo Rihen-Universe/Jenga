@@ -34,30 +34,10 @@ class HelpCommand:
         print(f"Jenga Build System v{__version__}")
         print("Usage: Jenga <command> [options]")
         print("\nCommandes principales :")
-        cmds = [
-            ("build, b", "Compile le workspace ou un projet"),
-            ("run, r", "Exécute un projet"),
-            ("test, t", "Lance les tests unitaires"),
-            ("clean, c", "Supprime les fichiers générés"),
-            ("rebuild", "Nettoie et compile"),
-            ("watch, w", "Surveille les fichiers et rebuild automatiquement"),
-            ("info, i", "Affiche les informations du workspace"),
-            ("gen", "Génère des fichiers projet (CMake, VS, Makefile)"),
-            ("workspace, init", "Crée un nouveau workspace"),
-            ("project, create", "Crée un nouveau projet"),
-            ("file, add", "Ajoute des fichiers/dépendances à un projet"),
-            ("install", "Installe dépendances et toolchains locales"),
-            ("kit", "Extrait un kit redistribuable (en-tetes + libs construites)"),
-            ("keygen", "Génère une keystore Android"),
-            ("sign", "Signe un APK ou IPA"),
-            ("docs", "Génère la documentation du projet"),
-            ("package", "Crée des packages distribuables"),
-            ("deploy", "Déploie l'application sur un appareil"),
-            ("publish", "Publie un package sur un registre"),
-            ("profile", "Lance un profilage de performance"),
-            ("bench", "Exécute des benchmarks"),
-            ("help, h", "Affiche cette aide"),
-        ]
+        # SOURCE UNIQUE : Registry.py. Cette liste et celle de Jenga.py étaient
+        # recopiées l'une de l'autre et avaient divergé de cinq commandes.
+        from Jenga.Commands.Registry import command_list
+        cmds = command_list()
         for cmd, desc in cmds:
             print(f"  {cmd:<20} {desc}")
 
