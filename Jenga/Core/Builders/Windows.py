@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 """
 Windows Builder – Compilation pour Microsoft Windows.
 Supporte MSVC, Clang (via clang-cl ou clang++), et MinGW (gcc/g++).
@@ -489,7 +490,7 @@ class WindowsBuilder(Builder):
                 args.extend(project.cflags)
             args.append(str(src))
         else:
-            args = [self.toolchain.ccPath, "-c", "-o", str(obj)]
+            args = self._WithCompilerLauncher([self.toolchain.ccPath, "-c", "-o", str(obj)])
             args.extend(self.GetDependencyFlags(str(obj)))
             args.extend(self._GetClangCommonFlags(project))
             pch_file = getattr(project, "_jengaPchFile", "")
@@ -582,7 +583,7 @@ class WindowsBuilder(Builder):
     # -----------------------------------------------------------------------
 
     def _CompileMinGW(self, project: Project, src: Path, obj: Path) -> ProcessResult:
-        args = [self.toolchain.ccPath, "-c", "-o", str(obj)]
+        args = self._WithCompilerLauncher([self.toolchain.ccPath, "-c", "-o", str(obj)])
         args.extend(self.GetDependencyFlags(str(obj)))
         args.extend(self._GetGCCCommonFlags(project))
         pch_header = getattr(project, "_jengaPchHeaderResolved", "")

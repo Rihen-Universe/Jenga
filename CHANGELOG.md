@@ -3,6 +3,30 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.1
+
+### Corrigé
+
+- **ccache / sccache cassait toute compilation GCC/Clang.** Quand l'un des deux
+  est dans le `PATH`, Jenga l'active tout seul, mais il **remplaçait** le
+  compilateur au lieu de se mettre devant : la commande devenait
+  `ccache -c -o main.o -g ... main.cpp`, sans `g++`, et ccache prenait les
+  drapeaux du compilateur pour les siens.
+
+  ```
+  ccache: unknown option -- g
+  ```
+
+  Les variables `CCACHE_CC` / `CCACHE_CXX` que Jenga posait pour « dire » le
+  vrai compilateur n'existent pas dans ccache. Désormais la toolchain garde son
+  vrai compilateur, et le cache est placé en tête des seules commandes de
+  **compilation** (`ccache g++ -c ...`) : Linux, macOS, MinGW et clang sous
+  Windows (hors clang-cl). L'édition de liens et MSVC ne passent pas par le
+  cache. Signalé par un utilisateur de Jenga et Nkentseu sous GCC, correctif
+  validé chez lui.
+
+  Contournement pour les versions antérieures : `JENGA_DISABLE_CCACHE=1`.
+
 ## v2.8.0
 
 ### Ajouté
