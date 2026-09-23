@@ -312,27 +312,20 @@ class Builder(abc.ABC):
         if not cache_wrapper:
             return
 
-        # Wrap compiler paths with cache wrapper
-        # Note: Only wrap for GCC/Clang-compatible compilers, not MSVC
-        # (sccache supports MSVC, but integration is more complex)
+        # Le cache se place DEVANT le compilateur (`ccache g++ -c ...`), il ne
+        # le remplace pas : ccPath/cxxPath gardent le vrai compilateur. Les
+        # remplacer par `ccache` seul faisait lire les drapeaux du compilateur
+        # à ccache (« ccache: unknown option -- g ») — CCACHE_CC/CCACHE_CXX
+        # n'existent pas dans ccache. Seulement GCC/Clang (pas MSVC).
         if self.toolchain.compilerFamily in (CompilerFamily.GCC, CompilerFamily.CLANG, CompilerFamily.APPLE_CLANG):
-            # Store original paths
-            if not hasattr(self.toolchain, '_original_ccPath'):
-                self.toolchain._original_ccPath = self.toolchain.ccPath
-            if not hasattr(self.toolchain, '_original_cxxPath'):
-                self.toolchain._original_cxxPath = self.toolchain.cxxPath
-
-            # Wrap with cache
-            if self.toolchain.ccPath:
-                self.toolchain.ccPath = Path(cache_wrapper)
-                # Store actual compiler as environment variable for cache to use
-                os.environ['CCACHE_CC'] = str(self.toolchain._original_ccPath)
-            if self.toolchain.cxxPath:
-                self.toolchain.cxxPath = Path(cache_wrapper)
-                os.environ['CCACHE_CXX'] = str(self.toolchain._original_cxxPath)
-
+            self._compilerLauncher = cache_wrapper
             if self.verbose:
                 Reporter.Info(f"Using {cache_wrapper} for faster builds")
+
+    def _WithCompilerLauncher(self, args: List[str]) -> List[str]:
+        """Préfixe une commande de COMPILATION par ccache/sccache s'il est actif (jamais l'édition de liens)."""
+        launcher = getattr(self, "_compilerLauncher", None)
+        return [launcher] + list(args) if launcher else args
 
     def _GetEffectiveJobs(self) -> int:
         """

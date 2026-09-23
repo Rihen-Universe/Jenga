@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 """
 Linux Builder – Compilation pour Linux ELF.
 Supporte GCC et Clang.
@@ -108,7 +109,7 @@ class LinuxBuilder(Builder):
             args.extend(self.GetModuleFlags(project, sourceFile))
         args.append(str(src))
 
-        result = Process.ExecuteCommand(args, captureOutput=True, silent=False)
+        result = Process.ExecuteCommand(self._WithCompilerLauncher(args), captureOutput=True, silent=False)
         self._lastResult = result
         return result
 
