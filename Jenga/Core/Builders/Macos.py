@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# AUTEUR : TEUGUIA TADJUIDJE Rodolf Séderis — Rihen
 """
 macOS Builder – Compilation pour macOS (Mach-O).
 Supporte Apple Clang.
@@ -137,7 +138,7 @@ class MacOSBuilder(AppleUniversalMixin, Builder):
         FileSystem.MakeDirectory(obj.parent)
 
         compiler = self.toolchain.cxxPath if project.language.value in ("C++", "Objective-C++") else self.toolchain.ccPath
-        args = [compiler]
+        args = self._WithCompilerLauncher([compiler])
         if self._NeedsObjectiveCppMode(src):
             args.extend(["-x", "objective-c++"])
         args.extend(["-c", "-o", str(obj)])

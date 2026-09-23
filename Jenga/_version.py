@@ -63,7 +63,11 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # et publie des signatures detachees .asc plus un SHA256SUMS. Les secrets
 # viennent de JENGA_WINDOWS_CERT_PASSWORD et JENGA_GPG_PASSPHRASE, jamais du
 # .jenga, et rien de secret n'est journalise.
-__version__ = "2.8.0"
+# 2.8.1 (2026-09-23) : ccache/sccache se place DEVANT le compilateur au lieu de
+# le remplacer. Avec ccache dans le PATH, toute compilation GCC/Clang echouait
+# sur « ccache: unknown option -- g » : g++ avait disparu de la commande et
+# ccache lisait les drapeaux du compilateur comme les siens.
+__version__ = "2.8.1"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

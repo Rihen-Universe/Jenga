@@ -36,6 +36,17 @@ jenga clean --all
 jenga build --no-cache --no-daemon --verbose
 ```
 
+### `ccache: unknown option -- g`
+
+Jenga active ccache (ou sccache) tout seul s'il est dans le `PATH`. Avant la
+**2.8.1**, il remplaçait le compilateur au lieu de se placer devant, et toute
+compilation GCC/Clang échouait ainsi. Mettez Jenga à jour, ou désactivez le
+cache :
+
+```bash
+export JENGA_DISABLE_CCACHE=1      # PowerShell : $env:JENGA_DISABLE_CCACHE = "1"
+```
+
 ### Android SDK / NDK introuvable
 
 Vérifiez `ANDROID_SDK_ROOT` / `ANDROID_NDK_ROOT`, ou en DSL :
@@ -105,6 +116,16 @@ You call `usetoolchain("X")` without declaring it.
 ```bash
 jenga clean --all
 jenga build --no-cache --no-daemon --verbose
+```
+
+### `ccache: unknown option -- g`
+
+Jenga enables ccache (or sccache) automatically when it is on the `PATH`.
+Before **2.8.1** it replaced the compiler instead of prefixing it, so every
+GCC/Clang compilation failed this way. Update Jenga, or disable the cache:
+
+```bash
+export JENGA_DISABLE_CCACHE=1      # PowerShell: $env:JENGA_DISABLE_CCACHE = "1"
 ```
 
 ### Android SDK / NDK not found
