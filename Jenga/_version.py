@@ -76,7 +76,13 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # C:\msys64\{ucrt64,clang64,mingw64}\bin apres le PATH (MSYS2_ROOT pour une
 # autre racine), et ar/ld sont pris a cote du compilateur retenu. « No suitable
 # toolchain found » liste desormais chaque candidat et la raison de son rejet.
-__version__ = "2.8.3"
+# 2.8.4 (2026-09-24) : `jenga gen` reconstruit contre les vrais outils. CMake
+# (chemins « \ » refuses, OBJC exige), Visual Studio (v143 en dur : MSB8020
+# sous VS 2026 ; GUID divergents), Makefile (chemin mange par le shell) et
+# Android.mk (ni -llog ni colle NativeActivity ; minsdk ignore) ne
+# construisaient plus. Nouveau : --compile-commands, capture des commandes
+# reelles du build.
+__version__ = "2.8.4"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

@@ -6,6 +6,7 @@ Support : CMake, Makefile, MK, Android NDK MK, Visual Studio 2022, Xcode.
 """
 
 import argparse
+import os
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,8 +30,11 @@ class GenCommand:
         parser.add_argument("--makefile", action="store_true", help="Generate Makefile")
         parser.add_argument("--mk", action="store_true", help="Generate workspace.mk include file")
         parser.add_argument("--android-mk", action="store_true", help="Generate Android.mk/Application.mk")
-        parser.add_argument("--vs2022", action="store_true", help="Generate Visual Studio 2022 solution")
+        parser.add_argument("--vs2022", "--vs", dest="vs2022", action="store_true",
+                            help="Generate a Visual Studio solution (any VS >= 2019: toolset = the opening VS's default)")
         parser.add_argument("--xcode", action="store_true", help="Generate Xcode project (.xcodeproj)")
+        parser.add_argument("--compile-commands", action="store_true",
+                            help="Generate compile_commands.json (clangd, VS Code, CLion) from the REAL build commands")
         parser.add_argument("--config", default="Debug", help="Context configuration for filters")
         parser.add_argument("--platform", default=None, help="Context platform for filters (e.g. Windows-x86_64)")
         parser.add_argument("--output", "-o", default=".", help="Output directory")
@@ -40,9 +44,12 @@ class GenCommand:
 
         if parsed.all:
             parsed.cmake = parsed.makefile = parsed.mk = parsed.android_mk = parsed.vs2022 = parsed.xcode = True
+            parsed.compile_commands = True
 
-        if not (parsed.cmake or parsed.makefile or parsed.mk or parsed.android_mk or parsed.vs2022 or parsed.xcode):
-            Colored.PrintError("No generator specified. Use --cmake, --makefile, --mk, --android-mk, --vs2022 or --xcode.")
+        if not (parsed.cmake or parsed.makefile or parsed.mk or parsed.android_mk or parsed.vs2022
+                or parsed.xcode or parsed.compile_commands):
+            Colored.PrintError("No generator specified. Use --cmake, --makefile, --mk, --android-mk, --vs, "
+                               "--xcode or --compile-commands.")
             return 1
 
         # Déterminer le répertoire de travail (workspace root)
@@ -147,6 +154,21 @@ class GenCommand:
         if parsed.xcode:
             builder = _build_gen_context("gen-xcode", "xcode")
             GenCommand._GenerateXcode(workspace, output_dir, builder)
+        if parsed.compile_commands:
+            # Builder REEL (pas le builder de generation, dont Compile() ne fait
+            # rien) : on veut les commandes que `jenga build` lancerait.
+            opts = BuildCommand.CollectFilterOptions(
+                config=parsed.config, platform=context_platform, target=None,
+                verbose=False, no_cache=parsed.no_cache, no_daemon=True,
+                extra=["action:build"], custom_option_values=custom_option_values)
+            try:
+                real = BuildCommand.CreateBuilder(workspace, parsed.config, context_platform, None, False,
+                                                  action="build", options=opts)
+            except Exception as e:  # noqa: BLE001
+                Colored.PrintError(f"compile_commands.json: cannot create builder: {e}")
+                return 1
+            if not GenCommand._GenerateCompileCommands(workspace, output_dir, real):
+                return 1
 
         return 0
 
@@ -243,13 +265,147 @@ class GenCommand:
     # Générateur CMake
     # -----------------------------------------------------------------------
 
+    # -----------------------------------------------------------------------
+    # compile_commands.json (clangd, VS Code C/C++, CLion, Qt Creator)
+    # -----------------------------------------------------------------------
+    # L'aide de jenga annonçait ce fichier depuis longtemps ; aucune commande
+    # ne l'ecrivait (`compile-flags` produit le .jcdb interne de NKCode).
+    #
+    # Les commandes ne sont PAS reconstruites : on appelle le vrai
+    # builder.Compile() de la plateforme, et on CAPTURE la commande qu'il
+    # passerait a Process.ExecuteCommand au lieu de la lancer. La base decrit
+    # donc exactement le build de Jenga -- toolchain, --target, defines de
+    # filtre compris -- et suit toute evolution des builders sans rien a
+    # maintenir ici.
+    _LANCEURS = {"ccache", "ccache.exe", "sccache", "sccache.exe"}
+
+    @staticmethod
+    def _GenerateCompileCommands(workspace, output_dir: Path, builder) -> bool:
+        import json
+        from ..Utils import Process, ProcessResult
+
+        entrees: List[Dict[str, Any]] = []
+        capturees: List[List[str]] = []
+
+        def _capture(args, *a, **k):
+            liste = [str(x) for x in args] if isinstance(args, (list, tuple)) else [str(args)]
+            capturees.append(liste)
+            return ProcessResult(returnCode=0, stdout="", stderr="", command=" ".join(liste))
+
+        # L'attribut tel qu'il est DANS la classe (le staticmethod), pour le
+        # restaurer a l'identique quoi qu'il arrive.
+        origine = Process.__dict__["ExecuteCommand"]
+        Process.ExecuteCommand = staticmethod(_capture)
+        try:
+            for name, proj in workspace.projects.items():
+                if name.startswith("__") or proj.kind not in (
+                        Api.ProjectKind.CONSOLE_APP, Api.ProjectKind.WINDOWED_APP, Api.ProjectKind.TEST_SUITE,
+                        Api.ProjectKind.STATIC_LIB, Api.ProjectKind.SHARED_LIB):
+                    continue
+                builder.PrepareProjectForCompile(proj)
+                obj_dir = Path(builder.GetObjectDir(proj))
+                base = Path(proj.location) if proj.location else Path(workspace.location or ".")
+                if not base.is_absolute():
+                    base = Path(workspace.location or ".") / base
+                for src in builder._CollectSourceFiles(proj):
+                    src_path = Path(src).resolve()
+                    obj = obj_dir / builder.GetObjectName(proj, src_path)
+                    capturees.clear()
+                    try:
+                        builder.Compile(proj, str(src_path), str(obj))
+                    except Exception as e:  # noqa: BLE001
+                        Colored.PrintWarning(f"compile_commands.json: {name}/{src_path.name} skipped ({e})")
+                        continue
+                    cmd = next((c for c in reversed(capturees) if str(src_path) in c or src in c), None)
+                    if not cmd:
+                        continue
+                    if Path(cmd[0]).name.lower() in GenCommand._LANCEURS:
+                        cmd = cmd[1:]
+                    entrees.append({
+                        "directory": str(base.resolve()),
+                        "file": str(src_path),
+                        "arguments": cmd,
+                        "output": str(obj),
+                    })
+        finally:
+            Process.ExecuteCommand = origine
+
+        if not entrees:
+            # Un fichier vide n'est pas un resultat : on le dit au lieu de
+            # l'ecrire (clangd croirait n'avoir rien a indexer).
+            Colored.PrintError("compile_commands.json: no compile command captured (no source file?)")
+            return False
+        chemin = output_dir / "compile_commands.json"
+        texte = json.dumps(entrees, indent=2, ensure_ascii=False) + "\n"
+        tmp = chemin.with_suffix(".json.tmp")
+        tmp.write_bytes(texte.encode("utf-8"))
+        os.replace(tmp, chemin)
+        Colored.PrintSuccess(f"compile_commands.json generated: {chemin} ({len(entrees)} entries)")
+        return True
+
+    # -----------------------------------------------------------------------
+    # Chemins ecrits dans les fichiers generes
+    # -----------------------------------------------------------------------
+    # Avant 2.8.4, tous les generateurs ecrivaient str(Path) : sous Windows,
+    # « C:\Users\... » avec des antislashs. CMake les lit comme des sequences
+    # d'echappement (« Invalid character escape '\U' ») et le shell de make les
+    # mange (« C:Users... »). Les fichiers generes etaient en plus lies a la
+    # machine qui les avait produits.
+    #
+    # Regle : toujours des « / » ; relatif au fichier genere quand c'est
+    # possible (le dossier se deplace avec ses sources), absolu en « / » sinon
+    # (autre lecteur Windows).
+
+    @staticmethod
+    def _Posix(path) -> str:
+        return str(path).replace("\\", "/")
+
+    @staticmethod
+    def _RelTo(path, base: Path, prefix: str = "") -> str:
+        """Chemin relatif a `base`, en « / », precede de `prefix` s'il est donne."""
+        cible = Path(path)
+        if not cible.is_absolute():
+            cible = (Path(base) / cible)
+        try:
+            rel = os.path.relpath(str(cible.resolve()), str(Path(base).resolve()))
+        except ValueError:
+            return GenCommand._Posix(cible.resolve())
+        rel = GenCommand._Posix(rel)
+        return f"{prefix}/{rel}" if prefix else rel
+
+    # Extension -> langage CMake. Point d'extension : un nouveau langage se
+    # declare ici, et `project(... LANGUAGES ...)` ne demandera que ceux qui
+    # ont reellement des sources.
+    _CMAKE_LANG_BY_EXT = {
+        ".c": "C",
+        ".cpp": "CXX", ".cc": "CXX", ".cxx": "CXX", ".c++": "CXX", ".cppm": "CXX", ".ixx": "CXX",
+        ".s": "ASM", ".asm": "ASM",
+        ".m": "OBJC",
+        ".mm": "OBJCXX",
+    }
+
     @staticmethod
     def _GenerateCMake(workspace, output_dir: Path, builder: Builder):
         """Génère un CMakeLists.txt à la racine du workspace."""
         cmake_path = output_dir / "CMakeLists.txt"
+
+        # Les langages DEMANDES a CMake sont ceux qui ont des sources. Declarer
+        # OBJC/OBJCXX pour un projet C++ obligeait CMake a trouver un
+        # compilateur Objective-C, et la configuration echouait sans lui.
+        fichiers: Dict[str, Tuple[List[str], List[str]]] = {}
+        langages = ["C", "CXX"]
+        for proj_name, proj in workspace.projects.items():
+            if proj_name.startswith('__'):
+                continue
+            fichiers[proj_name] = GenCommand._CollectProjectFilesForGen(proj, builder)
+            for src in fichiers[proj_name][0]:
+                lang = GenCommand._CMAKE_LANG_BY_EXT.get(Path(src).suffix.lower())
+                if lang and lang not in langages:
+                    langages.append(lang)
+
         with open(cmake_path, 'w', encoding='utf-8') as f:
             f.write("cmake_minimum_required(VERSION 3.20)\n")
-            f.write(f"project({workspace.name} LANGUAGES C CXX ASM OBJC OBJCXX)\n\n")
+            f.write(f"project({workspace.name} LANGUAGES {' '.join(langages)})\n\n")
 
             # Options de configuration (multi-config generators)
             if workspace.configurations:
@@ -263,15 +419,20 @@ class GenCommand:
             for proj_name, proj in workspace.projects.items():
                 if proj_name.startswith('__'):
                     continue
-                GenCommand._WriteCMakeProject(f, proj_name, proj, workspace, builder)
+                GenCommand._WriteCMakeProject(f, proj_name, proj, workspace, builder,
+                                              output_dir, fichiers[proj_name])
 
         Colored.PrintSuccess(f"CMakeLists.txt generated: {cmake_path}")
 
     @staticmethod
-    def _WriteCMakeProject(f, name: str, proj, workspace, builder: Builder):
+    def _WriteCMakeProject(f, name: str, proj, workspace, builder: Builder,
+                           output_dir: Path, fichiers: Tuple[List[str], List[str]]):
         """Écrit un projet CMake (add_executable ou add_library)."""
-        # Déterminer le type
-        if proj.kind in (Api.ProjectKind.CONSOLE_APP, Api.ProjectKind.WINDOWED_APP, Api.ProjectKind.TEST_SUITE):
+        # Déterminer le type. WIN32 : sous Windows, une application fenetree
+        # utilise le sous-systeme GUI (WinMain) ; CMake l'ignore ailleurs.
+        if proj.kind == Api.ProjectKind.WINDOWED_APP:
+            cmd = f"add_executable({name} WIN32"
+        elif proj.kind in (Api.ProjectKind.CONSOLE_APP, Api.ProjectKind.TEST_SUITE):
             cmd = f"add_executable({name}"
         elif proj.kind == Api.ProjectKind.STATIC_LIB:
             cmd = f"add_library({name} STATIC"
@@ -280,36 +441,37 @@ class GenCommand:
         else:
             return
 
+        base = "${CMAKE_CURRENT_SOURCE_DIR}"
+        chemin = lambda p: GenCommand._RelTo(p, output_dir, base)
+
         f.write(f"\n# Project: {name}\n")
-        src_files, hdr_files = GenCommand._CollectProjectFilesForGen(proj, builder)
+        src_files, hdr_files = fichiers
 
         # Écrire la commande principale
         f.write(f"{cmd}\n")
         for sf in src_files:
-            f.write(f"  \"{sf}\"\n")
+            f.write(f"  \"{chemin(sf)}\"\n")
         f.write(")\n")
 
         # Headers (pour IDE)
         if hdr_files:
             f.write(f"target_sources({name} PRIVATE\n")
             for hf in hdr_files:
-                f.write(f"  \"{hf}\"\n")
+                f.write(f"  \"{chemin(hf)}\"\n")
             f.write(")\n")
 
         # Includes
         if proj.includeDirs:
             f.write(f"target_include_directories({name} PRIVATE\n")
             for inc in proj.includeDirs:
-                resolved = builder.ResolveProjectPath(proj, inc)
-                f.write(f"  \"{resolved}\"\n")
+                f.write(f"  \"{chemin(builder.ResolveProjectPath(proj, inc))}\"\n")
             f.write(")\n")
 
         # Library search paths
         if proj.libDirs:
             f.write(f"target_link_directories({name} PRIVATE\n")
             for libdir in proj.libDirs:
-                resolved = builder.ResolveProjectPath(proj, libdir)
-                f.write(f"  \"{resolved}\"\n")
+                f.write(f"  \"{chemin(builder.ResolveProjectPath(proj, libdir))}\"\n")
             f.write(")\n")
 
         # Définitions
@@ -340,14 +502,24 @@ class GenCommand:
                 f.write(f"  {flag}\n")
             f.write(")\n")
 
-        # Librairies
-        if proj.links:
+        # Librairies. Jenga lie AUTOMATIQUEMENT les bibliotheques du workspace
+        # citees dans dependson() (Builders/Windows.py, Linux.py) : le CMake
+        # genere doit faire de meme, sinon un projet qui ne les repete pas dans
+        # links() construit avec Jenga et echoue au lien avec CMake.
+        a_lier: List[str] = [str(lib) for lib in proj.links]
+        for dep in proj.dependsOn:
+            dep_proj = workspace.projects.get(dep)
+            if (dep_proj is not None and not dep.startswith("__")
+                    and dep_proj.kind in (Api.ProjectKind.STATIC_LIB, Api.ProjectKind.SHARED_LIB)
+                    and dep not in a_lier):
+                a_lier.append(dep)
+        if a_lier:
             f.write(f"target_link_libraries({name} PRIVATE\n")
-            for lib in proj.links:
-                if lib in workspace.projects:
+            for lib in a_lier:
+                if lib in workspace.projects or not ("/" in lib or "\\" in lib):
                     f.write(f"  {lib}\n")
                 else:
-                    f.write(f"  {lib}\n")
+                    f.write(f"  \"{chemin(builder.ResolveProjectPath(proj, lib))}\"\n")
             f.write(")\n")
 
         # Dépendances explicites de build order
@@ -371,7 +543,7 @@ class GenCommand:
         f.write(std_flag)
 
         # Répertoires de sortie (selon contexte de génération)
-        target_dir = str(builder.GetTargetDir(proj))
+        target_dir = chemin(builder.GetTargetDir(proj))
         f.write(f"set_target_properties({name} PROPERTIES\n")
         if proj.kind in (Api.ProjectKind.CONSOLE_APP, Api.ProjectKind.WINDOWED_APP, Api.ProjectKind.TEST_SUITE):
             f.write(f"  RUNTIME_OUTPUT_DIRECTORY \"{target_dir}\"\n")
@@ -462,7 +634,9 @@ class GenCommand:
             f.write("# Makefile generated by Jenga\n\n")
             f.write(f"WORKSPACE = {workspace.name}\n")
             f.write(f"JENGA ?= jenga\n")
-            f.write(f"JENGA_FILE ?= {entry_file}\n")
+            # Guillemets et « / » : le shell de make mangeait les antislashs
+            # d'un chemin Windows (« C:\Users » devenait « C:Users »).
+            f.write(f"JENGA_FILE ?= \"{GenCommand._Posix(Path(entry_file).resolve())}\"\n")
             f.write("CONFIG ?= Debug\n")
             f.write(f"PLATFORM ?= {default_platform}\n")
             if default_target:
@@ -515,7 +689,9 @@ class GenCommand:
             f.write("# workspace.mk generated by Jenga\n")
             f.write(f"WORKSPACE := {workspace.name}\n")
             f.write("JENGA ?= jenga\n")
-            f.write(f"JENGA_FILE ?= {entry_file}\n")
+            # Guillemets et « / » : le shell de make mangeait les antislashs
+            # d'un chemin Windows (« C:\Users » devenait « C:Users »).
+            f.write(f"JENGA_FILE ?= \"{GenCommand._Posix(Path(entry_file).resolve())}\"\n")
             f.write("CONFIG ?= Debug\n")
             f.write(f"PLATFORM ?= {default_platform}\n")
             if default_target:
@@ -588,6 +764,7 @@ class GenCommand:
             module_names[proj.name] = (proj.targetName or proj.name).replace(" ", "_")
 
         lines: List[str] = []
+        besoin_glue = False
         lines.append("# Android.mk generated by Jenga")
         lines.append("LOCAL_PATH := $(call my-dir)")
         lines.append("")
@@ -598,8 +775,11 @@ class GenCommand:
                 continue
 
             module_name = module_names[proj.name]
-            project_srcs = [str(Path(src).resolve()) for src in src_files]
-            include_dirs = [str(Path(builder.ResolveProjectPath(proj, inc)).resolve()) for inc in proj.includeDirs]
+            # Sources relatives a LOCAL_PATH (ndk-build les prefixe lui-meme),
+            # includes via $(LOCAL_PATH) ; « / » dans les deux cas.
+            project_srcs = [GenCommand._RelTo(src, output_dir) for src in src_files]
+            include_dirs = [GenCommand._RelTo(builder.ResolveProjectPath(proj, inc), output_dir, "$(LOCAL_PATH)")
+                            for inc in proj.includeDirs]
             defines = [f"-D{d}" for d in proj.defines if d]
             cflags = [f for f in proj.cflags if f]
             cxxflags = [f for f in proj.cxxflags if f]
@@ -633,6 +813,20 @@ class GenCommand:
                 else:
                     ldlibs.append(f"-l{link_token}")
 
+            # NativeActivity : le build natif de Jenga compile lui-meme
+            # android_native_app_glue et lie -llog -landroid (Builders/Android.py).
+            # Sans le meme contrat ici, ndk-build echouait au lien
+            # (« undefined symbol: __android_log_print »), et sans la colle une
+            # app qui liait quand meme mourait au lancement.
+            native_activity = (proj.kind == Api.ProjectKind.WINDOWED_APP
+                               and bool(getattr(proj, "androidNativeActivity", False)))
+            if native_activity:
+                besoin_glue = True
+                for lib in ("-llog", "-landroid"):
+                    if lib not in ldlibs:
+                        ldlibs.append(lib)
+                local_static.append("android_native_app_glue")
+
             lines.append("include $(CLEAR_VARS)")
             lines.append(f"LOCAL_MODULE := {module_name}")
             lines.append("LOCAL_SRC_FILES := \\")
@@ -646,6 +840,13 @@ class GenCommand:
                     suffix = " \\" if idx < len(include_dirs) - 1 else ""
                     lines.append(f"\t{inc}{suffix}")
 
+            # Standard C++ PAR MODULE, lu dans cppdialect() : un -std=c++17 global
+            # dans Application.mk ecrasait le C++20 d'un projet qui le declarait.
+            if proj.language in (Api.Language.CPP, Api.Language.OBJCPP) and getattr(proj, "cppdialect", ""):
+                std = str(proj.cppdialect).lower().replace("gnu++", "c++")
+                if std == "c++latest":
+                    std = "c++2b"
+                cxxflags = [f"-std={std}"] + cxxflags
             if defines or cflags:
                 lines.append(f"LOCAL_CFLAGS += {' '.join(defines + cflags)}")
             if defines or cxxflags:
@@ -656,12 +857,19 @@ class GenCommand:
                 lines.append(f"LOCAL_STATIC_LIBRARIES += {' '.join(local_static)}")
             if local_shared:
                 lines.append(f"LOCAL_SHARED_LIBRARIES += {' '.join(local_shared)}")
+            if native_activity:
+                # Sans -u, l'editeur de liens jette ANativeActivity_onCreate
+                # (rien ne l'appelle dans le .so) et l'activite ne demarre pas.
+                lines.append("LOCAL_LDFLAGS += -u ANativeActivity_onCreate")
 
             if proj.kind == Api.ProjectKind.STATIC_LIB:
                 lines.append("include $(BUILD_STATIC_LIBRARY)")
             else:
                 lines.append("include $(BUILD_SHARED_LIBRARY)")
             lines.append("")
+
+        if besoin_glue:
+            lines.append("$(call import-module,android/native_app_glue)")
 
         android_mk_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -678,20 +886,30 @@ class GenCommand:
         if not app_abis:
             app_abis = ["arm64-v8a"]
 
+        # APP_PLATFORM = le PLUS ELEVE des androidminsdk() declares : un module
+        # qui exige l'API 24 ne se compile pas contre l'API 21. (Avant 2.8.4 :
+        # min(21, ...) -- tout minsdk superieur a 21 etait ignore.)
         min_sdk = 21
+        declares: List[int] = []
         for proj in projects:
             if getattr(proj, "androidMinSdk", None):
                 try:
-                    min_sdk = min(min_sdk, int(proj.androidMinSdk))
+                    declares.append(int(proj.androidMinSdk))
                 except Exception:
                     pass
+        if declares:
+            min_sdk = max(declares)
+
+        # APP_STL : androidstl() s'il est declare (c++_static l'emporte s'il est
+        # demande quelque part : un seul runtime par application), sinon c++_shared.
+        stls = {str(getattr(p, "androidStl", "") or "") for p in projects}
+        app_stl = "c++_static" if "c++_static" in stls else "c++_shared"
 
         app_lines = [
             "# Application.mk generated by Jenga",
             f"APP_ABI := {' '.join(app_abis)}",
             f"APP_PLATFORM := android-{min_sdk}",
-            "APP_STL := c++_shared",
-            "APP_CPPFLAGS += -std=c++17",
+            f"APP_STL := {app_stl}",
         ]
         application_mk_path.write_text("\n".join(app_lines) + "\n", encoding="utf-8")
 
@@ -762,13 +980,19 @@ class GenCommand:
         for proj_name, proj in workspace.projects.items():
             if proj_name.startswith('__'):
                 continue
-            GenCommand._GenerateVCXProj(proj, output_dir / f"{proj_name}.vcxproj", workspace, builder)
+            GenCommand._GenerateVCXProj(proj, output_dir / f"{proj_name}.vcxproj", workspace, builder,
+                                        project_guids[proj_name])
 
         Colored.PrintSuccess(f"Visual Studio 2022 solution generated: {sln_path}")
 
     @staticmethod
-    def _GenerateVCXProj(project, proj_path: Path, workspace, builder: Builder):
-        """Génère un fichier .vcxproj avec dépendances et chemins complets."""
+    def _GenerateVCXProj(project, proj_path: Path, workspace, builder: Builder, project_guid: str):
+        """Génère un fichier .vcxproj avec dépendances et chemins complets.
+
+        project_guid : celui que la solution declare pour ce projet. Avant 2.8.4,
+        le .vcxproj en tirait un second au hasard -- la solution et le projet ne
+        se designaient pas par le meme identifiant.
+        """
         from xml.etree.ElementTree import Element, SubElement, tostring
         import xml.dom.minidom
 
@@ -784,7 +1008,7 @@ class GenCommand:
 
         # Globals
         pg = SubElement(root, "PropertyGroup", Label="Globals")
-        SubElement(pg, "ProjectGuid").text = "{" + str(uuid.uuid4()).upper() + "}"
+        SubElement(pg, "ProjectGuid").text = project_guid
         SubElement(pg, "Keyword").text = "Win32Proj"
         SubElement(pg, "RootNamespace").text = project.name
         SubElement(pg, "WindowsTargetPlatformVersion").text = "10.0"
@@ -798,7 +1022,12 @@ class GenCommand:
                 pg = SubElement(root, "PropertyGroup", Condition=f"'$(Configuration)|$(Platform)'=='{config}|{plat}'", Label="Configuration")
                 SubElement(pg, "ConfigurationType").text = GenCommand._GetVSConfigurationType(project.kind)
                 SubElement(pg, "UseDebugLibraries").text = "true" if config == "Debug" else "false"
-                SubElement(pg, "PlatformToolset").text = "v143"
+                # $(DefaultPlatformToolset) : l'ensemble d'outils de la version
+                # de Visual Studio qui ouvre le projet (defini par
+                # Microsoft.Cpp.Default.props, importe juste au-dessus). « v143 »
+                # ecrit en dur rendait le projet inconstructible sous VS 2026
+                # (v145) : MSB8020.
+                SubElement(pg, "PlatformToolset").text = "$(DefaultPlatformToolset)"
                 if project.kind == Api.ProjectKind.SHARED_LIB:
                     SubElement(pg, "LinkIncremental").text = "false"
                 target_dir = str(builder.GetTargetDir(project))
@@ -904,6 +1133,13 @@ class GenCommand:
                         lib_dirs.append(str(builder.GetTargetDir(workspace.projects[dep])))
                 lib_dirs.append("%(AdditionalLibraryDirectories)")
                 SubElement(link, "AdditionalLibraryDirectories").text = ";".join(dict.fromkeys(lib_dirs))
+
+                # Sous-systeme : une application fenetree (WinMain) doit etre
+                # liee en Windows, sinon l'editeur de liens cherche main().
+                if project.kind == Api.ProjectKind.WINDOWED_APP:
+                    SubElement(link, "SubSystem").text = "Windows"
+                elif project.kind in (Api.ProjectKind.CONSOLE_APP, Api.ProjectKind.TEST_SUITE):
+                    SubElement(link, "SubSystem").text = "Console"
 
                 # Custom link options
                 if project.ldflags:

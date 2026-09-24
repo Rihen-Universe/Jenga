@@ -2154,11 +2154,14 @@ class Builder(abc.ABC):
                 file.extend(str(d) for d in (getattr(dep, "dependsOn", []) or []))
         return ordre
 
-    def BuildProject(self, project: Project) -> bool:
-        # Check if project is already compiled for this platform/arch context
-        if self.state.IsProjectCompiled(project.name, self.platform, self.targetArch.value if self.targetArch else ""):
-            return True
+    def PrepareProjectForCompile(self, project: Project) -> None:
+        """Met le builder dans l'etat ou il compile `project` : filtres, toolchain.
 
+        Partage par BuildProject et par `jenga gen --compile-commands`, qui
+        capture les commandes de compilation au lieu de les executer : les deux
+        doivent voir le MEME projet et le MEME toolchain, sinon la base de
+        compilation decrit un build qui n'existe pas.
+        """
         # Apply filter(system/config) materialization before any build decision.
         self._ApplyProjectFilters(project)
 
@@ -2172,6 +2175,13 @@ class Builder(abc.ABC):
                 # Re-run platform-specific toolchain preparation if available
                 if hasattr(self, '_PrepareNDKToolchain'):
                     self._PrepareNDKToolchain()
+
+    def BuildProject(self, project: Project) -> bool:
+        # Check if project is already compiled for this platform/arch context
+        if self.state.IsProjectCompiled(project.name, self.platform, self.targetArch.value if self.targetArch else ""):
+            return True
+
+        self.PrepareProjectForCompile(project)
 
         # Create logger with project info
         kind_str = project.kind.name if hasattr(project.kind, 'name') else str(project.kind)
