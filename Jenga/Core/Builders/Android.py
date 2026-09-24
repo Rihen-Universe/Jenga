@@ -663,13 +663,20 @@ class AndroidBuilder(Builder):
         target = f"{self.ndk_llvm_triple}{min_api}"
         flags.append(f"--target={target}")
         flags.append(f"--sysroot={self.toolchain.sysroot}")
-        flags.append("-llog")
 
-        # Pour les applications non-console, lier les bibliothèques Android standards
-        if project.kind != ProjectKind.CONSOLE_APP:
+        # Bibliotheques implicites : UNIQUEMENT celles qu'exige le code que
+        # Jenga injecte lui-meme. android_native_app_glue.c appelle
+        # __android_log_print (liblog) et ALooper_*/AInputQueue_* (libandroid) :
+        # sans elles, la colle ne lie pas. Rien d'autre n'est ajoute ici.
+        # EGL, GLESv2/v3, Vulkan, OpenSLES... se declarent dans links() :
+        # retirer une dependance de links() DOIT produire une erreur de lien.
+        # (Avant 2.8.2, -landroid -lEGL -lGLESv2 etaient forces pour toute
+        # application non-console, ce qui masquait tout oubli dans links().)
+        if project.kind == ProjectKind.WINDOWED_APP and project.androidNativeActivity:
+            flags.append("-llog")
             flags.append("-landroid")
-            flags.append("-lEGL")
-            flags.append("-lGLESv2")
+        elif project.kind != ProjectKind.CONSOLE_APP:
+            pass
         else:
             # Pour les exécutables, lier la bibliothèque C dynamique
             flags.append("-lc")
@@ -742,6 +749,75 @@ class AndroidBuilder(Builder):
         android_mk = next((p for p in android_candidates if p.exists()), None)
         app_mk = next((p for p in app_candidates if p.exists()), None)
         return android_mk, app_mk
+
+    # -----------------------------------------------------------------------
+    # libc++_shared.so dans l'APK
+    # -----------------------------------------------------------------------
+    # Sans ce fichier, l'application se construit, s'installe, se lance et
+    # meurt : `dlopen failed: library "libc++_shared.so" not found`, puis
+    # SIG 9, retour au bureau sans un mot (rien n'est encore dessine).
+    #
+    # La decision ne se prend PAS sur la configuration (androidstl, langage) :
+    # elle se prend sur ce que le chargeur lira. Un .so qui depend de
+    # libc++_shared.so porte cette chaine dans sa table dynamique (DT_NEEDED) ;
+    # si un seul des .so empaquetes la porte, le fichier doit etre dans l'APK.
+    # androidstl("c++_shared") explicite force aussi le bundling.
+    #
+    # Avant 2.8.2 : le test comparait project.language (un enum Language.CPP)
+    # a la chaine 'C++' -> toujours faux, et le chemin mono-ABI ne bundlait
+    # jamais. Seul un projet a cppdialect() ET plusieurs ABI recevait le .so.
+
+    _ABI_TO_NDK_LIB_DIR = {
+        "armeabi-v7a": "arm-linux-androideabi",
+        "arm64-v8a": "aarch64-linux-android",
+        "x86": "i686-linux-android",
+        "x86_64": "x86_64-linux-android",
+    }
+
+    @staticmethod
+    def _LibNeedsSharedStl(lib_path: str) -> bool:
+        try:
+            with open(lib_path, "rb") as f:
+                return b"libc++_shared.so\x00" in f.read()
+        except OSError:
+            return False
+
+    def _FindSharedStl(self, abi: str) -> Optional[Path]:
+        host_tag = {
+            "win32": "windows-x86_64",
+            "linux": "linux-x86_64",
+            "darwin": "darwin-x86_64",
+        }.get(sys.platform, "linux-x86_64")
+        lib_dir = self._ABI_TO_NDK_LIB_DIR.get(abi)
+        candidates = []
+        if lib_dir:
+            candidates.append(self.ndk_path / "toolchains" / "llvm" / "prebuilt" / host_tag
+                              / "sysroot" / "usr" / "lib" / lib_dir / "libc++_shared.so")
+        candidates.append(self.ndk_path / "sources" / "cxx-stl" / "llvm-libc++" / "libs" / abi / "libc++_shared.so")
+        for c in candidates:
+            if c.exists():
+                return c
+        return None
+
+    def _AppendSharedStl(self, project: Project, abi: str, native_libs: List[str]) -> bool:
+        """Ajoute libc++_shared.so a native_libs si un .so en depend. Faux = echec du build."""
+        if any(Path(l).name == "libc++_shared.so" for l in native_libs):
+            return True
+        needers = [Path(l).name for l in native_libs if self._LibNeedsSharedStl(l)]
+        explicit = getattr(project, 'androidStl', '') == 'c++_shared'
+        if not needers and not explicit:
+            return True
+        stl_lib = self._FindSharedStl(abi)
+        if stl_lib is None:
+            # Un APK qui mourra au lancement n'est pas un succes : on refuse.
+            why = ", ".join(needers) if needers else 'androidstl("c++_shared")'
+            Reporter.Error(f"libc++_shared.so not found in the NDK for {abi}, "
+                           f"but {why} requires it — the APK would die at launch "
+                           f"(dlopen failed). Check ANDROID_NDK_ROOT, or use androidstl(\"c++_static\").")
+            return False
+        native_libs.append(str(stl_lib))
+        Reporter.Info(f"  + libc++_shared.so ({abi}) — needed by {', '.join(needers) or 'androidstl'}")
+        return True
 
     def _CollectBuiltSharedLibs(self, libs_dir: Path, abi: Optional[str] = None) -> List[str]:
         abi_dir = libs_dir / (abi or self.ndk_abi)
@@ -943,6 +1019,9 @@ class AndroidBuilder(Builder):
                         Reporter.Error(f"No shared libraries produced by ndk-build for '{proj.name}' ({abi})")
                         return 1
 
+                    if not self._AppendSharedStl(proj, abi, native_libs):
+                        return 1
+
                     all_native_libs[abi] = native_libs
                     if output_mode in ("split", "both"):
                         self.ndk_abi = abi
@@ -1059,6 +1138,9 @@ class AndroidBuilder(Builder):
 
                 if not native_libs:
                     Reporter.Error(f"No native outputs found for APK packaging: {proj.name}")
+                    return 1
+
+                if not self._AppendSharedStl(proj, self.ndk_abi, native_libs):
                     return 1
 
                 if self.build_aab:
@@ -1207,36 +1289,8 @@ class AndroidBuilder(Builder):
                     Reporter.Error(f"Failed to build for {abi}")
                     return False
 
-                # Bundle libc++_shared.so sauf si androidStl="c++_static" (runtime embarqué).
-                stl_pref = getattr(project, 'androidStl', '')
-                is_cpp = bool(getattr(project, 'cppdialect', '') or getattr(project, 'language', '') == 'C++')
-                uses_shared_stl = is_cpp and stl_pref != 'c++_static' and not any(
-                    'c++_static' in (getattr(p, 'links', []) or [])
-                    for p in [project]
-                )
-                if uses_shared_stl:
-                    host_tag = {
-                        "win32": "windows-x86_64",
-                        "linux": "linux-x86_64",
-                        "darwin": "darwin-x86_64"
-                    }.get(sys.platform, "linux-x86_64")
-
-                    abi_to_lib_dir = {
-                        "armeabi-v7a": "arm-linux-androideabi",
-                        "arm64-v8a": "aarch64-linux-android",
-                        "x86": "i686-linux-android",
-                        "x86_64": "x86_64-linux-android"
-                    }
-
-                    lib_dir = abi_to_lib_dir.get(abi)
-                    if lib_dir:
-                        stl_lib = self.ndk_path / "toolchains" / "llvm" / "prebuilt" / host_tag / "sysroot" / "usr" / "lib" / lib_dir / "libc++_shared.so"
-                        if not stl_lib.exists():
-                            stl_lib = self.ndk_path / "sources" / "cxx-stl" / "llvm-libc++" / "libs" / abi / "libc++_shared.so"
-                        if stl_lib.exists():
-                            native_libs.append(str(stl_lib))
-                        else:
-                            Reporter.Warning(f"libc++_shared.so not found for {abi} — APK may crash at runtime")
+                if success and not self._AppendSharedStl(project, abi, native_libs):
+                    return False
 
                 if not native_libs:
                     Reporter.Warning(f"No native libraries found for {abi}")
