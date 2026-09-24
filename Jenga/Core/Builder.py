@@ -2762,24 +2762,33 @@ class Builder(abc.ABC):
                     continue
 
             run_cwd = proj.location or self.workspace.location
-            for cmd in proj.preBuildCommands:
-                expanded_cmd = cmd
-                if self._expander:
-                    self._expander.SetProject(proj)
-                    expanded_cmd = self._expander.Expand(cmd, recursive=True)
-                Process.Run(expanded_cmd, shell=True, cwd=run_cwd)
-            ok = self.BuildProject(proj)
+
+            # Le code de retour d'une commande prebuild/postbuild DECIDE.
+            # Avant 2.8.2 il etait jete : un prebuild qui echouait laissait le
+            # projet se construire, un postbuild qui echouait laissait le build
+            # vert. Une garde ecrite en prebuild ne pouvait donc rien garder.
+            def _run_hooks(cmds, phase):
+                for cmd in cmds:
+                    expanded_cmd = cmd
+                    if self._expander:
+                        self._expander.SetProject(proj)
+                        expanded_cmd = self._expander.Expand(cmd, recursive=True)
+                    rc = Process.Run(expanded_cmd, shell=True, cwd=run_cwd)
+                    if rc != 0:
+                        Reporter.Error(f"{proj_name}: {phase} command failed (exit {rc}): {expanded_cmd}")
+                        return False
+                return True
+
+            ok = _run_hooks(proj.preBuildCommands, "prebuild")
+            if ok:
+                ok = self.BuildProject(proj)
             coordinator.MarkProjectBuilt(ok, proj_name)
             # Accumulate per-project error/warning counts for global footer summary
             last_logger = getattr(self, '_last_logger', None)
             if last_logger:
                 coordinator.AccumulateStats(last_logger.errors_count, last_logger.warnings_count)
-            for cmd in proj.postBuildCommands:
-                expanded_cmd = cmd
-                if self._expander:
-                    self._expander.SetProject(proj)
-                    expanded_cmd = self._expander.Expand(cmd, recursive=True)
-                Process.Run(expanded_cmd, shell=True, cwd=run_cwd)
+            if ok:
+                ok = _run_hooks(proj.postBuildCommands, "postbuild")
             if ok:
                 success_count += 1
             else:

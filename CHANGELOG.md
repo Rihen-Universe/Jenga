@@ -3,6 +3,50 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.2
+
+Trois défauts Android, trouvés sur un vrai téléphone par un étudiant (22P033),
+traces à l'appui, et un quatrième qui empêchait une garde de faire son travail.
+
+### Corrigé
+
+- **Le code de retour de `prebuild()` / `postbuild()` était ignoré.** Un
+  `prebuild` en échec laissait le projet se compiler, un `postbuild` en échec
+  laissait le build vert : une garde écrite en `prebuild` ne gardait rien.
+  Désormais un `prebuild` en échec arrête le projet avant compilation
+  (`<projet>: prebuild command failed (exit N): <commande>`), un `postbuild` en
+  échec le marque en échec, et un `postbuild` ne s'exécute plus après une
+  compilation ratée (comme Visual Studio et Premake). ⚠️ Une commande qui peut
+  échouer sans gravité doit maintenant le dire : `cmd || exit 0`.
+
+- **`libc++_shared.so` manquait dans l'APK.** L'application se construisait,
+  s'installait, se lançait et mourait : `dlopen failed: library
+  "libc++_shared.so" not found`, puis `SIG: 9`, retour au bureau sans un mot.
+  Deux causes empilées : le test comparait `project.language` (un enum
+  `Language.CPP`) à la chaîne `'C++'`, donc il était toujours faux sans
+  `cppdialect()` ; et le chemin **une seule ABI** ne l'ajoutait jamais. Désormais
+  la décision se prend sur les `.so` produits : si l'un porte `libc++_shared.so`
+  dans ses dépendances dynamiques (`DT_NEEDED`), le fichier du NDK est
+  empaqueté — sur les trois chemins (une ABI, plusieurs ABI, `ndk-build`).
+  `androidstl("c++_shared")` le force ; `androidstl("c++_static")` n'ajoute
+  rien. S'il est requis et introuvable dans le NDK, **le build échoue** au lieu
+  de produire un APK qui meurt au lancement.
+- **Le builder Android forçait `-landroid -lEGL -lGLESv2`** (et `-llog`) pour
+  toute application non-console, quoi que dise `links()` : retirer EGL de
+  `links()` construisait sans erreur. Ne restent implicites que `-llog` et
+  `-landroid`, et seulement pour une NativeActivity : la colle
+  `android_native_app_glue` injectée par Jenga les exige. EGL, GLES, Vulkan…
+  se déclarent dans `links()`. ⚠️ Un projet qui utilisait EGL/GLES sans les
+  déclarer échoue maintenant au lien (`undefined symbol: egl…`) : ajouter
+  `links(["EGL", "GLESv3"])` sous `filter("system:Android")`.
+- **`jenga deploy` affichait `adb install failed.` pour tout échec.** L'état de
+  l'appareil est vérifié avant l'installation, et la sortie d'adb est lue :
+  `Deploy failed: device <série> is 'unauthorized' — accept the USB debugging
+  prompt on the device, then retry.` Idem pour `offline`, aucun appareil,
+  plusieurs appareils sans `--target`, signature incompatible, ABI absente,
+  stockage plein, rétrogradation de version, APK non signé… Un code inconnu est
+  cité tel quel.
+
 ## v2.8.1
 
 ### Corrigé

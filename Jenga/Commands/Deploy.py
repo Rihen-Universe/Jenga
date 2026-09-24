@@ -600,12 +600,7 @@ class DeployCommand:
                 adb_base + ["shell", "am", "force-stop", pkg_id],
                 captureOutput=True, silent=True)
 
-        result = Process.ExecuteCommand(
-            adb_base + ["install", "-r", str(apk_path)],
-            captureOutput=False, silent=False)
-
-        if result.returnCode != 0:
-            Colored.PrintError("adb install failed.")
+        if DeployCommand._AndroidInstall(adb, apk_path, parsed.target) != 0:
             return 1
 
         Colored.PrintSuccess(f"APK installed: {apk_path}")
@@ -655,17 +650,132 @@ class DeployCommand:
             Colored.PrintError(f"APK not found: {apk_path}")
             return 1
 
-        cmd = [str(adb)]
-        if parsed.target:
-            cmd += ["-s", parsed.target]
-        cmd += ["install", "-r", str(apk_path)]
+        if DeployCommand._AndroidInstall(adb, apk_path, parsed.target) != 0:
+            return 1
+        Colored.PrintSuccess("APK installed successfully.")
+        return 0
 
-        result = Process.ExecuteCommand(cmd, captureOutput=False, silent=False)
-        if result.returnCode == 0:
-            Colored.PrintSuccess("APK installed successfully.")
+    # -----------------------------------------------------------------------
+    # Installation Android : un echec se DIT avec sa cause.
+    # Avant : "adb install failed." pour tout (autorisation revoquee, signature
+    # incompatible, ABI absente, stockage plein...). L'information existe dans
+    # la sortie d'adb ; on la lit au lieu de la jeter.
+    # -----------------------------------------------------------------------
+
+    # Code d'echec du gestionnaire de paquets -> (cause, geste a faire).
+    # Point d'extension : ajouter une ligne ici pour tout nouveau code rencontre.
+    _ADB_INSTALL_ERRORS = {
+        "INSTALL_FAILED_UPDATE_INCOMPATIBLE":
+            ("the installed app is signed with a different key",
+             "uninstall it first (jenga deploy --uninstall, or adb uninstall <package>), then retry"),
+        "INSTALL_FAILED_NO_MATCHING_ABIS":
+            ("the APK contains no native library for this device's CPU ABI",
+             "add the device ABI to androidabis() (arm64-v8a for almost every phone) and rebuild"),
+        "INSTALL_FAILED_INSUFFICIENT_STORAGE":
+            ("not enough free space on the device", "free some storage, then retry"),
+        "INSTALL_FAILED_VERSION_DOWNGRADE":
+            ("the installed app has a higher versionCode",
+             "raise androidversioncode(), or uninstall the installed app first"),
+        "INSTALL_FAILED_OLDER_SDK":
+            ("the device Android version is older than androidminsdk()",
+             "lower androidminsdk() or use a newer device"),
+        "INSTALL_PARSE_FAILED_NO_CERTIFICATES":
+            ("the APK is not signed",
+             "check JAVA_HOME and ~/.android/debug.keystore, then rebuild"),
+        "INSTALL_FAILED_INVALID_APK":
+            ("the APK is malformed", "rebuild it and check the build log for packaging warnings"),
+        "INSTALL_FAILED_USER_RESTRICTED":
+            ("the device refused the install (USB install disabled or prompt declined)",
+             "enable 'Install via USB' in developer options and accept the prompt on the device"),
+        "INSTALL_FAILED_TEST_ONLY":
+            ("the APK is marked test-only", "retry with: adb install -t"),
+        "INSTALL_FAILED_DUPLICATE_PERMISSION":
+            ("another installed app declares the same permission",
+             "uninstall the conflicting app"),
+        "INSTALL_FAILED_ALREADY_EXISTS":
+            ("the app already exists and cannot be replaced", "uninstall it first"),
+    }
+
+    # Etat rendu par `adb devices` -> geste a faire.
+    _ADB_DEVICE_STATES = {
+        "unauthorized": "accept the USB debugging prompt on the device, then retry",
+        "offline": "unplug and replug the device (or run: adb kill-server), then retry",
+        "no permissions": "fix the udev rules for this device (Linux), then retry",
+        "recovery": "reboot the device into Android, then retry",
+        "bootloader": "reboot the device into Android, then retry",
+        "sideload": "reboot the device into Android, then retry",
+    }
+
+    @staticmethod
+    def _ParseAdbDevices(text: str) -> List[tuple]:
+        """Lignes de `adb devices` -> [(serie, etat)]. L'etat peut contenir un espace."""
+        devices = []
+        for line in (text or "").splitlines():
+            s = line.strip()
+            if not s or s.startswith("List of devices") or s.startswith("*"):
+                continue
+            parts = s.split(None, 1)
+            if len(parts) == 2:
+                devices.append((parts[0], parts[1].strip()))
+        return devices
+
+    @staticmethod
+    def _DiagnoseAdbInstall(output: str, where: str, returnCode: int) -> str:
+        """Sortie d'`adb install` en echec -> message qui nomme la cause et le geste."""
+        for code, (cause, hint) in DeployCommand._ADB_INSTALL_ERRORS.items():
+            if code in output:
+                return f"Deploy failed on {where}: {code} — {cause}; {hint}."
+        for state, hint in DeployCommand._ADB_DEVICE_STATES.items():
+            if f"device {state}" in output or f"device '{state}'" in output:
+                return f"Deploy failed: {where} is '{state}' — {hint}."
+        # Code inconnu : on le cite tel quel plutot que de le taire.
+        reason = next((l.strip() for l in output.splitlines()
+                       if "INSTALL_" in l or "Failure" in l or "error" in l.lower()), "")
+        return f"Deploy failed on {where}: " + (reason or f"adb exited with code {returnCode}") + "."
+
+    @staticmethod
+    def _AndroidInstall(adb: Path, apk_path: Path, target: Optional[str]) -> int:
+        """Installe un APK ; en cas d'echec, nomme l'appareil, la cause et le geste."""
+        # 1. Etat des appareils AVANT d'installer : l'erreur d'adb sur un
+        #    appareil non autorise est plus obscure que la notre.
+        listing = Process.ExecuteCommand([str(adb), "devices"], captureOutput=True, silent=True)
+        if listing.returnCode == 0:
+            devices = DeployCommand._ParseAdbDevices(listing.stdout)
+            if target:
+                chosen = [d for d in devices if d[0] == target]
+                if not chosen:
+                    known = ", ".join(f"{d[0]} ({d[1]})" for d in devices) or "none"
+                    Colored.PrintError(f"Deploy failed: device {target} is not connected. Connected: {known}.")
+                    return 1
+            else:
+                if not devices:
+                    Colored.PrintError("Deploy failed: no Android device connected — plug a device with USB debugging enabled, then retry.")
+                    return 1
+                if len(devices) > 1:
+                    known = ", ".join(f"{d[0]} ({d[1]})" for d in devices)
+                    Colored.PrintError(f"Deploy failed: {len(devices)} devices connected ({known}) — choose one with --target <serial>.")
+                    return 1
+                chosen = devices
+            serial, state = chosen[0]
+            if state != "device":
+                hint = DeployCommand._ADB_DEVICE_STATES.get(state, "check the device, then retry")
+                Colored.PrintError(f"Deploy failed: device {serial} is '{state}' — {hint}.")
+                return 1
+            target = serial
+
+        # 2. Installation, sortie capturee puis re-affichee : on la montre ET on la lit.
+        cmd = [str(adb)] + (["-s", target] if target else []) + ["install", "-r", str(apk_path)]
+        result = Process.ExecuteCommand(cmd, captureOutput=True, silent=True)
+        output = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+        if output:
+            print(output)
+
+        # adb a deja rendu 0 avec "Failure [...]" dans la sortie : la sortie fait foi.
+        failed = result.returnCode != 0 or "Failure [" in output or "adb: failed to install" in output
+        if not failed:
             return 0
-
-        Colored.PrintError("adb install failed.")
+        where = f"device {target}" if target else "the device"
+        Colored.PrintError(DeployCommand._DiagnoseAdbInstall(output, where, result.returnCode))
         return 1
 
     @staticmethod

@@ -67,7 +67,12 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # le remplacer. Avec ccache dans le PATH, toute compilation GCC/Clang echouait
 # sur « ccache: unknown option -- g » : g++ avait disparu de la commande et
 # ccache lisait les drapeaux du compilateur comme les siens.
-__version__ = "2.8.1"
+# 2.8.2 (2026-09-24) : Android. libc++_shared.so empaquetee quand un .so en
+# depend (lu dans DT_NEEDED) -- l'app mourait au lancement sur un vrai
+# telephone. EGL/GLESv2 ne sont plus lies d'office : seuls -llog et -landroid,
+# exiges par la colle NativeActivity. `jenga deploy` nomme la cause d'un echec
+# d'installation. Le code de retour de prebuild/postbuild arrete le projet.
+__version__ = "2.8.2"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer
