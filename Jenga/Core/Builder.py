@@ -280,7 +280,13 @@ class Builder(abc.ABC):
         if tc_name:
             self.toolchain = self.toolchainManager.GetToolchain(tc_name)
         if not self.toolchain:
-            raise RuntimeError(f"No suitable toolchain found for {self.targetOs.value} {self.targetArch.value}")
+            # Le refus dit ce qui a ete cherche et pourquoi chaque candidat a
+            # ete ecarte : sans ca, « aucun toolchain » ne distingue pas un
+            # compilateur absent d'un PATH faux ou d'un compilateur qui plante.
+            from .Toolchains import ToolchainManager as _TM
+            raise RuntimeError(
+                f"No suitable toolchain found for {self.targetOs.value} {self.targetArch.value}.\n"
+                "What Jenga looked for:\n" + _TM.DescribeDetection())
 
         # Auto-detect and enable ccache/sccache for faster builds
         self._DetectCompilerCache()

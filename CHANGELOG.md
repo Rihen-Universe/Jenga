@@ -3,6 +3,32 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.3
+
+### Corrigé
+
+- **« No suitable toolchain found for Windows x86_64 » avec clang et g++
+  installés.** Cas réel : le `PATH` d'un utilisateur pointait sur
+  `C:\msys64\ucrt64\x86_64-w64-mingw32\bin` (qui ne contient que `ar`, `ld`,
+  `as`…) au lieu de `C:\msys64\ucrt64\bin`. Dans le terminal MSYS2 tout
+  marchait, puisque MSYS2 ajoute lui-même le bon dossier ; dans PowerShell et
+  VS Code, Jenga ne trouvait rien. La détection automatique fouille désormais
+  `C:\msys64\{ucrt64,clang64,mingw64}\bin` **après** le `PATH` (une autre
+  racine se donne par `MSYS2_ROOT`) — comme le faisait déjà
+  `RegisterJengaGlobalToolchains()`, mais seulement pour les workspaces qui
+  l'appelaient.
+- **`ar` et `ld` sont pris à côté du compilateur retenu**, et non plus au
+  hasard du `PATH` : un clang de `ucrt64` n'est plus associé à l'`ar` d'une
+  autre installation.
+
+### Amélioré
+
+- **Le refus « No suitable toolchain found » dit ce qui a été cherché** :
+  l'hôte et le Python vus par Jenga, puis chaque candidat avec son sort
+  (introuvable, trouvé à tel endroit, ou trouvé mais `--version` a échoué — une
+  DLL manquante est nommée comme telle), et le geste à faire.
+- Classifieurs PyPI : Python 3.12, 3.13 et 3.14 (testé sous 3.13.13 et 3.14.5).
+
 ## v2.8.2
 
 Trois défauts Android, trouvés sur un vrai téléphone par un étudiant (22P033),
