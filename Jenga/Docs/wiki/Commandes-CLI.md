@@ -149,14 +149,25 @@ jenga file MonApp --src "src/**.cpp" --inc include --link pthread
 
 | Commande | Alias | Rôle | Options clés |
 |----------|-------|------|--------------|
-| `gen` | — | Génère fichiers projet IDE | `--cmake --makefile --mk --android-mk --vs2022 --xcode --all --output/-o` |
+| `gen` | — | Génère fichiers projet IDE | `--cmake --makefile --mk --android-mk --vs (alias --vs2022) --xcode --compile-commands --all --output/-o` |
 | `docs` | `d` | Génère la doc (Doxygen → MD/HTML/PDF) | selon projet |
 | `ide-setup` | `ide` | Configure l'éditeur pour `.jenga` | `--editor (auto\|vscode\|lsp\|all) --force --info` |
 
 ```bash
-jenga gen --cmake --vs2022 --output generated
+jenga gen --cmake --vs --output generated
+jenga gen --compile-commands          # compile_commands.json pour clangd / VS Code / CLion
 jenga ide-setup --editor vscode
 ```
+
+Depuis la 2.8.4 :
+- les chemins des fichiers générés sont en `/` et **relatifs** au fichier généré :
+  le dossier se déplace avec ses sources (un `CMakeLists.txt` produit sous
+  Windows se construit tel quel sous Linux) ;
+- `--vs` produit une solution que **toute** version de Visual Studio ouvre avec
+  son propre ensemble d'outils (`$(DefaultPlatformToolset)`) ;
+- `--compile-commands` capture les commandes **réelles** de `jenga build`, sans
+  rien compiler ;
+- `--xcode` n'a pas été éprouvé par `xcodebuild` (aucun Mac disponible).
 
 ### Packaging, déploiement, signature
 
@@ -348,14 +359,25 @@ jenga file MyApp --src "src/**.cpp" --inc include --link pthread
 
 | Command | Alias | Purpose | Key options |
 |---------|-------|---------|-------------|
-| `gen` | — | Generate IDE project files | `--cmake --makefile --mk --android-mk --vs2022 --xcode --all --output/-o` |
+| `gen` | — | Generate IDE project files | `--cmake --makefile --mk --android-mk --vs (alias --vs2022) --xcode --compile-commands --all --output/-o` |
 | `docs` | `d` | Generate docs (Doxygen → MD/HTML/PDF) | project-dependent |
 | `ide-setup` | `ide` | Configure editor for `.jenga` | `--editor (auto\|vscode\|lsp\|all) --force --info` |
 
 ```bash
-jenga gen --cmake --vs2022 --output generated
+jenga gen --cmake --vs --output generated
+jenga gen --compile-commands          # compile_commands.json for clangd / VS Code / CLion
 jenga ide-setup --editor vscode
 ```
+
+Since 2.8.4:
+- paths in generated files use `/` and are **relative** to the generated file:
+  the folder moves with its sources (a `CMakeLists.txt` produced on Windows
+  builds as-is on Linux);
+- `--vs` produces a solution that **any** Visual Studio version opens with its
+  own toolset (`$(DefaultPlatformToolset)`);
+- `--compile-commands` captures the **real** `jenga build` commands, without
+  compiling anything;
+- `--xcode` has not been exercised with `xcodebuild` (no Mac available).
 
 ### Packaging, deployment, signing
 

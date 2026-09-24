@@ -3,6 +3,53 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.4
+
+`jenga gen` n'avait pas été modifié depuis mai. Chaque format a été construit
+avec son outil réel (CMake 4.4 + Ninja, MSBuild de Visual Studio 2026,
+`make`, `ndk-build` r27, CMake 3.22 sous WSL2 Ubuntu) : quatre sur cinq ne
+construisaient plus.
+
+### Corrigé
+
+- **CMake : refusé dès la configuration sous Windows.** Les chemins étaient
+  écrits avec des `\`, que CMake lit comme des échappements
+  (`Invalid character escape '\U'`). Ils sont désormais en `/` et **relatifs**
+  à `${CMAKE_CURRENT_SOURCE_DIR}` : le dossier généré se déplace avec les
+  sources, et un `CMakeLists.txt` produit sous Windows se construit tel quel
+  sous Linux. `project()` ne demande plus que les langages qui ont des sources
+  (il exigeait un compilateur Objective-C pour un projet C++). Les
+  bibliothèques de `dependson()` sont liées comme le fait `jenga build`, et une
+  application fenêtrée est déclarée `WIN32`.
+- **Visual Studio : inconstructible sous VS 2026.** `PlatformToolset` était
+  figé à `v143` (VS 2022) : `MSB8020`. C'est désormais
+  `$(DefaultPlatformToolset)`, l'ensemble d'outils de la version qui ouvre le
+  projet. Le `.vcxproj` porte le **même GUID** que la solution (il en tirait un
+  second au hasard) et le bon `SubSystem` (Windows pour une application
+  fenêtrée). `--vs` est un alias de `--vs2022`.
+- **Makefile / `.mk` : chemin mangé par le shell.** Le `.jenga` était passé
+  sans guillemets et avec des `\` (`C:\Users` devenait `C:Users`).
+- **Android.mk : refusé au lien.** Il manquait `-llog`/`-landroid` et la colle
+  `android_native_app_glue` d'une NativeActivity (sans elle, une application
+  qui liait quand même mourait au lancement). `APP_PLATFORM` prenait le
+  **minimum** entre 21 et les `androidminsdk()` — tout minsdk supérieur était
+  ignoré ; c'est maintenant le plus élevé déclaré. `APP_STL` suit
+  `androidstl()`, et le standard C++ est posé par module d'après `cppdialect()`
+  au lieu d'un `-std=c++17` global.
+
+### Ajouté
+
+- **`jenga gen --compile-commands`** : `compile_commands.json` pour clangd,
+  VS Code, CLion. L'aide l'annonçait depuis longtemps, aucune commande ne
+  l'écrivait. Les commandes ne sont pas reconstruites : le vrai
+  `builder.Compile()` de la plateforme est appelé, et la commande qu'il
+  lancerait est **capturée** au lieu d'être exécutée. Vérifié : chaque commande
+  rejouée produit son fichier objet.
+
+### Non éprouvé
+
+- `--xcode` : aucun Mac disponible pour `xcodebuild`.
+
 ## v2.8.3
 
 ### Corrigé
