@@ -36,6 +36,23 @@ jenga clean --all
 jenga build --no-cache --no-daemon --verbose
 ```
 
+### `No suitable toolchain found for Windows x86_64`
+
+Jenga n'a trouvé aucun compilateur qui réponde. Depuis la **2.8.3**, le message
+liste chaque candidat cherché et pourquoi il a été écarté. Causes fréquentes :
+
+- le `PATH` pointe sur `C:\msys64\ucrt64\x86_64-w64-mingw32\bin` (outils
+  internes seulement) au lieu de **`C:\msys64\ucrt64\bin`** ;
+- le terminal ou VS Code a été ouvert **avant** la modification des variables
+  d'environnement : fermez-les tous et rouvrez-les ;
+- dans le terminal MSYS2 tout marche mais pas ailleurs : c'est MSYS2 qui ajoute
+  lui-même `ucrt64\bin` au `PATH`.
+
+Vérifiez dans PowerShell : `where.exe clang gcc` doit afficher
+`C:\msys64\ucrt64\bin\...`. Depuis la 2.8.3, Jenga fouille aussi
+`C:\msys64\{ucrt64,clang64,mingw64}\bin` quand le `PATH` ne donne rien (autre
+racine : variable `MSYS2_ROOT`).
+
 ### `ccache: unknown option -- g`
 
 Jenga active ccache (ou sccache) tout seul s'il est dans le `PATH`. Avant la
@@ -150,6 +167,22 @@ You call `usetoolchain("X")` without declaring it.
 jenga clean --all
 jenga build --no-cache --no-daemon --verbose
 ```
+
+### `No suitable toolchain found for Windows x86_64`
+
+Jenga found no compiler that answers. Since **2.8.3**, the message lists every
+candidate it looked for and why it was rejected. Common causes:
+
+- `PATH` points to `C:\msys64\ucrt64\x86_64-w64-mingw32\bin` (internal tools
+  only) instead of **`C:\msys64\ucrt64\bin`**;
+- the terminal or VS Code was opened **before** the environment variables were
+  changed: close them all and reopen;
+- everything works in the MSYS2 terminal but not elsewhere: MSYS2 adds
+  `ucrt64\bin` to `PATH` by itself.
+
+Check in PowerShell: `where.exe clang gcc` must print `C:\msys64\ucrt64\bin\...`.
+Since 2.8.3, Jenga also searches `C:\msys64\{ucrt64,clang64,mingw64}\bin` when
+`PATH` gives nothing (other root: `MSYS2_ROOT` variable).
 
 ### `ccache: unknown option -- g`
 

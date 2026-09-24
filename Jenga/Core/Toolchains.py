@@ -76,25 +76,112 @@ class ToolchainManager:
     _cacheRunnable: Dict[tuple, Optional[str]] = {}
     _cacheFamily: Dict[str, "CompilerFamily"] = {}
 
+    # ── Ce que la detection a essaye, candidat par candidat ─────────────────
+    # « No suitable toolchain found » ne disait ni ou Jenga avait cherche, ni
+    # pourquoi il avait rejete ce qu'il avait trouve. Cas reel (2.8.2) : un PATH
+    # pointant sur C:\msys64\ucrt64\x86_64-w64-mingw32\bin (binutils seuls) au
+    # lieu de C:\msys64\ucrt64\bin ; clang et g++ repondaient dans le terminal
+    # MSYS2, et rien ne permettait de comprendre pourquoi Jenga ne les voyait
+    # pas. Chaque sonde note ici son resultat ; DescribeDetection() le restitue.
+    _diagnostics: Dict[str, str] = {}
+
+    # Dossiers MSYS2 standards, fouilles APRES le PATH (Windows seulement).
+    # Meme ordre que RegisterJengaGlobalToolchains() : ucrt64 d'abord (le
+    # defaut recommande par MSYS2), puis clang64, puis mingw64.
+    # Point d'extension : une autre racine se donne par MSYS2_ROOT.
+    @staticmethod
+    def _WindowsFallbackDirs() -> List[Path]:
+        if sys.platform != "win32":
+            return []
+        racines = []
+        env_root = os.environ.get("MSYS2_ROOT", "").strip()
+        if env_root:
+            racines.append(Path(env_root))
+        racines.append(Path(r"C:\msys64"))
+        dossiers: List[Path] = []
+        for r in racines:
+            for sous in ("ucrt64", "clang64", "mingw64"):
+                d = r / sous / "bin"
+                if d.is_dir() and d not in dossiers:
+                    dossiers.append(d)
+        return dossiers
+
+    @staticmethod
+    def _FindExecutable(name: str) -> Optional[str]:
+        """PATH d'abord ; sinon, sous Windows, les dossiers MSYS2 standards."""
+        path = Process.Which(name)
+        if path:
+            return path
+        for d in ToolchainManager._WindowsFallbackDirs():
+            candidat = d / (name if name.lower().endswith(".exe") else name + ".exe")
+            if candidat.is_file():
+                return str(candidat)
+        return None
+
+    @staticmethod
+    def _ToolNextTo(compiler_path: Optional[str], names: List[str]) -> Optional[str]:
+        """Outil (ar, ld...) du MEME dossier que le compilateur retenu, sinon PATH/MSYS2.
+
+        Un clang de ucrt64 associe a l'ar d'une autre installation trouvee plus
+        haut dans le PATH produit des archives que son editeur de liens peut
+        refuser. On prend donc d'abord l'outil qui a ete livre avec lui.
+        """
+        if compiler_path:
+            dossier = Path(compiler_path).parent
+            for name in names:
+                for nom in (name, name + ".exe"):
+                    p = dossier / nom
+                    if p.is_file():
+                        return str(p)
+        for name in names:
+            p = ToolchainManager._FindExecutable(name)
+            if p:
+                return p
+        return None
+
     @staticmethod
     def _FirstRunnable(candidates: List[str], version_arg: str = "--version") -> Optional[str]:
         cle = (tuple(candidates), version_arg)
         if cle in ToolchainManager._cacheRunnable:
             return ToolchainManager._cacheRunnable[cle]
         resultat = None
+        diag = ToolchainManager._diagnostics
         for name in candidates:
-            path = Process.Which(name)
+            path = ToolchainManager._FindExecutable(name)
             if not path:
+                replis = ToolchainManager._WindowsFallbackDirs()
+                diag.setdefault(name, "not found in PATH"
+                                + (" nor in " + ", ".join(str(d) for d in replis) if replis else ""))
                 continue
+            origine = "" if Process.Which(name) else " (not in PATH, found in MSYS2 folder)"
             try:
                 probe = Process.ExecuteCommand([path, version_arg], captureOutput=True, silent=True)
                 if probe.returnCode == 0:
+                    diag[name] = f"OK: {path}{origine}"
                     resultat = path
                     break
-            except Exception:
+                rc = probe.returnCode
+                # 0xC0000135 : STATUS_DLL_NOT_FOUND, vu signe ou non signe.
+                dll = (" -- a DLL is missing (another compiler earlier in PATH?)"
+                       if rc in (3221225781, -1073741515) else "")
+                diag[name] = f"found {path}{origine}, but '{name} {version_arg}' failed (exit {rc}){dll}"
+            except Exception as exc:
+                diag[name] = f"found {path}{origine}, but could not run it: {exc}"
                 continue
         ToolchainManager._cacheRunnable[cle] = resultat
         return resultat
+
+    @staticmethod
+    def DescribeDetection() -> str:
+        """Ce que la detection a vu : a joindre a tout refus faute de toolchain."""
+        import platform as _pf
+        lignes = [f"  host: {_pf.system()} (Python {sys.executable}, sys.platform={sys.platform})"]
+        for name, etat in ToolchainManager._diagnostics.items():
+            lignes.append(f"  {name}: {etat}")
+        if sys.platform == "win32":
+            lignes.append("  -> Add the folder that CONTAINS your compiler to PATH (e.g. C:\\msys64\\ucrt64\\bin,"
+                          " not ...\\x86_64-w64-mingw32\\bin), then open a NEW terminal.")
+        return "\n".join(lignes)
 
     @staticmethod
     def _AddToolchainIfValid(toolchains: Dict[str, Toolchain], tc: Optional[Toolchain]) -> None:
@@ -299,7 +386,7 @@ class ToolchainManager:
                 compilerFamily=CompilerFamily.CLANG,
                 ccPath=clang_path,
                 cxxPath=clangpp_path,
-                arPath=Process.Which("llvm-ar") or Process.Which("ar"),
+                arPath=ToolchainManager._ToolNextTo(clang_path, ["llvm-ar", "ar"]),
                 ldPath=clangpp_path,
             )
             tc.targetOs = TargetOS.WINDOWS
@@ -334,14 +421,14 @@ class ToolchainManager:
         if ToolchainManager._DetectCompilerFamily(gcc_path) != CompilerFamily.GCC:
             return None
         gpp_path = ToolchainManager._FirstRunnable(["x86_64-w64-mingw32-g++", "g++"])
-        ar_path = Process.Which("x86_64-w64-mingw32-ar") or Process.Which("ar")
+        ar_path = ToolchainManager._ToolNextTo(gcc_path, ["x86_64-w64-mingw32-ar", "ar"])
         tc = Toolchain(
             name="mingw",
             compilerFamily=CompilerFamily.GCC,
             ccPath=gcc_path,
             cxxPath=gpp_path or gcc_path,
             arPath=ar_path,
-            ldPath=Process.Which("ld") or gcc_path,
+            ldPath=ToolchainManager._ToolNextTo(gcc_path, ["ld"]) or gcc_path,
         )
         tc.targetOs = TargetOS.WINDOWS
         tc.targetArch = Platform.GetHostArchitecture()

@@ -72,7 +72,11 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # telephone. EGL/GLESv2 ne sont plus lies d'office : seuls -llog et -landroid,
 # exiges par la colle NativeActivity. `jenga deploy` nomme la cause d'un echec
 # d'installation. Le code de retour de prebuild/postbuild arrete le projet.
-__version__ = "2.8.2"
+# 2.8.3 (2026-09-24) : Windows. La detection automatique fouille aussi
+# C:\msys64\{ucrt64,clang64,mingw64}\bin apres le PATH (MSYS2_ROOT pour une
+# autre racine), et ar/ld sont pris a cote du compilateur retenu. « No suitable
+# toolchain found » liste desormais chaque candidat et la raison de son rejet.
+__version__ = "2.8.3"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer
