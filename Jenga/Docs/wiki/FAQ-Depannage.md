@@ -47,6 +47,39 @@ cache :
 export JENGA_DISABLE_CCACHE=1      # PowerShell : $env:JENGA_DISABLE_CCACHE = "1"
 ```
 
+### Android : `dlopen failed: library "libc++_shared.so" not found`
+
+L'application s'installe, se lance et revient au bureau sans un mot. Avant la
+**2.8.2**, Jenga oubliait `libc++_shared.so` dans l'APK (toujours pour une seule
+ABI, et pour plusieurs sans `cppdialect()`). Mettez Jenga à jour ; ou, sur une
+version antérieure, liez la STL statiquement : `androidstl("c++_static")`.
+
+### Android : `undefined symbol: eglGetDisplay` après la mise à jour
+
+Depuis la **2.8.2**, Jenga ne lie plus EGL et GLES d'office : il ne garde que
+`-llog` et `-landroid`, dont a besoin la colle NativeActivity qu'il ajoute
+lui-même. Déclarez ce que votre code utilise :
+
+```python
+with filter("system:Android"):
+    links(["EGL", "GLESv3"])
+```
+
+### `jenga deploy` : « Deploy failed: device … is 'unauthorized' »
+
+Acceptez l'invite « Autoriser le débogage USB » sur le téléphone, puis relancez.
+Depuis la **2.8.2**, `jenga deploy` nomme la cause de chaque échec (appareil
+non autorisé ou hors ligne, signature incompatible, ABI absente, stockage
+plein…) au lieu de « adb install failed. ».
+
+### Une commande `prebuild` / `postbuild` échoue et arrête le build
+
+Depuis la **2.8.2**, leur code de retour compte : un `prebuild` en échec arrête
+le projet avant compilation, un `postbuild` en échec le marque en échec (et un
+`postbuild` ne s'exécute plus après une compilation ratée). Avant, l'échec était
+ignoré en silence. Si une commande peut échouer sans gravité, rendez-la
+tolérante vous-même (`cmd || exit 0`).
+
 ### Android SDK / NDK introuvable
 
 Vérifiez `ANDROID_SDK_ROOT` / `ANDROID_NDK_ROOT`, ou en DSL :
@@ -127,6 +160,39 @@ GCC/Clang compilation failed this way. Update Jenga, or disable the cache:
 ```bash
 export JENGA_DISABLE_CCACHE=1      # PowerShell: $env:JENGA_DISABLE_CCACHE = "1"
 ```
+
+### Android: `dlopen failed: library "libc++_shared.so" not found`
+
+The app installs, starts and drops back to the home screen without a word.
+Before **2.8.2**, Jenga left `libc++_shared.so` out of the APK (always for a
+single ABI, and for several without `cppdialect()`). Update Jenga; or, on an
+older version, link the STL statically: `androidstl("c++_static")`.
+
+### Android: `undefined symbol: eglGetDisplay` after updating
+
+Since **2.8.2**, Jenga no longer links EGL and GLES implicitly: only `-llog` and
+`-landroid` remain, which the NativeActivity glue Jenga adds itself requires.
+Declare what your code uses:
+
+```python
+with filter("system:Android"):
+    links(["EGL", "GLESv3"])
+```
+
+### `jenga deploy`: "Deploy failed: device … is 'unauthorized'"
+
+Accept the "Allow USB debugging" prompt on the phone, then retry. Since
+**2.8.2**, `jenga deploy` names the cause of every failure (unauthorized or
+offline device, incompatible signature, missing ABI, storage full…) instead of
+"adb install failed.".
+
+### A `prebuild` / `postbuild` command fails and stops the build
+
+Since **2.8.2**, their exit code counts: a failing `prebuild` stops the project
+before compiling, a failing `postbuild` marks it failed (and a `postbuild` no
+longer runs after a failed compilation). Before, the failure was silently
+ignored. If a command may fail harmlessly, make it tolerant yourself
+(`cmd || exit 0`).
 
 ### Android SDK / NDK not found
 
