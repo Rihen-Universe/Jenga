@@ -403,6 +403,98 @@ class Builder(abc.ABC):
         except Exception:
             return False
 
+    # Combien attendre un verrou, et a quel rythme.
+    #
+    # ⚠️ CE PLAFOND NE DEPEND PAS DE LA DUREE DU VERROU, MAIS DE QUI LE TIENT.
+    #    Premiere version : 12 s pour tout le monde. Mesure : un tenant de 26 s
+    #    faisait echouer la construction alors qu'il allait relacher, et un
+    #    tenant reel observe le 26/09 a tenu QUARANTE MINUTES -- aucun plafond
+    #    ne sert les deux cas. La difference utile est ailleurs :
+    #
+    #      - si le tenant est une EXECUTION DE LA CIBLE, attendre est inutile :
+    #        elle ne se fermera pas toute seule. On echoue TOUT DE SUITE en
+    #        disant de la fermer.
+    #      - si le tenant est un TIERS (antivirus, indexeur, assistant d'IDE),
+    #        il relache generalement seul. On attend, en le NOMMANT pour que
+    #        l'attente soit comprehensible.
+    _ATTENTE_VERROU_S = 90.0
+    _PAS_ATTENTE_VERROU_S = 0.75
+
+    @classmethod
+    def _PlafondAttenteVerrou(cls) -> float:
+        """Le plafond, surchargeable par `JENGA_ATTENTE_VERROU` (en secondes).
+
+        Une integration continue veut echouer vite (`0`) ; un poste de travail
+        veut attendre. Le nombre est donc VISIBLE et reglable, pas enfoui.
+        """
+        v = os.environ.get("JENGA_ATTENTE_VERROU")
+        if v is None or v.strip() == "":
+            return cls._ATTENTE_VERROU_S
+        try:
+            n = float(v)
+            return n if n >= 0.0 else cls._ATTENTE_VERROU_S
+        except ValueError:
+            return cls._ATTENTE_VERROU_S
+
+    @staticmethod
+    def _TenantsDuFichier(chemin) -> list:
+        """Qui tient ce fichier ? Le Restart Manager de Windows repond.
+
+        Rend une liste de chaines « PID nom », ou [] si on ne sait pas. Ne leve
+        jamais : un diagnostic qui plante vaut moins qu'un diagnostic absent.
+        """
+        if os.name != 'nt':
+            return []
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class FILETIME(ctypes.Structure):
+                _fields_ = [("dwLowDateTime", wintypes.DWORD),
+                            ("dwHighDateTime", wintypes.DWORD)]
+
+            class RM_UNIQUE_PROCESS(ctypes.Structure):
+                _fields_ = [("dwProcessId", wintypes.DWORD),
+                            ("ProcessStartTime", FILETIME)]
+
+            class RM_PROCESS_INFO(ctypes.Structure):
+                _fields_ = [("Process", RM_UNIQUE_PROCESS),
+                            ("strAppName", wintypes.WCHAR * 256),
+                            ("strServiceShortName", wintypes.WCHAR * 64),
+                            ("ApplicationType", ctypes.c_int),
+                            ("AppStatus", wintypes.DWORD),
+                            ("TSSessionId", wintypes.DWORD),
+                            ("bRestartable", wintypes.BOOL)]
+
+            rm = ctypes.WinDLL("rstrtmgr.dll")
+            session = wintypes.DWORD()
+            cle = ctypes.create_unicode_buffer(256)
+            if rm.RmStartSession(ctypes.byref(session), 0, cle) != 0:
+                return []
+            try:
+                fichiers = (ctypes.c_wchar_p * 1)(str(chemin))
+                if rm.RmRegisterResources(session, 1, fichiers, 0, None, 0, None) != 0:
+                    return []
+                besoin = wintypes.UINT(0)
+                nb = wintypes.UINT(0)
+                raison = wintypes.DWORD(0)
+                r = rm.RmGetList(session, ctypes.byref(besoin), ctypes.byref(nb),
+                                 None, ctypes.byref(raison))
+                # 234 = ERROR_MORE_DATA : `besoin` porte le compte reel.
+                if r != 234 or besoin.value == 0:
+                    return []
+                infos = (RM_PROCESS_INFO * besoin.value)()
+                nb = wintypes.UINT(besoin.value)
+                if rm.RmGetList(session, ctypes.byref(besoin), ctypes.byref(nb),
+                                infos, ctypes.byref(raison)) != 0:
+                    return []
+                return [f"{infos[i].Process.dwProcessId} {infos[i].strAppName}"
+                        for i in range(nb.value)]
+            finally:
+                rm.RmEndSession(session)
+        except Exception:
+            return []
+
     def _VerifierCibleEcrivable(self, target_path) -> bool:
         """Le binaire de sortie peut-il etre remplace ? Sinon, dire POURQUOI.
 
@@ -410,32 +502,116 @@ class Builder(abc.ABC):
         liens avec un message qui ne mentionne ni la cause ni le remede. On
         renvoie False APRES avoir explique, plutot que de laisser l'utilisateur
         face a « cannot open output file ».
+
+        🔴 CE QUE CETTE FONCTION AFFIRMAIT SANS L'AVOIR MESURE (corrige le
+           27/09/2026). Elle ecrivait « une execution precedente tourne encore »
+           et conseillait `taskkill /IM <cible>` — sur un verrou qui ne venait
+           PAS de la cible. Cas reel : aucun processus du binaire n'existait, le
+           tenant etait un assistant d'IDE, et le message a envoye chercher
+           pendant quarante minutes un processus qui n'a jamais existe.
+
+           *Un diagnostic qui NOMME une cause qu'il n'a pas mesuree coute plus
+           cher qu'un diagnostic muet* : on lui fait confiance.
+
+           Deux changements, donc :
+             1. ON ATTEND. Un verrou de scanner (antivirus, indexeur, assistant)
+                dure quelques secondes. Echouer a la premiere tentative
+                transformait un passage en panne.
+             2. ON NOMME. Le Restart Manager de Windows dit QUI tient le
+                fichier. Quand il repond, on affiche le PID et le nom ; quand il
+                ne repond pas, on dit qu'on ne sait pas — jamais une hypothese
+                deguisee en fait.
         """
-        try:
-            from pathlib import Path as _P
-            p = _P(str(target_path))
-            if not p.exists():
-                return True  # rien a remplacer
-            # Ouvrir en ajout demande le meme droit d'ecriture exclusif que
-            # l'editeur de liens, sans modifier le contenu.
-            with open(p, "ab"):
-                pass
+        from pathlib import Path as _P
+        p = _P(str(target_path))
+
+        def _libre() -> Optional[bool]:
+            """Vrai = remplacable, Faux = verrouille, None = autre souci."""
+            try:
+                if not p.exists():
+                    return True  # rien a remplacer
+                # Ouvrir en ajout demande le meme droit d'ecriture exclusif que
+                # l'editeur de liens, sans modifier le contenu.
+                with open(p, "ab"):
+                    pass
+                return True
+            except PermissionError:
+                return False
+            except Exception:
+                # Tout autre souci (chemin exotique, systeme de fichiers) ne doit
+                # PAS empecher de tenter l'edition de liens.
+                return None
+
+        etat = _libre()
+        if etat is not False:
             return True
-        except PermissionError:
-            nom = getattr(target_path, 'name', str(target_path))
+
+        # ── VERROUILLE. La premiere question n'est pas « combien de temps » ──
+        #    mais « QUI ». La reponse decide s'il faut attendre.
+        nom = p.name
+        tenants = self._TenantsDuFichier(p)
+        soi_meme = [t for t in tenants if nom.lower() in t.lower()]
+        plafond = self._PlafondAttenteVerrou()
+
+        if soi_meme:
+            # Une execution de la cible ne se fermera pas toute seule : attendre
+            # ne ferait que retarder le meme echec.
             Reporter.Error(
-                f"'{nom}' est VERROUILLE : une execution precedente tourne encore.\n"
-                f"  Fichier : {target_path}\n"
-                f"  Fermer la fenetre ne suffit pas toujours — le processus peut survivre.\n"
-                f"  Windows : taskkill /IM {nom} /F     (ou via le Gestionnaire des taches)\n"
-                f"  Linux/macOS : pkill -f {nom}\n"
-                f"  Puis relancer la construction."
+                f"'{nom}' est VERROUILLE par sa propre execution :\n"
+                + "".join(f"    - {t}\n" for t in soi_meme)
+                + "  Fichier : "
+                + f"{target_path}\n"
+                + "  Fermer la fenetre ne suffit pas toujours — le processus peut survivre.\n"
+                + f"  Windows : taskkill /IM {nom} /F     (ou via le Gestionnaire des taches)\n"
+                + f"  Linux/macOS : pkill -f {nom}"
             )
             return False
-        except Exception:
-            # Tout autre souci (chemin exotique, systeme de fichiers) ne doit
-            # PAS empecher de tenter l'edition de liens.
-            return True
+
+        if plafond > 0.0:
+            if tenants:
+                Reporter.Warning(
+                    f"'{nom}' est verrouille par un tiers ; j'attends jusqu'a "
+                    f"{plafond:.0f}s :\n" + "".join(f"    - {t}\n" for t in tenants).rstrip()
+                )
+            else:
+                Reporter.Warning(
+                    f"'{nom}' est verrouille (tenant non nomme) ; j'attends jusqu'a "
+                    f"{plafond:.0f}s."
+                )
+            debut = time.time()
+            while time.time() - debut < plafond:
+                time.sleep(self._PAS_ATTENTE_VERROU_S)
+                etat = _libre()
+                if etat is not False:
+                    Reporter.Info(
+                        f"'{nom}' libere apres {time.time() - debut:.1f}s : je continue."
+                    )
+                    return True
+            # Le tenant a pu changer pendant l'attente : on redemande.
+            tenants = self._TenantsDuFichier(p) or tenants
+
+        lignes = [
+            f"'{nom}' est VERROUILLE : impossible de le remplacer.",
+            f"  Fichier : {target_path}",
+        ]
+        if plafond > 0.0:
+            lignes.append(f"  Attendu {plafond:.0f}s sans qu'il se libere.")
+        if tenants:
+            lignes.append("  Tenu par :")
+            lignes.extend(f"    - {t}" for t in tenants)
+            lignes.append("  ⚠️ N'arretez un processus qui n'est pas le votre qu'en connaissance")
+            lignes.append("     de cause : un antivirus, un indexeur ou un assistant d'editeur")
+            lignes.append("     relache seul, parfois apres de longues minutes.")
+        else:
+            # ⚠️ NE PAS DEVINER. C'est precisement ce que l'ancien message
+            #    faisait, et il se trompait.
+            lignes.append("  Tenant : inconnu (le Restart Manager n'a nomme personne).")
+            lignes.append("  Cherchez un scanner (antivirus, indexeur, extension d'editeur).")
+        lignes.append("  Contournement immediat : l'autre configuration")
+        lignes.append("  (--config Debug / Release) ecrit dans un AUTRE fichier.")
+        lignes.append("  Reglage : JENGA_ATTENTE_VERROU=<secondes> (0 = echouer tout de suite).")
+        Reporter.Error("\n".join(lignes))
+        return False
 
     @abc.abstractmethod
     def GetOutputExtension(self, project: Project) -> str:

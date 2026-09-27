@@ -3,6 +3,41 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.5
+
+### Le binaire VERROUILLÉ : Jenga nomme le tenant au lieu de le deviner
+
+Quand la sortie ne peut pas être remplacée, le message disait **« une exécution
+précédente tourne encore »** et conseillait `taskkill /IM <cible>`. Cas réel du
+26/09/2026 : **aucun processus de ce binaire n'existait**. Le tenant était
+l'assistant Python d'un éditeur, et le message a envoyé chercher pendant
+**quarante minutes** un coupable qui n'existait pas.
+
+> Un diagnostic qui **nomme** une cause qu'il n'a pas mesurée coûte plus cher
+> qu'un diagnostic muet : on lui fait confiance.
+
+Trois changements :
+
+- **Il nomme.** Le Restart Manager de Windows (`rstrtmgr.dll`, via `ctypes`) dit
+  quels processus tiennent le fichier — PID **et** nom. Quand il ne nomme
+  personne, le message le **dit**, au lieu de formuler une hypothèse.
+- **Il attend, quand c'est un tiers.** Un antivirus, un indexeur ou un assistant
+  d'éditeur relâche seul. Échouer à la première tentative transformait un
+  passage en panne. Plafond : `JENGA_ATTENTE_VERROU` secondes (défaut 90 ;
+  `0` = échouer tout de suite, ce que veut une intégration continue).
+- **Il n'attend pas quand c'est la cible.** Une exécution du binaire ne se
+  fermera pas d'elle-même : l'attente ne retarderait que le même échec. Ce
+  cas-là échoue immédiatement, avec la commande pour la fermer.
+
+Le message propose aussi le contournement immédiat : **l'autre configuration**
+(`--config Debug` / `Release`) écrit dans un autre fichier.
+
+Bancs : `tests/test_verrou_cible.py` (8 cas). L'un d'eux tient un fichier en
+exclusif depuis le processus de test et exige que le Restart Manager **nomme ce
+PID-là** — sans lui, les autres ne prouveraient que la mise en forme du message.
+Deux mutations vérifiées : retirer la voie rapide « la cible se tient elle-même »
+et retirer l'attente font chacune rougir un cas.
+
 ## v2.8.4
 
 `jenga gen` n'avait pas été modifié depuis mai. Chaque format a été construit

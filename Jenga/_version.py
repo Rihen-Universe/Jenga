@@ -82,7 +82,16 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # Android.mk (ni -llog ni colle NativeActivity ; minsdk ignore) ne
 # construisaient plus. Nouveau : --compile-commands, capture des commandes
 # reelles du build.
-__version__ = "2.8.4"
+# 2.8.5 (2026-09-27) : le diagnostic de binaire VERROUILLE ne devine plus. Il
+# NOMME le tenant (Restart Manager), ATTEND quand c'est un tiers -- antivirus,
+# indexeur, assistant d'editeur relachent seuls -- et echoue tout de suite quand
+# c'est une execution de la cible, qui ne se fermera pas d'elle-meme. L'ancien
+# message affirmait « une execution precedente tourne encore » et conseillait
+# `taskkill` sur un binaire dont aucun processus n'existait : quarante minutes
+# passees a chercher un coupable qui n'existait pas. Plafond d'attente reglable
+# par JENGA_ATTENTE_VERROU (0 = echouer tout de suite, pour l'integration
+# continue).
+__version__ = "2.8.5"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer
