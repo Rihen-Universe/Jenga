@@ -1337,6 +1337,96 @@ class TestIDEEditorDetection:
             "le repli « on assume VSCode » est revenu dans DetectEditors")
 
 
+class TestIDEJsonc:
+    """
+    Le strip des commentaires JSONC prenait `/*` et `*/` DANS les chaines :
+    `"**/*.jenga", "**/*.py"` devenait `"***.py"`, et chaque build en
+    rajoutait un dans settings.json (150 dans Nkentseu, 2026-09-29).
+    """
+
+    def test_motifs_glob_intacts(self):
+        from Jenga.Core.IDEConfigurator import _ParseJsonc
+        d = _ParseJsonc('{"python.analysis.include": ["**/*.jenga", "**/*.py"]}')
+        assert d["python.analysis.include"] == ["**/*.jenga", "**/*.py"]
+
+    def test_url_intacte(self):
+        from Jenga.Core.IDEConfigurator import _ParseJsonc
+        assert _ParseJsonc('{"u": "https://x.y/z"}')["u"] == "https://x.y/z"
+
+    def test_vrais_commentaires_retires(self):
+        """ANTI-REGRESSION : le strip retire toujours les commentaires."""
+        from Jenga.Core.IDEConfigurator import _ParseJsonc
+        d = _ParseJsonc('{\n // ligne\n "a": 1, /* bloc\n */ "b": "q\\"/*",\n}')
+        assert d == {"a": 1, "b": 'q"/*'}
+
+    def test_settings_repare_et_stable(self):
+        """Un settings.json deja abime est purge, puis ne bouge plus."""
+        from Jenga.Core.IDEConfigurator import ConfigureVSCode
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / ".vscode" / "settings.json"
+            p.parent.mkdir()
+            p.write_text('{"python.analysis.include": ["***.py", "***.py", "**/*.jenga", "**/*.py"]}',
+                         encoding="utf-8")
+            assert ConfigureVSCode(Path(d))
+            data = json.loads(p.read_text(encoding="utf-8"))
+            assert data["python.analysis.include"] == ["**/*.jenga", "**/*.py"]
+            assert data["C_Cpp.default.compileCommands"].endswith("Build/compile_commands.json")
+            avant = p.read_text(encoding="utf-8")
+            assert not ConfigureVSCode(Path(d)), "second passage : rien a ecrire"
+            assert p.read_text(encoding="utf-8") == avant
+
+
+class TestIDECpp:
+    """
+    Le Ctrl+clic sur un #include n'existe que si l'extension C/C++ resout le
+    chemin. La base se regenere quand la LISTE des sources change -- pas
+    seulement quand un .jenga change -- et c_cpp_properties.json donne un
+    repli aux fichiers crees depuis le dernier build.
+    """
+
+    def test_source_ajoutee_change_l_empreinte(self):
+        from Jenga.Core.IDEConfigurator import _ScanWorkspace
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "a.cpp").write_text("", encoding="utf-8")
+            (Path(d) / "w.jenga").write_text("", encoding="utf-8")
+            _, avant = _ScanWorkspace(Path(d))
+            (Path(d) / "sous").mkdir()
+            (Path(d) / "sous" / "b.cpp").write_text("", encoding="utf-8")
+            _, apres = _ScanWorkspace(Path(d))
+            (Path(d) / "sous" / "notes.txt").write_text("", encoding="utf-8")
+            _, sans_source = _ScanWorkspace(Path(d))
+        assert avant != apres, "une source ajoutee doit changer l'empreinte"
+        assert apres == sans_source, "un fichier qui n'est pas une source ne compte pas"
+
+    def test_repli_includes_relatifs(self):
+        from Jenga.Core.IDEConfigurator import _CppPropertiesFromDb
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            db = [{"arguments": ["C:/x/clang.exe", "-I" + str(root / "Mod" / "src"),
+                                 "-isystem", str(root / "Ext"), "-std=gnu++20", "-c", "a.cpp"]}]
+            cfg = _CppPropertiesFromDb(root, db)
+        assert cfg["includePath"] == ["${workspaceFolder}/Mod/src", "${workspaceFolder}/Ext"]
+        assert cfg["compileCommands"].endswith("Build/compile_commands.json")
+        assert cfg["cppStandard"] == "c++20"
+        assert cfg["compilerPath"] == "C:/x/clang.exe"
+
+    def test_c_cpp_properties_utilisateur_intouche(self):
+        """ANTI-REGRESSION : une configuration de l'utilisateur n'est jamais reecrite."""
+        from Jenga.Core.IDEConfigurator import _WriteCppProperties
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / ".vscode").mkdir()
+            db = root / "cc.json"
+            db.write_text('[{"arguments": ["clang", "-Isrc", "a.cpp"]}]', encoding="utf-8")
+            p = root / ".vscode" / "c_cpp_properties.json"
+            assert _WriteCppProperties(root, db), "absent : Jenga l'ecrit"
+            assert not _WriteCppProperties(root, db), "inchange : rien a ecrire"
+            user = '{"configurations": [{"name": "Moi"}], "version": 4}'
+            p.write_text(user, encoding="utf-8")
+            assert not _WriteCppProperties(root, db)
+            assert p.read_text(encoding="utf-8") == user
+
+
 # ===========================================================================
 # Main entry point (for running without pytest)
 # ===========================================================================

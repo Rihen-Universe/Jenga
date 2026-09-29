@@ -91,7 +91,14 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # passees a chercher un coupable qui n'existait pas. Plafond d'attente reglable
 # par JENGA_ATTENTE_VERROU (0 = echouer tout de suite, pour l'integration
 # continue).
-__version__ = "2.8.5"
+# 2.8.6 (2026-09-29) : VS Code et le C++. `jenga build` tient a jour
+# Build/compile_commands.json et .vscode/c_cpp_properties.json -- regeneres
+# quand un .jenga change OU quand la liste des sources change -- sans quoi
+# l'extension C/C++ ne resolvait aucun #include (ni Ctrl+clic, ni definition).
+# Corrige le strip JSONC, qui prenait `/*` DANS les chaines pour un
+# commentaire : `"**/*.jenga", "**/*.py"` devenait `"***.py"`, et chaque build
+# en ajoutait un dans settings.json (150 dans Nkentseu). Les restes sont purges.
+__version__ = "2.8.6"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

@@ -611,10 +611,15 @@ class BuildCommand:
         # Configure VSCode/Cursor/Windsurf + pyrightconfig.json pour que les
         # fichiers *.jenga aient coloration syntaxique Python + autocomplete.
         # No-op si la config est deja a jour (verif par marker).
+        # Puis Build/compile_commands.json et .vscode/c_cpp_properties.json
+        # pour l'extension C/C++ (Ctrl+clic sur un #include) : regeneres
+        # seulement s'ils manquent, si un .jenga a change ou si la liste des
+        # sources a change.
         # Desactiver via JENGA_NO_IDE_CONFIG=1.
         try:
-            from ..Core.IDEConfigurator import AutoConfigure
+            from ..Core.IDEConfigurator import AutoConfigure, RefreshCompileCommands
             AutoConfigure(workspace_root, force=False, verbose=False)
+            RefreshCompileCommands(workspace_root, entry_file, verbose=False)
         except Exception:
             # On ne fait JAMAIS echouer le build pour une erreur IDE setup.
             pass

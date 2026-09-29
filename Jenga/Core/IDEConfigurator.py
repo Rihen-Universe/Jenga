@@ -43,12 +43,18 @@ from typing import Optional, Dict, Any, List, Tuple
 import json
 import os
 import re
+import subprocess
+import sys
 import hashlib
 
 
 # Version du schema de config jenga IDE. Bumper si on change les cles ecrites
 # (force une regeneration au prochain build).
 _CONFIG_SCHEMA_VERSION = "1.0"
+
+# Base de compilation lue par l'extension C/C++ (et clangd), rangee sous Build/
+# comme le reste des sorties : jamais suivie par git.
+COMPILE_COMMANDS_NAME = "compile_commands.json"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,18 +81,68 @@ def GetJengaHome() -> Optional[str]:
 # settings.json. On strip les commentaires avant `json.loads` pour eviter
 # le crash sur configs existantes. ATTENTION : ce strip simple ne preserve
 # pas les commentaires en re-ecriture (on accepte ce trade-off).
+#
+# Le strip LIT LES CHAINES. L'ancien strip par regex prenait `/*` et `*/`
+# a l'interieur des chaines pour un commentaire : dans
+# `"**/*.jenga", "**/*.py"` il retirait `/*.jenga", "**/` et laissait
+# `"***.py"`. L'union des listes rajoutait alors les bonnes valeurs a chaque
+# ecriture : settings.json gagnait une entree `"***.py"` par machine et par
+# build (150 dans Nkentseu le 2026-09-29). Meme sort pour `"https://..."`,
+# coupe par `//`.
 # ─────────────────────────────────────────────────────────────────────────────
-_JSONC_LINE_COMMENT = re.compile(r"//.*?$",       re.MULTILINE)
-_JSONC_BLOCK_COMMENT = re.compile(r"/\*.*?\*/",   re.DOTALL)
 _JSONC_TRAILING_COMMA = re.compile(r",(\s*[}\]])")
+
+# Ce que l'ancien strip fabriquait a partir de nos propres motifs. On les
+# retire des listes a la lecture : ce ne sont pas des choix de l'utilisateur.
+_JSONC_BUG_ARTIFACTS = {"***.py", "***.jenga"}
+
+
+def _StripJsoncComments(text: str) -> str:
+    """Retire les commentaires // et /* */ HORS des chaines JSON."""
+    out: List[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            # Chaine : recopiee telle quelle, echappements compris.
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
 
 
 def _ParseJsonc(text: str) -> Any:
     """Parse JSON avec support des commentaires // et /* */ + trailing commas."""
-    cleaned = _JSONC_LINE_COMMENT.sub("", text)
-    cleaned = _JSONC_BLOCK_COMMENT.sub("", cleaned)
+    cleaned = _StripJsoncComments(text)
     cleaned = _JSONC_TRAILING_COMMA.sub(r"\1", cleaned)
     return json.loads(cleaned)
+
+
+def _PurgeBugArtifacts(data: Any) -> bool:
+    """Retire recursivement les `"***.py"` laisses par l'ancien strip ; True si retire."""
+    changed = False
+    if isinstance(data, dict):
+        for v in data.values():
+            changed = _PurgeBugArtifacts(v) or changed
+    elif isinstance(data, list):
+        garde = [x for x in data if not (isinstance(x, str) and x in _JSONC_BUG_ARTIFACTS)]
+        if len(garde) != len(data):
+            data[:] = garde
+            changed = True
+        for v in data:
+            changed = _PurgeBugArtifacts(v) or changed
+    return changed
 
 
 def _LoadJsonFile(path: Path) -> Optional[Dict[str, Any]]:
@@ -332,6 +388,11 @@ def _GetVSCodeJengaConfig(jenga_home: Optional[str]) -> Dict[str, Any]:
             "reportMissingImports": "warning",
             "reportUndefinedVariable": "warning",
         },
+        # 5. C/C++ (ms-vscode.cpptools) : les VRAIES commandes du build, tenues
+        #    a jour par RefreshCompileCommands au debut de `jenga build`. Sans
+        #    elles l'extension ne resout aucun `#include "NKCore/..."` : ni
+        #    Ctrl+clic sur le chemin, ni aller a la definition.
+        "C_Cpp.default.compileCommands": "${workspaceFolder}/Build/" + COMPILE_COMMANDS_NAME,
     }
     # 4. extraPaths : Jenga (resolution de l'API) + dossier de stubs des symboles
     #    charges via useconfig() (.jenga-typings).
@@ -409,14 +470,18 @@ def ConfigureVSCode(workspace_root: Path, force: bool = False,
             print(f"[ide-setup] {settings_path} invalide, skip.")
         return False
 
+    # Les `"***.py"` de l'ancien strip passent AVANT le marker : un fichier a
+    # jour selon le marker peut encore en contenir.
+    purged = _PurgeBugArtifacts(existing)
+
     # Marker check : si deja a jour, skip.
     marker_key = "_jengaIdeConfigVersion"
-    if not force and existing.get(marker_key) == fp_target:
+    if not force and not purged and existing.get(marker_key) == fp_target:
         return False
 
     # Merge non-destructif des cles jenga.
     merged, changed = _MergeVSCodeSettings(existing, jenga_cfg)
-    if not changed and existing.get(marker_key) == fp_target:
+    if not changed and not purged and existing.get(marker_key) == fp_target:
         return False
 
     merged[marker_key] = fp_target
@@ -558,6 +623,180 @@ def DetectEditors(workspace_root: Path) -> List[str]:
         found.append("lsp-generic")
 
     return found
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# C/C++ : compile_commands.json et c_cpp_properties.json tenus a jour
+# ─────────────────────────────────────────────────────────────────────────────
+# Dossiers qui ne contiennent ni .jenga ni source du workspace (ou trop gros
+# pour etre parcourus a chaque build).
+_SCAN_PRUNE = {".git", "Build", "build", "node_modules", "__pycache__", ".jenga",
+               ".nkcode", ".vscode", "dist", "cache"}
+_SOURCE_EXTS = (".c", ".cc", ".cpp", ".cxx", ".c++", ".m", ".mm")
+
+# Empreinte de la derniere generation, a cote de la base.
+_COMPILE_STAMP_NAME = "compile_commands.stamp"
+
+# Nom de la configuration que Jenga possede dans c_cpp_properties.json. Un
+# fichier qui en contient une AUTRE appartient a l'utilisateur : on n'y touche pas.
+CPP_PROPERTIES_CONFIG = "Jenga"
+
+
+def _ScanWorkspace(workspace_root: Path) -> Tuple[float, str]:
+    """
+    Un seul parcours : (mtime du .jenga le plus recent, empreinte de la LISTE
+    des sources). Une source ajoutee, supprimee ou renommee change l'empreinte
+    sans toucher a aucun .jenga -- c'est ce que la date seule ne voyait pas.
+    """
+    newest = 0.0
+    sources: List[str] = []
+    for dirpath, dirnames, filenames in os.walk(workspace_root):
+        dirnames[:] = [d for d in dirnames if d not in _SCAN_PRUNE]
+        for f in filenames:
+            if f.endswith(".jenga"):
+                try:
+                    newest = max(newest, os.path.getmtime(os.path.join(dirpath, f)))
+                except OSError:
+                    pass
+            elif f.lower().endswith(_SOURCE_EXTS):
+                sources.append(os.path.relpath(os.path.join(dirpath, f), workspace_root)
+                               .replace("\\", "/"))
+    sources.sort()
+    return newest, hashlib.sha1("\n".join(sources).encode("utf-8")).hexdigest()[:16]
+
+
+def _ReadStamp(path: Path) -> str:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("sources", "")
+    except Exception:
+        return ""
+
+
+def _CppPropertiesFromDb(workspace_root: Path, db: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    La configuration « Jenga » de c_cpp_properties.json, tiree de la base.
+
+    compileCommands sert chaque fichier QUI Y EST avec ses vrais drapeaux.
+    includePath est le REPLI pour un fichier qui n'y est pas encore (cree
+    depuis le dernier build) : l'union des -I du workspace, pour que ses
+    #include soient deja resolus -- Ctrl+clic compris -- sans attendre.
+    """
+    root = str(Path(workspace_root).resolve())
+    incs: Dict[str, None] = {}
+    compilers: Dict[str, int] = {}
+    stds: Dict[str, int] = {}
+    for e in db:
+        args = e.get("arguments") or []
+        if args:
+            compilers[args[0]] = compilers.get(args[0], 0) + 1
+        it = iter(args[1:])
+        for a in it:
+            d = None
+            if a.startswith("-I") or a.startswith("/I"):
+                d = a[2:] or next(it, "")
+            elif a == "-isystem":
+                d = next(it, "")
+            elif a.startswith("-std=") and "++" in a:
+                stds[a[5:]] = stds.get(a[5:], 0) + 1
+            if not d:
+                continue
+            d = os.path.normpath(d)
+            try:
+                rel = os.path.relpath(d, root)
+            except ValueError:  # autre lecteur sous Windows
+                rel = ".."
+            if not rel.startswith(".."):
+                d = "${workspaceFolder}/" + rel
+            incs[d.replace("\\", "/")] = None
+    cfg: Dict[str, Any] = {
+        "name": CPP_PROPERTIES_CONFIG,
+        "compileCommands": "${workspaceFolder}/Build/" + COMPILE_COMMANDS_NAME,
+        "includePath": list(incs),
+    }
+    if compilers:
+        cfg["compilerPath"] = max(compilers, key=compilers.get).replace("\\", "/")
+    if stds:
+        # cpptools ne connait que les noms « c++NN ».
+        cfg["cppStandard"] = max(stds, key=stds.get).replace("gnu++", "c++")
+    return cfg
+
+
+def _WriteCppProperties(workspace_root: Path, db_path: Path, verbose: bool = False) -> bool:
+    """Ecrit .vscode/c_cpp_properties.json s'il est a Jenga (ou absent) ; True si ecrit."""
+    path = Path(workspace_root) / ".vscode" / "c_cpp_properties.json"
+    if not path.parent.is_dir():
+        return False
+    existing = _LoadJsonFile(path)
+    if existing is None:
+        return False  # present mais illisible : a l'utilisateur
+    configs = existing.get("configurations") or []
+    if any(not isinstance(c, dict) or c.get("name") != CPP_PROPERTIES_CONFIG for c in configs):
+        return False  # une configuration de l'utilisateur : on n'y touche pas
+    try:
+        db = json.loads(Path(db_path).read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    data = {"configurations": [_CppPropertiesFromDb(workspace_root, db)], "version": 4}
+    if existing == data:
+        return False
+    if _WriteJsonFile(path, data):
+        if verbose:
+            print(f"[ide-setup] c_cpp_properties.json mis a jour : {path}")
+        return True
+    return False
+
+
+def RefreshCompileCommands(workspace_root: Path, entry_file: Path,
+                           verbose: bool = False) -> bool:
+    """
+    Regenere Build/compile_commands.json s'il manque, si un .jenga est plus
+    recent, ou si la LISTE des sources a change (ajout, suppression,
+    renommage). Puis tient .vscode/c_cpp_properties.json a jour. Appele au
+    debut de `jenga build`, apres AutoConfigure.
+
+    Les commandes sont celles de `jenga gen --compile-commands` (le vrai
+    builder, capture). Un sous-processus plutot qu'un appel direct : `gen`
+    recharge le workspace et remplace Process.ExecuteCommand le temps de la
+    capture, ce qui ne doit pas deborder sur le build qui suit.
+
+    Retourne True si la base a ete (re)ecrite.
+    """
+    workspace_root = Path(workspace_root)
+    if os.environ.get("JENGA_NO_IDE_CONFIG", "").lower() in ("1", "true", "yes"):
+        return False
+    dest = workspace_root / "Build" / COMPILE_COMMANDS_NAME
+    stamp = dest.with_name(_COMPILE_STAMP_NAME)
+    # Seulement pour qui s'en sert : VSCode detecte, ou une base deja la
+    # (clangd, CLion...). Un espace vierge ne paie pas la generation.
+    if not dest.exists() and "vscode" not in DetectEditors(workspace_root):
+        return False
+    newest_jenga, sources_fp = _ScanWorkspace(workspace_root)
+    if (dest.exists() and os.path.getmtime(dest) >= newest_jenga
+            and _ReadStamp(stamp) == sources_fp):
+        _WriteCppProperties(workspace_root, dest, verbose)  # s'il manque encore
+        return False
+
+    print(f"[ide-setup] {COMPILE_COMMANDS_NAME} : regeneration (Build/)...", flush=True)
+    cmd = [sys.executable, "-m", "Jenga", "gen", "--compile-commands",
+           "-o", str(dest.parent), "--jenga-file", str(entry_file)]
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run(cmd, cwd=str(workspace_root), capture_output=True,
+                           text=True, errors="replace", timeout=600)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ide-setup] {COMPILE_COMMANDS_NAME} non regenere : {e}", flush=True)
+        return False
+    if r.returncode != 0 or not dest.exists():
+        # Dit une fois, sans faire echouer le build ; la sortie de `gen` dit pourquoi.
+        detail = (r.stderr or r.stdout).strip().splitlines()[-1:] or ["(aucune sortie)"]
+        print(f"[ide-setup] {COMPILE_COMMANDS_NAME} non regenere (code {r.returncode}) : "
+              f"{detail[0]}", flush=True)
+        return False
+    _WriteJsonFile(stamp, {"sources": sources_fp})
+    _WriteCppProperties(workspace_root, dest, verbose)
+    if verbose:
+        print(r.stdout.strip())
+    return True
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -169,6 +169,17 @@ Depuis la 2.8.4 :
   rien compiler ;
 - `--xcode` n'a pas été éprouvé par `xcodebuild` (aucun Mac disponible).
 
+Depuis la 2.8.6, **VS Code n'a plus besoin de la commande** : `jenga build`
+tient à jour `Build/compile_commands.json` et `.vscode/c_cpp_properties.json`
+(configuration « Jenga »). Ils sont régénérés quand ils manquent, quand un
+`.jenga` change **ou quand la liste des sources change** (ajout, suppression,
+renommage) ; sinon le contrôle coûte une fraction de seconde. Le second fichier
+donne aussi aux sources créées depuis le dernier build l'union des chemins
+d'inclusion du workspace : leurs `#include` se résolvent — Ctrl+clic compris —
+sans attendre. Un `c_cpp_properties.json` qui contient une autre configuration
+appartient à l'utilisateur et n'est jamais réécrit. `JENGA_NO_IDE_CONFIG=1`
+désactive le tout.
+
 ### Packaging, déploiement, signature
 
 | Commande | Rôle | Options clés |
@@ -378,6 +389,16 @@ Since 2.8.4:
 - `--compile-commands` captures the **real** `jenga build` commands, without
   compiling anything;
 - `--xcode` has not been exercised with `xcodebuild` (no Mac available).
+
+Since 2.8.6, **VS Code no longer needs the command**: `jenga build` keeps
+`Build/compile_commands.json` and `.vscode/c_cpp_properties.json` (a "Jenga"
+configuration) up to date. They are regenerated when missing, when a `.jenga`
+changes **or when the list of sources changes** (added, removed, renamed);
+otherwise the check costs a fraction of a second. The second file also gives
+sources created since the last build the union of the workspace's include
+paths: their `#include`s resolve — Ctrl+click included — right away. A
+`c_cpp_properties.json` holding any other configuration belongs to the user and
+is never rewritten. `JENGA_NO_IDE_CONFIG=1` turns it all off.
 
 ### Packaging, deployment, signing
 

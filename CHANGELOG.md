@@ -3,6 +3,48 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.6
+
+### VS Code : le Ctrl+clic sur un `#include` marche sans rien lancer
+
+Sous VS Code, l'extension C/C++ ne résolvait **aucun** `#include "NKCore/..."`
+d'un workspace Jenga : ni Ctrl+clic sur le chemin, ni « aller à la définition ».
+L'auto-configuration lancée par `jenga build` ne s'occupait que du Python des
+`.jenga` ; la base `compile_commands.json` n'existait que si l'on pensait à
+`jenga gen --compile-commands`.
+
+- **`jenga build` tient la base à jour.** `Build/compile_commands.json` est
+  régénéré quand il manque, quand un `.jenga` change, **et quand la liste des
+  sources change** (ajout, suppression, renommage) : la date des `.jenga` seule
+  ne voit pas un fichier créé à côté d'un motif `src/**.cpp`. Une empreinte de
+  la liste est rangée dans `Build/compile_commands.stamp`. À jour, le contrôle
+  coûte une fraction de seconde (0,2 à 0,6 s sur Nkentseu, 9 000 fichiers) ;
+  une régénération, 5 à 11 s.
+- **`.vscode/c_cpp_properties.json`, configuration « Jenga ».** Elle pointe la
+  base, et donne en repli l'union des chemins d'inclusion du workspace : une
+  source créée depuis le dernier build — ou qu'aucun projet ne compile encore —
+  a déjà ses `#include` résolus. Un fichier qui contient **une autre**
+  configuration appartient à l'utilisateur : Jenga n'y touche pas.
+- **`settings.json` reçoit `C_Cpp.default.compileCommands`**, pour qui garde sa
+  propre configuration C/C++.
+
+### Corrigé : `settings.json` grossissait d'une ligne à chaque build
+
+Le retrait des commentaires JSONC se faisait par expression régulière, sans
+lire les chaînes : dans `"**/*.jenga", "**/*.py"`, il prenait `/*.jenga", "**/`
+pour un commentaire et laissait `"***.py"`. L'union des listes rajoutait alors
+les bonnes valeurs, que la lecture suivante abîmait à nouveau : **150**
+entrées `"***.py"` dans le `settings.json` de Nkentseu, et un fichier suivi par
+git modifié à chaque build. Une URL (`"https://..."`) était coupée de la même
+façon par `//`. Le retrait lit désormais les chaînes, et les `"***.py"` /
+`"***.jenga"` déjà écrits sont purgés à la lecture.
+
+Bancs : `tests/test_jenga_complete.py`, `TestIDEJsonc` (4 cas) et `TestIDECpp`
+(3 cas). Mutation vérifiée : ne plus compter les sources dans l'empreinte fait
+rougir `test_source_ajoutee_change_l_empreinte`. Vérifié de bout en bout sur
+Nkentseu : une source ajoutée sous `NKCore/src` entre dans la base au build
+suivant sans qu'aucun `.jenga` ne change, et en sort quand on la retire.
+
 ## v2.8.5
 
 ### Le binaire VERROUILLÉ : Jenga nomme le tenant au lieu de le deviner
