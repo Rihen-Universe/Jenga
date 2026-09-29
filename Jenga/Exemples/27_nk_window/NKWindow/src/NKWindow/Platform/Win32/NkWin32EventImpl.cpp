@@ -90,13 +90,14 @@ void           NkWin32EventImpl::PollEvents()
     }
 }
 
-const NkEvent& NkWin32EventImpl::Front()    const
-{ return mQueue.empty() ? mDummyEvent : mQueue.front(); }
+NkEvent*    NkWin32EventImpl::Front()   const
+{ return mQueue.empty() ? nullptr : mQueue.front().get(); }
 
 void        NkWin32EventImpl::Pop()           { if (!mQueue.empty()) mQueue.pop(); }
 bool        NkWin32EventImpl::IsEmpty() const { return mQueue.empty(); }
 std::size_t NkWin32EventImpl::Size()    const { return mQueue.size();  }
-void        NkWin32EventImpl::PushEvent(const NkEvent& e) { mQueue.push(e); }
+void        NkWin32EventImpl::PushEvent(std::unique_ptr<NkEvent> e)
+{ if (e) mQueue.push(std::move(e)); }
 
 // ---------------------------------------------------------------------------
 // Callbacks
@@ -115,7 +116,7 @@ void NkWin32EventImpl::SetWindowCallback(void* nativeHandle, NkEventCallback cb)
         it->second.callback = std::move(cb);
 }
 
-void NkWin32EventImpl::DispatchEvent(NkEvent& event, void* nativeHandle)
+void NkWin32EventImpl::DispatchEvent(NkEvent* event, void* nativeHandle)
 {
     HWND hwnd = static_cast<HWND>(nativeHandle);
 
@@ -564,11 +565,12 @@ LRESULT NkWin32EventImpl::ProcessWin32Message(
     default: break;
     }
 
-    // Dispatch
+    // Dispatch : une copie part dans la file (lue par EventSystem),
+    // l'original sert aux callbacks immédiats.
     if (nkEvent.IsValid())
     {
-        mQueue.push(nkEvent);
-        DispatchEvent(nkEvent, hwnd);
+        mQueue.push(std::make_unique<NkEvent>(nkEvent));
+        DispatchEvent(&nkEvent, hwnd);
     }
 
     if (suppressDefaultProc)

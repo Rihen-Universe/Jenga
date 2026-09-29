@@ -37,12 +37,13 @@ void NkXLibEventImpl::Shutdown(void* nativeHandle)
 // Queue
 // ---------------------------------------------------------------------------
 
-const NkEvent& NkXLibEventImpl::Front() const
-{ return mQueue.empty() ? mDummyEvent : mQueue.front(); }
+NkEvent* NkXLibEventImpl::Front() const
+{ return mQueue.empty() ? nullptr : mQueue.front().get(); }
 void NkXLibEventImpl::Pop()           { if (!mQueue.empty()) mQueue.pop(); }
 bool NkXLibEventImpl::IsEmpty() const { return mQueue.empty(); }
 std::size_t NkXLibEventImpl::Size() const { return mQueue.size(); }
-void NkXLibEventImpl::PushEvent(const NkEvent& e) { mQueue.push(e); }
+void NkXLibEventImpl::PushEvent(std::unique_ptr<NkEvent> e)
+{ if (e) mQueue.push(std::move(e)); }
 
 // ---------------------------------------------------------------------------
 // Callbacks
@@ -59,7 +60,7 @@ void NkXLibEventImpl::SetWindowCallback(void* nativeHandle, NkEventCallback cb)
         it->second.callback = std::move(cb);
 }
 
-void NkXLibEventImpl::DispatchEvent(NkEvent& ev, void* nativeHandle)
+void NkXLibEventImpl::DispatchEvent(NkEvent* ev, void* nativeHandle)
 {
     if (nativeHandle)
     {
@@ -225,12 +226,12 @@ void NkXLibEventImpl::PollEvents()
 
         if (nkEv.IsValid())
         {
-            mQueue.push(nkEv);
+            mQueue.push(std::make_unique<NkEvent>(nkEv));
             auto it = mWindowMap.find(srcWindow);
             if (it != mWindowMap.end() && it->second.callback)
-                it->second.callback(nkEv);
+                it->second.callback(&nkEv);
             if (mGlobalCallback)
-                mGlobalCallback(nkEv);
+                mGlobalCallback(&nkEv);
         }
     }
 }

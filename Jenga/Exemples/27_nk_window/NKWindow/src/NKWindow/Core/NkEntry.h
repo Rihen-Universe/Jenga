@@ -7,7 +7,7 @@
 // et détruite après le retour de nkmain().
 // =============================================================================
 
-#include "NKPatform/NkPlatformDetect.h"
+#include "NkPlatformDetect.h"
 #include <string>
 #include <vector>
 

@@ -56,7 +56,16 @@ void EventSystem::PumpEventsOnce(bool queueEvents)
     {
         while (!impl->IsEmpty())
         {
-            NkEvent ev = impl->Front();
+            NkEvent* front = impl->Front();
+            if (!front)
+            {
+                impl->Pop();
+                continue;
+            }
+
+            // L'événement quitte la file de l'impl : on le déplace dans le
+            // buffer de lecture (EventSystem stocke des NkEvent par valeur).
+            NkEvent ev = std::move(*front);
             impl->Pop();
 
             // Callbacks immédiat

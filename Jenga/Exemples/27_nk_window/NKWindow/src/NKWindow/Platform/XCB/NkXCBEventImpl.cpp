@@ -51,12 +51,13 @@ void NkXCBEventImpl::Shutdown(void* nativeHandle)
 // Queue
 // ---------------------------------------------------------------------------
 
-const NkEvent& NkXCBEventImpl::Front() const
-{ return mQueue.empty() ? mDummyEvent : mQueue.front(); }
+NkEvent*    NkXCBEventImpl::Front()   const
+{ return mQueue.empty() ? nullptr : mQueue.front().get(); }
 void        NkXCBEventImpl::Pop()           { if (!mQueue.empty()) mQueue.pop(); }
 bool        NkXCBEventImpl::IsEmpty() const { return mQueue.empty(); }
 std::size_t NkXCBEventImpl::Size()    const { return mQueue.size(); }
-void        NkXCBEventImpl::PushEvent(const NkEvent& e) { mQueue.push(e); }
+void        NkXCBEventImpl::PushEvent(std::unique_ptr<NkEvent> e)
+{ if (e) mQueue.push(std::move(e)); }
 
 // ---------------------------------------------------------------------------
 // Callbacks
@@ -72,7 +73,7 @@ void NkXCBEventImpl::SetWindowCallback(void* nativeHandle, NkEventCallback cb)
     if (it != mWindowMap.end()) it->second.callback = std::move(cb);
 }
 
-void NkXCBEventImpl::DispatchEvent(NkEvent& ev, void* nativeHandle)
+void NkXCBEventImpl::DispatchEvent(NkEvent* ev, void* nativeHandle)
 {
     if (nativeHandle)
     {
@@ -165,7 +166,7 @@ void NkXCBEventImpl::PollEvents()
             srcWindow = ce->event;
             NkWindowResizeData rd;
             rd.width=ce->width; rd.height=ce->height;
-            nkEv = NkEvent(NkEventType::NK_WINDOW_RESIZE, rd);
+            nkEv = NkEvent(rd, NkEventType::NK_WINDOW_RESIZE);
             break;
         }
         case XCB_FOCUS_IN:
@@ -202,13 +203,13 @@ void NkXCBEventImpl::PollEvents()
 
         if (nkEv.IsValid())
         {
-            mQueue.push(nkEv);
+            mQueue.push(std::make_unique<NkEvent>(nkEv));
             auto it = mWindowMap.find(srcWindow);
             if (it != mWindowMap.end())
             {
-                if (it->second.callback) it->second.callback(nkEv);
+                if (it->second.callback) it->second.callback(&nkEv);
             }
-            if (mGlobalCallback) mGlobalCallback(nkEv);
+            if (mGlobalCallback) mGlobalCallback(&nkEv);
         }
 
         free(xev);
