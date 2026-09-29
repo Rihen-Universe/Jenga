@@ -183,12 +183,19 @@ void NkWin32EventImpl::BlitToHwnd(
 LRESULT CALLBACK NkWin32EventImpl::WindowProcStatic(
     HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    // EventImpl active du thread (une seule instance par thread dans ce
+    // design). Elle est retenue pendant le bootstrap, AVANT la remise à zéro
+    // de sPendingEventImpl : la retenir après (comme avant) la laissait
+    // toujours nulle, et plus aucun message n'atteignait ProcessWin32Message.
+    static thread_local NkWin32EventImpl* sCurrentImpl = nullptr;
+
     // Phase bootstrap : WM_CREATE arrive avant que la map soit remplie
     if (msg == WM_NCCREATE || msg == WM_CREATE)
     {
         if (sPendingOwner && sPendingEventImpl)
         {
             sWindowMap[hwnd] = { sPendingOwner, {} };
+            sCurrentImpl      = sPendingEventImpl;
             sPendingOwner     = nullptr;
             sPendingEventImpl = nullptr;
         }
@@ -197,24 +204,6 @@ LRESULT CALLBACK NkWin32EventImpl::WindowProcStatic(
     auto it = sWindowMap.find(hwnd);
     if (it == sWindowMap.end())
         return DefWindowProc(hwnd, msg, wp, lp);
-
-    NkWin32EventImpl* self  = nullptr;
-    // Retrouver l'EventImpl depuis le premier sWindowMap — on cherche
-    // l'instance qui contient cette HWND. Comme elle est thread_local,
-    // on utilise la variable statique courante.
-    // (Une seule instance d'EventImpl par thread dans ce design.)
-    // Le pattern est : WindowProcStatic → ProcessWin32Message via sPendingEventImpl.
-    // Mais après bootstrap, on doit localiser l'instance.
-    // Solution : stocker un backpointer dans WindowEntry.
-    // → On va l'ajouter dans la struct (voir ProcessWin32Message).
-
-    // Pour l'instant, on passe par le global sPendingEventImpl
-    // ou par un singleton de thread. On utilise une variable statique
-    // thread_local supplémentaire qui pointe vers l'EventImpl active.
-    static thread_local NkWin32EventImpl* sCurrentImpl = nullptr;
-
-    // Au RegisterPending on sauvegarde aussi sCurrentImpl
-    if (sPendingEventImpl) sCurrentImpl = sPendingEventImpl;
 
     if (!sCurrentImpl)
         return DefWindowProc(hwnd, msg, wp, lp);
