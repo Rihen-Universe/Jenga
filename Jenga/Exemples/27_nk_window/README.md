@@ -333,6 +333,58 @@ export ANDROID_NDK_ROOT=/path/to/android/ndk
 ### HarmonyOS
 - HarmonyOS SDK + DevEco Studio
 
+## Si NKWindow ne compile pas
+
+**Symptôme** — `jenga build` échoue dès la bibliothèque NKWindow, sur **toutes**
+les plateformes (Windows, macOS, Linux…), avec des erreurs comme :
+
+```
+NkWin32EventImpl.h: error: virtual function 'Front' has a different return type
+    ('const NkEvent &') than the function it overrides (which has return type 'NkEvent *')
+error: non-virtual member function marked 'override' hides virtual member function
+NkSystem.cpp: error: allocating an object of abstract class type 'NkWin32EventImpl'
+NkCocoaWindowImpl.mm:44:  error: no viable conversion from 'NkEvent' to 'std::unique_ptr<NkEvent>'   (macOS)
+NkCocoaWindowImpl.mm:171: error: no viable conversion from 'NkEvent' to 'NkEvent *'                  (macOS)
+```
+
+puis, une fois la bibliothèque passée, dans Sandbox :
+`NkEntry.h: fatal error: 'NKPatform/NkPlatformDetect.h' file not found`.
+
+**Cause** — la file d'événements interne (`Core/IEventImpl.h`) avait été passée
+aux pointeurs, comme l'API publique (`EventSystem::PollEvent()` rend un
+`NkEvent*`) : `NkEvent* Front()`, `PushEvent(std::unique_ptr<NkEvent>)`,
+`DispatchEvent(NkEvent*, …)`. Les neuf backends (`Platform/Win32`, `Cocoa`,
+`XLib`, `XCB`, `Android`, `WASM`, `UIKit`, `UWP`, `Noop`) étaient restés à
+l'ancienne API par valeur. S'y ajoutait un `#include` hérité du moteur
+(`NKPatform/…`) dans `Core/NkEntry.h`. Et sous Windows, une fois compilé, aucun
+événement n'arrivait à l'application (clavier, souris, demande de fermeture) :
+`WindowProcStatic` ne retenait jamais l'`EventImpl` active.
+
+**Version corrigée** — branche `fix/exemple27-evenements-pointeurs` du dépôt
+Jenga ; toute version de Jenga **postérieure à 2.8.6** qui l'intègre contient la
+correction (2.8.6 et avant : non corrigées). Votre copie est corrigée si
+`NKWindow/src/NKWindow/Platform/Cocoa/NkCocoaEventImpl.h` déclare
+`NkEvent* Front() const` (et non plus `const NkEvent& Front() const`).
+
+La correction ne touche que le dossier `NKWindow/` : votre propre code
+(`Sandbox/`) ne change pas. Il s'écrit avec l'API à pointeurs, comme
+`Sandbox/src/main.cpp` :
+
+```cpp
+while (NkEvent* event = es.PollEvent())
+{
+    if (auto* e = event->As<NkWindowCloseEvent>()) { window.Close(); running = false; }
+}
+```
+
+Pour mettre une copie à jour sans perdre son travail : remplacer uniquement
+son dossier `NKWindow/` par celui de la version corrigée, puis relancer
+`jenga build`.
+
+À savoir sur macOS : le rendu logiciel n'a pas encore de chemin Cocoa
+(`NkSoftwareRendererImpl::BlitOS` ne traite que Win32, XLib, XCB, Android et
+Web) : même compilé, ce que dessine `Renderer` n'apparaît pas dans la fenêtre.
+
 ## Dépannage
 
 **Erreur "Platform not detected"** :
