@@ -3,6 +3,32 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.7
+
+### Corrigé : les options de compilation d'un projet sont ignorées sur macOS, Linux et Web
+
+Un `cxxflags([...])` ou un `cflags([...])` posé dans un **projet** n'atteignait le
+compilateur que sous Windows : `Macos.py`, `Linux.py` et `Emscripten.py` ne
+passaient que les options du **toolchain**, sans rien dire. Trouvé par Nkentseu :
+son `-ffp-contract=off` n'arrivait pas au Mac, et la physique n'y calculait pas
+comme sous Windows. Les trois builders suivent désormais Windows : les options du
+toolchain d'abord, celles du projet ensuite.
+
+Test : `TestFlagsDeProjetPosix` (trois builders, C et C++, sans compilateur) ;
+contre-épreuve à l'écriture : sans le correctif, les six cas disent « absent ».
+
+### Corrigé : l'exemple 27 (NKWindow) ne compilait sur aucune plateforme
+
+Mac compris, où des étudiants l'utilisaient. `IEventImpl` était passé à une API à
+pointeurs, mais ses neuf backends (Win32, Cocoa, XLib, XCB, Android, WASM, UIKit,
+UWP, Noop) étaient restés à l'ancienne : ils la suivent maintenant. Sous Win32,
+les événements n'arrivaient pas à l'application (croix, clavier, souris) : c'est
+réparé. Un include mort (`NKPatform/NkPlatformDetect.h`) est retiré. Le README de
+l'exemple dit quoi faire si NKWindow ne compile pas, et un workflow construit
+l'exemple sur un vrai Mac (vert).
+
+pytest : 203 verts, 2 sautés.
+
 ## v2.8.6
 
 ### VS Code : le Ctrl+clic sur un `#include` marche sans rien lancer

@@ -98,7 +98,11 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # Corrige le strip JSONC, qui prenait `/*` DANS les chaines pour un
 # commentaire : `"**/*.jenga", "**/*.py"` devenait `"***.py"`, et chaque build
 # en ajoutait un dans settings.json (150 dans Nkentseu). Les restes sont purges.
-__version__ = "2.8.6"
+# 2.8.7 (2026-09-30) : macOS, Linux et Web passent enfin les cxxflags()/cflags()
+# d'un PROJET au compilateur (seul Windows le faisait) ; l'exemple 27 (NKWindow)
+# recompile sur toutes les plateformes -- ses neuf backends suivent l'API a
+# pointeurs, et Win32 livre ses evenements -- verifie sur un vrai Mac par la CI.
+__version__ = "2.8.7"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer
