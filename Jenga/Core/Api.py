@@ -555,6 +555,7 @@ class Project:
     _filteredSymbols: Dict[str, bool] = field(default_factory=dict)
     _filteredWarnings: Dict[str, WarningLevel] = field(default_factory=dict)
     _filteredRuntime: Dict[str, str] = field(default_factory=dict)
+    _filteredObjcArc: Dict[str, bool] = field(default_factory=dict)
 
     # Inclusion metadata
     _external: bool = False
@@ -1973,6 +1974,12 @@ def postlink(cmds: List[str]) -> None:
             _currentProject.postLinkCommands.extend(cmds)
 
 # --- Toolchain selection ---
+# (2.8.8) Noms qui designent un toolchain de l'HOTE sans en etre le nom
+# d'enregistrement (« clang-native » : host-apple-clang sur macOS, host-clang
+# sur Linux...). Resolus au build par Builder._TrouverToolchain ; acceptes ici
+# sans etre declares.
+TOOLCHAIN_ALIAS_HOTE = ("clang-native",)
+
 def usetoolchain(name: str) -> None:
     global _currentProject, _currentWorkspace, _currentFilter
     if _currentProject:
@@ -1980,7 +1987,8 @@ def usetoolchain(name: str) -> None:
             # Deferred validation: toolchain will be checked at build time
             _currentProject._filteredToolchain[_currentFilter] = name
         else:
-            if _currentWorkspace and name not in _currentWorkspace.toolchains:
+            if (_currentWorkspace and name not in _currentWorkspace.toolchains
+                    and str(name).strip().lower() not in TOOLCHAIN_ALIAS_HOTE):
                 raise ValueError(f"Toolchain '{name}' not defined")
             _currentProject.toolchain = name
             _currentProject._explicitToolchain = True
@@ -3425,7 +3433,11 @@ def objcarc(active: bool = True) -> None:
     """
     if _currentProject is None:
         raise RuntimeError("objcarc() must be inside a project")
-    _currentProject.objcArc = bool(active)
+    if _currentFilter:
+        # Sous filter("system:macOS") : materialise au build, comme frameworks().
+        _currentProject._filteredObjcArc[_currentFilter] = bool(active)
+    else:
+        _currentProject.objcArc = bool(active)
 
 def frameworkpath(path: str) -> None:
     if _currentToolchain:

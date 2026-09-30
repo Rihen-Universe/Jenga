@@ -160,6 +160,10 @@ class Builder(abc.ABC):
 
         self._ValidateHostTarget()
         self._ResolveToolchain()
+        # (2.8.8) Le toolchain PAR DEFAUT de ce build, garde a part : un projet
+        # dont usetoolchain(nom) ne se resout pas y revient, au lieu d'heriter
+        # du toolchain qu'a laisse le projet precedent.
+        self._defaultToolchain = self.toolchain
 
     # Les builders qui cross-compilent depuis un hote non-natif (ex.
     # MacosZigBuilder : macOS depuis Windows/Linux via Zig) mettent cet attribut
@@ -1474,6 +1478,7 @@ class Builder(abc.ABC):
                 "optimize": project.optimize,
                 "symbols": project.symbols,
                 "warnings": project.warnings,
+                "objcArc": getattr(project, "objcArc", False),
             }
             project._jenga_filter_base_state = base
 
@@ -1503,6 +1508,7 @@ class Builder(abc.ABC):
         project.optimize = base["optimize"]
         project.symbols = base["symbols"]
         project.warnings = base["warnings"]
+        project.objcArc = base.get("objcArc", False)
 
         # 1) system links collected via links() inside filter("system:...")
         active_system = self._NormalizeSystemName(self.targetOs.value)
@@ -1608,6 +1614,11 @@ class Builder(abc.ABC):
         for filter_name, warn in project._filteredWarnings.items():
             if self._FilterMatches(filter_name, project):
                 project.warnings = warn
+
+        # (2.8.8) objcarc() pose sous un filtre (« system:macOS »)
+        for filter_name, arc in getattr(project, "_filteredObjcArc", {}).items():
+            if self._FilterMatches(filter_name, project):
+                project.objcArc = arc
 
         # 3) explicit remove* directives (Premake-compatible behavior)
         for filter_name, dirs in getattr(project, "_filteredRemoveIncludeDirs", {}).items():
@@ -2341,11 +2352,14 @@ class Builder(abc.ABC):
         # Apply filter(system/config) materialization before any build decision.
         self._ApplyProjectFilters(project)
 
+        # Le toolchain par defaut, capture avant que le premier projet ne le
+        # change (un builder construit sans __init__ n'a pas _defaultToolchain).
+        if getattr(self, "_defaultToolchain", None) is None:
+            self._defaultToolchain = self.toolchain
+
         # Re-resolve toolchain if filter changed project.toolchain
         if project._explicitToolchain and project.toolchain:
-            tc = self.workspace.toolchains.get(project.toolchain)
-            if not tc:
-                tc = self.toolchainManager.GetToolchain(project.toolchain)
+            tc = self._TrouverToolchain(project.toolchain)
             if tc:
                 self.toolchain = tc
                 # Re-run platform-specific toolchain preparation if available
@@ -2353,9 +2367,15 @@ class Builder(abc.ABC):
                     self._PrepareNDKToolchain()
             else:
                 # (2.8.8) Avant : silence total, et le projet heritait du
-                # toolchain courant (usetoolchain("clang-native") sur macOS,
-                # ou l'hote s'appelle host-apple-clang). On ne change pas
-                # encore ce comportement, mais on le dit, une fois par nom.
+                # toolchain qu'avait laisse le PROJET PRECEDENT -- son
+                # compilateur dependait donc de l'ordre de construction. Il
+                # revient maintenant au toolchain par defaut du build, et on
+                # le dit, une fois par projet et par nom.
+                defaut = self._defaultToolchain
+                if defaut is not None and defaut is not self.toolchain:
+                    self.toolchain = defaut
+                    if hasattr(self, '_PrepareNDKToolchain'):
+                        self._PrepareNDKToolchain()
                 deja = getattr(self, "_toolchainsIntrouvables", None)
                 if deja is None:
                     deja = self._toolchainsIntrouvables = set()
@@ -2366,8 +2386,54 @@ class Builder(abc.ABC):
                     connus = sorted(self.workspace.toolchains.keys()) if self.workspace.toolchains else []
                     Reporter.Warning(
                         f"[{project.name}] usetoolchain(\"{project.toolchain}\") : toolchain inconnu, "
-                        f"le projet garde \"{courant}\". Toolchains declares : "
+                        f"le projet prend le toolchain par defaut \"{courant}\". Toolchains declares : "
                         f"{', '.join(connus) if connus else '(aucun)'}")
+
+    # (2.8.8) Alias de toolchain : un NOM qui designe « le clang de cet hote »,
+    # quel que soit le nom sous lequel Jenga l'a enregistre. Nkentseu ecrit
+    # usetoolchain("clang-native") sous ses filtres macOS/Linux ; aucun
+    # toolchain ne s'appelle ainsi, et le projet heritait en silence de celui
+    # du projet precedent. Un toolchain DECLARE sous ce nom l'emporte toujours
+    # sur l'alias. Candidats dans l'ordre, par OS HOTE ; un candidat qui ne
+    # vise pas l'OS cible du build est ecarte (build croise : « clang-native »
+    # sous un filtre Linux, construit depuis Windows, ne doit pas donner le
+    # clang Windows).
+    _ALIAS_TOOLCHAIN_HOTE = {
+        "clang-native": {
+            TargetOS.MACOS: ("host-apple-clang", "host-clang"),
+            TargetOS.LINUX: ("host-clang",),
+            TargetOS.WINDOWS: ("host-clang", "clang-mingw", "clang-cl"),
+        },
+    }
+
+    def _ChercherToolchainParNom(self, nom: str) -> Optional[Toolchain]:
+        """Toolchain declare dans le workspace, sinon detecte ; None sinon."""
+        tc = (self.workspace.toolchains or {}).get(nom) if self.workspace else None
+        if tc:
+            return tc
+        manager = getattr(self, "toolchainManager", None)
+        return manager.GetToolchain(nom) if manager is not None else None
+
+    def _TrouverToolchain(self, nom: str) -> Optional[Toolchain]:
+        """Le toolchain que designe `nom` : son nom exact d'abord, puis l'alias
+        d'hote (_ALIAS_TOOLCHAIN_HOTE). None s'il ne designe rien ici."""
+        if not nom:
+            return None
+        tc = self._ChercherToolchainParNom(nom)
+        if tc:
+            return tc
+        alias = self._ALIAS_TOOLCHAIN_HOTE.get(str(nom).strip().lower())
+        if not alias:
+            return None
+        for candidat in alias.get(Platform.GetHostOS(), ()):
+            tc = self._ChercherToolchainParNom(candidat)
+            if tc is None:
+                continue
+            cible = getattr(tc, "targetOs", None)
+            if cible is not None and cible != self.targetOs:
+                continue
+            return tc
+        return None
 
     def BuildProject(self, project: Project) -> bool:
         # Check if project is already compiled for this platform/arch context

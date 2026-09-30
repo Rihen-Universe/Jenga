@@ -383,6 +383,8 @@ class BuildCommand:
                 if any(str(o).lower().startswith("toolchain:") for o in builder.options) \
                    and hasattr(builder, "_ResolveToolchain"):
                     builder._ResolveToolchain()
+                    # (2.8.8) le repli des toolchains introuvables suit le --toolchain
+                    builder._defaultToolchain = builder.toolchain
             except Exception:
                 pass
             return builder

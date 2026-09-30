@@ -1585,13 +1585,170 @@ class TestMacosFrameworksArcToolchain:
         msgs = []
         monkeypatch.setattr(Reporter, "Warning", classmethod(lambda cls, m, critical=False: msgs.append(m)))
         p = self._proj(wks, "Ani1071Log", ProjectKind.CONSOLE_APP)
-        p.toolchain, p._explicitToolchain = "clang-native", True
+        p.toolchain, p._explicitToolchain = "clang-introuvable", True
         avant = b.toolchain
         b.PrepareProjectForCompile(p)
         b.PrepareProjectForCompile(p)
-        assert b.toolchain is avant  # comportement inchange (pour l'instant)
+        assert b.toolchain is avant  # le defaut du build, ici celui du depart
         assert len(msgs) == 1, msgs
-        assert "clang-native" in msgs[0] and "host-apple-clang" in msgs[0]
+        assert "clang-introuvable" in msgs[0] and "host-apple-clang" in msgs[0]
+
+
+class TestToolchainClangNatifEtRepli:
+    """
+    (2.8.8) usetoolchain("clang-native") -- ecrit par Nkentseu sous ses filtres
+    macOS/Linux (NKRHI, NKCanvas, Ani1071Log, ConquerorLab...) -- ne designait
+    AUCUN toolchain : Jenga enregistre le clang de l'hote sous host-apple-clang
+    (macOS) ou host-clang. Le projet heritait alors EN SILENCE du toolchain du
+    projet construit juste avant lui.
+      1. « clang-native » est un alias : le clang de l'hote, par OS hote ;
+      2. un nom qui ne se resout vraiment pas ramene le projet au toolchain PAR
+         DEFAUT du build (plus l'avertissement), jamais a celui du voisin.
+    L'OS hote est simule (Platform.GetHostOS) : ces tests passent partout.
+    """
+
+    @staticmethod
+    def _tc(nom, tos, fam=CompilerFamily.CLANG):
+        return Toolchain(name=nom, compilerFamily=fam, ccPath="cc", cxxPath="c++", arPath="ar",
+                         targetOs=tos, targetArch=TargetArch.X86_64)
+
+    def _builder(self, monkeypatch, hote, cible, toolchains, defaut=None):
+        from Jenga.Core.Builders.Linux import LinuxBuilder
+        monkeypatch.setattr(Platform, "GetHostOS", classmethod(lambda cls: hote))
+        _reset()
+        wks = Workspace(name="W", location=tempfile.mkdtemp())
+        for tc in toolchains:
+            wks.toolchains[tc.name] = tc
+        b = LinuxBuilder.__new__(LinuxBuilder)
+        b.workspace, b.config, b.platform = wks, "Debug", f"{cible.value}-x86_64"
+        b.targetOs, b.targetArch, b.targetEnv = cible, TargetArch.X86_64, None
+        b.verbose, b.action, b.options = False, "build", []
+        b.toolchainManager = type("TM", (), {"GetToolchain": lambda self, n: None})()
+        b.toolchain = defaut or (toolchains[0] if toolchains else None)
+        b._defaultToolchain = b.toolchain
+        return b
+
+    def test_macos_clang_native_donne_host_apple_clang(self, monkeypatch):
+        apple = self._tc("host-apple-clang", TargetOS.MACOS, CompilerFamily.APPLE_CLANG)
+        brew = self._tc("host-clang", TargetOS.MACOS)
+        b = self._builder(monkeypatch, TargetOS.MACOS, TargetOS.MACOS, [brew, apple])
+        assert b._TrouverToolchain("clang-native") is apple
+        # sans Apple clang (llvm de Homebrew seul) : host-clang
+        b = self._builder(monkeypatch, TargetOS.MACOS, TargetOS.MACOS, [brew])
+        assert b._TrouverToolchain("clang-native") is brew
+
+    def test_linux_clang_native_donne_host_clang(self, monkeypatch):
+        clang = self._tc("host-clang", TargetOS.LINUX)
+        gcc = self._tc("host-gcc", TargetOS.LINUX, CompilerFamily.GCC)
+        b = self._builder(monkeypatch, TargetOS.LINUX, TargetOS.LINUX, [gcc, clang])
+        assert b._TrouverToolchain("clang-native") is clang
+        assert b._TrouverToolchain("CLANG-NATIVE") is clang
+
+    def test_windows_clang_native_donne_le_clang_detecte(self, monkeypatch):
+        mingw = self._tc("clang-mingw", TargetOS.WINDOWS)
+        hote = self._tc("host-clang", TargetOS.WINDOWS)
+        b = self._builder(monkeypatch, TargetOS.WINDOWS, TargetOS.WINDOWS, [mingw, hote])
+        assert b._TrouverToolchain("clang-native") is hote
+        b = self._builder(monkeypatch, TargetOS.WINDOWS, TargetOS.WINDOWS, [mingw])
+        assert b._TrouverToolchain("clang-native") is mingw
+
+    def test_un_toolchain_declare_clang_native_l_emporte(self, monkeypatch):
+        propre = self._tc("clang-native", TargetOS.LINUX)
+        clang = self._tc("host-clang", TargetOS.LINUX)
+        b = self._builder(monkeypatch, TargetOS.LINUX, TargetOS.LINUX, [clang, propre])
+        assert b._TrouverToolchain("clang-native") is propre
+
+    def test_build_croise_n_emprunte_pas_le_clang_de_l_hote(self, monkeypatch):
+        # « clang-native » sous filter("system:Linux"), construit DEPUIS Windows :
+        # le clang Windows ne vise pas Linux, l'alias ne se resout pas.
+        hote = self._tc("host-clang", TargetOS.WINDOWS)
+        zig = self._tc("zig-linux-x64", TargetOS.LINUX)
+        b = self._builder(monkeypatch, TargetOS.WINDOWS, TargetOS.LINUX, [zig, hote], defaut=zig)
+        assert b._TrouverToolchain("clang-native") is None
+
+    def test_prepare_projet_prend_l_alias(self, monkeypatch):
+        clang = self._tc("host-clang", TargetOS.LINUX)
+        zig = self._tc("zig-linux-x64", TargetOS.LINUX)
+        b = self._builder(monkeypatch, TargetOS.LINUX, TargetOS.LINUX, [zig, clang], defaut=zig)
+        b._ApplyProjectFilters = lambda p: None
+        p = Project(name="Ani1071Log")
+        p.toolchain, p._explicitToolchain = "clang-native", True
+        b.PrepareProjectForCompile(p)
+        assert b.toolchain is clang
+
+    def test_nom_introuvable_revient_au_defaut_pas_au_voisin(self, monkeypatch):
+        from Jenga.Utils import Reporter
+        defaut = self._tc("zig-linux-x64", TargetOS.LINUX)
+        gcc = self._tc("host-gcc", TargetOS.LINUX, CompilerFamily.GCC)
+        b = self._builder(monkeypatch, TargetOS.LINUX, TargetOS.LINUX, [defaut, gcc], defaut=defaut)
+        b._ApplyProjectFilters = lambda p: None
+        msgs = []
+        monkeypatch.setattr(Reporter, "Warning", classmethod(lambda cls, m, critical=False: msgs.append(m)))
+        voisin = Project(name="Voisin")
+        voisin.toolchain, voisin._explicitToolchain = "host-gcc", True
+        b.PrepareProjectForCompile(voisin)
+        assert b.toolchain is gcc
+        perdu = Project(name="Perdu")
+        perdu.toolchain, perdu._explicitToolchain = "gcc-de-nulle-part", True
+        b.PrepareProjectForCompile(perdu)
+        assert b.toolchain is defaut, "le projet a herite du toolchain du projet precedent"
+        assert len(msgs) == 1 and "zig-linux-x64" in msgs[0] and "gcc-de-nulle-part" in msgs[0], msgs
+
+    def test_defaut_capture_si_builder_sans_init(self, monkeypatch):
+        defaut = self._tc("host-clang", TargetOS.LINUX)
+        gcc = self._tc("host-gcc", TargetOS.LINUX, CompilerFamily.GCC)
+        b = self._builder(monkeypatch, TargetOS.LINUX, TargetOS.LINUX, [defaut, gcc], defaut=defaut)
+        del b._defaultToolchain
+        b._ApplyProjectFilters = lambda p: None
+        a = Project(name="A")
+        a.toolchain, a._explicitToolchain = "host-gcc", True
+        b.PrepareProjectForCompile(a)
+        z = Project(name="Z")
+        z.toolchain, z._explicitToolchain = "inconnu", True
+        b.PrepareProjectForCompile(z)
+        assert b.toolchain is defaut
+
+    def test_usetoolchain_hors_filtre_accepte_l_alias(self):
+        _reset()
+        with workspace("W"):
+            with project("P"):
+                usetoolchain("clang-native")
+            with pytest.raises(ValueError):
+                with project("Q"):
+                    usetoolchain("vraiment-inconnu")
+        assert Api._currentWorkspace.projects["P"].toolchain == "clang-native"
+
+    def test_les_alias_du_builder_sont_ceux_de_l_api(self):
+        from Jenga.Core.Builder import Builder
+        assert set(Builder._ALIAS_TOOLCHAIN_HOTE) == set(Api.TOOLCHAIN_ALIAS_HOTE)
+
+
+class TestObjcArcSousFiltre:
+    """(2.8.8) objcarc() sous filter("system:macOS") ne vaut que pour macOS,
+    comme frameworks() : Nkentseu l'ecrit dans le filtre macOS de NKRHI."""
+
+    def _builder(self, cible):
+        from Jenga.Core.Builders.Linux import LinuxBuilder
+        wks = Api._currentWorkspace
+        b = LinuxBuilder.__new__(LinuxBuilder)
+        b.workspace, b.config, b.platform = wks, "Debug", f"{cible.value}-arm64"
+        b.targetOs, b.targetArch, b.targetEnv = cible, TargetArch.ARM64, None
+        b.verbose, b.action, b.options = False, "build", []
+        return b
+
+    def test_objcarc_ne_vaut_que_sous_son_filtre(self):
+        _reset()
+        with workspace("W"):
+            with project("NKRHI"):
+                staticlib()
+                with filter("system:macOS"):
+                    objcarc()
+        p = Api._currentWorkspace.projects["NKRHI"]
+        assert p.objcArc is False  # rien hors filtre
+        self._builder(TargetOS.MACOS)._ApplyProjectFilters(p)
+        assert p.objcArc is True
+        self._builder(TargetOS.LINUX)._ApplyProjectFilters(p)
+        assert p.objcArc is False, "l'ARC de macOS a fui sur un autre systeme"
 
 
 # ===========================================================================
