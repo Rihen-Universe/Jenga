@@ -2351,6 +2351,23 @@ class Builder(abc.ABC):
                 # Re-run platform-specific toolchain preparation if available
                 if hasattr(self, '_PrepareNDKToolchain'):
                     self._PrepareNDKToolchain()
+            else:
+                # (2.8.8) Avant : silence total, et le projet heritait du
+                # toolchain courant (usetoolchain("clang-native") sur macOS,
+                # ou l'hote s'appelle host-apple-clang). On ne change pas
+                # encore ce comportement, mais on le dit, une fois par nom.
+                deja = getattr(self, "_toolchainsIntrouvables", None)
+                if deja is None:
+                    deja = self._toolchainsIntrouvables = set()
+                cle = (project.name, project.toolchain)
+                if cle not in deja:
+                    deja.add(cle)
+                    courant = getattr(self.toolchain, "name", "?")
+                    connus = sorted(self.workspace.toolchains.keys()) if self.workspace.toolchains else []
+                    Reporter.Warning(
+                        f"[{project.name}] usetoolchain(\"{project.toolchain}\") : toolchain inconnu, "
+                        f"le projet garde \"{courant}\". Toolchains declares : "
+                        f"{', '.join(connus) if connus else '(aucun)'}")
 
     def BuildProject(self, project: Project) -> bool:
         # Check if project is already compiled for this platform/arch context

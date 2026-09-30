@@ -275,6 +275,8 @@ class Project:
     links: List[str] = field(default_factory=list)
     frameworks: List[str] = field(default_factory=list)
     dependsOn: List[str] = field(default_factory=list)
+    # (2.8.8) Objective-C(++) sous ARC (-fobjc-arc sur les .m/.mm) : objcarc().
+    objcArc: bool = False
 
     # File dependencies (copy after build)
     dependFiles: List[str] = field(default_factory=list)
@@ -3413,6 +3415,17 @@ def frameworks(names: Union[str, List[str]]) -> None:
 def framework(name: str) -> None:
     """Backward-compatible singular alias for frameworks()."""
     frameworks(name)
+
+def objcarc(active: bool = True) -> None:
+    """(2.8.8) Compile les .m / .mm du projet sous ARC (-fobjc-arc), macOS.
+
+    Eteint par defaut : du code Objective-C ecrit en retain/release manuel ne
+    compile pas sous ARC. A allumer sur un projet dont le code Objective-C est
+    ecrit pour ARC (__bridge_retained, __bridge_transfer...).
+    """
+    if _currentProject is None:
+        raise RuntimeError("objcarc() must be inside a project")
+    _currentProject.objcArc = bool(active)
 
 def frameworkpath(path: str) -> None:
     if _currentToolchain:

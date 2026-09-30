@@ -109,6 +109,43 @@ class MacOSBuilder(AppleUniversalMixin, Builder):
         else:
             return ""
 
+    @staticmethod
+    def _DrapeauxArc(project: Project, src: Path) -> List[str]:
+        """-fobjc-arc si le projet l'a demande (objcarc()) et que la source est
+        de l'Objective-C (.m / .mm) ; rien sinon."""
+        if getattr(project, "objcArc", False) and Path(src).suffix.lower() in (".m", ".mm"):
+            return ["-fobjc-arc"]
+        return []
+
+    def _FrameworksDesDependancesStatiques(self, project: Project) -> List[str]:
+        """Frameworks des bibliotheques STATIQUES atteintes par dependsOn, dans
+        l'ordre de decouverte, sans doublon. On traverse les .a (elles ne
+        portent pas leurs frameworks) ; on s'arrete a une bibliotheque partagee,
+        liee a ses propres frameworks. Les filtres de chaque dependance sont
+        appliques (idempotent) : une .a deja a jour n'est pas repassee par
+        BuildProject, ses frameworks filtres seraient sinon absents."""
+        vus, sortie = set(), []
+        a_voir = list(getattr(project, "dependsOn", []) or [])
+        projets = getattr(self.workspace, "projects", {}) or {}
+        while a_voir:
+            nom = a_voir.pop(0)
+            if nom in vus:
+                continue
+            vus.add(nom)
+            dep = projets.get(nom)
+            if dep is None or dep.kind != ProjectKind.STATIC_LIB:
+                continue
+            if hasattr(self, "_ApplyProjectFilters"):
+                try:
+                    self._ApplyProjectFilters(dep)
+                except Exception:  # noqa: BLE001 -- un filtre casse ne doit pas tuer le lien
+                    pass
+            for fw in dep.frameworks or []:
+                if fw not in sortie:
+                    sortie.append(fw)
+            a_voir.extend(getattr(dep, "dependsOn", []) or [])
+        return sortie
+
     def _NeedsObjectiveCppMode(self, sourcePath: Path) -> bool:
         """Detect C++ sources that must be compiled as Objective-C++ on macOS."""
         ext = sourcePath.suffix.lower()
@@ -141,6 +178,11 @@ class MacOSBuilder(AppleUniversalMixin, Builder):
         args = self._WithCompilerLauncher([compiler])
         if self._NeedsObjectiveCppMode(src):
             args.extend(["-x", "objective-c++"])
+        # (2.8.8) ARC sur demande du projet (objcarc()), pour les seuls .m / .mm :
+        # le code Metal de Nkentseu est ecrit pour ARC (__bridge_retained...),
+        # sans lui les retenues/liberations sont mal appariees. Eteint par
+        # defaut : du code ecrit en retain/release manuel ne compile pas sous ARC.
+        args.extend(self._DrapeauxArc(project, src))
         args.extend(["-c", "-o", str(obj)])
         args.extend(self.GetDependencyFlags(str(obj)))
         args.extend(self._GetCompilerFlags(project))
@@ -196,6 +238,15 @@ class MacOSBuilder(AppleUniversalMixin, Builder):
             # Frameworks (project)
             for fw in project.frameworks:
                 args.extend(["-framework", fw])
+            # (2.8.8) ... et ceux des BIBLIOTHEQUES STATIQUES dont il depend,
+            # transitivement : une .a ne porte pas ses frameworks, c'est le lien
+            # de l'executable qui doit les nommer. Avant, un frameworks("Metal")
+            # pose sur NKRHI n'arrivait jamais au lien de NKCraft (Nkentseu).
+            dejaNommes = set(project.frameworks or []) | set(getattr(self.toolchain, 'frameworks', []) or [])
+            for fw in self._FrameworksDesDependancesStatiques(project):
+                if fw not in dejaNommes:
+                    dejaNommes.add(fw)
+                    args.extend(["-framework", fw])
             # Default Apple frameworks for macOS app/test targets.
             # This ensures Objective-C runtime symbols and common platform APIs
             # used by Cocoa backends are resolved even when workspaces omit explicit frameworks.

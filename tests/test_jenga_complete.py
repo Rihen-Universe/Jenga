@@ -1483,6 +1483,117 @@ class TestFlagsDeProjetPosix:
             assert f.index(du_tc) < f.index(propre)
 
 
+class TestMacosFrameworksArcToolchain:
+    """
+    (2.8.8) Trois trous trouves par le portage Mac de Nkentseu :
+    1. les frameworks() d'une bibliotheque STATIQUE n'arrivaient pas au lien
+       de l'executable (une .a ne porte pas ses frameworks) ;
+    2. les .mm n'etaient jamais compiles sous ARC, alors que le code Metal de
+       Nkentseu est ecrit pour ARC -> objcarc(), eteint par defaut ;
+    3. usetoolchain("nom-inconnu") ne disait rien et gardait le toolchain
+       courant -> avertissement nomme (comportement inchange).
+    Aucun compilateur n'est lance.
+    """
+
+    def _mac(self):
+        from Jenga.Core.Builders.Macos import MacOSBuilder
+        _reset()
+        wks = Workspace(name="W", location=tempfile.mkdtemp())
+        tc = Toolchain(name="host-apple-clang", compilerFamily=CompilerFamily.APPLE_CLANG,
+                       ccPath="clang", cxxPath="clang++", arPath="ar",
+                       targetOs=TargetOS.MACOS, targetArch=TargetArch.ARM64)
+        wks.toolchains[tc.name] = tc
+        b = MacOSBuilder.__new__(MacOSBuilder)
+        b.workspace, b.config, b.platform, b.toolchain = wks, "Debug", "macOS-arm64", tc
+        b.targetOs, b.targetArch, b.targetEnv = TargetOS.MACOS, TargetArch.ARM64, None
+        return b, wks
+
+    def _proj(self, wks, nom, kind, fws=(), deps=()):
+        p = Project(name=nom)
+        p.kind = kind
+        p.frameworks = list(fws)
+        p.dependsOn = list(deps)
+        wks.projects[nom] = p
+        return p
+
+    def test_frameworks_des_statiques_transitifs(self):
+        b, wks = self._mac()
+        b._ApplyProjectFilters = lambda p: None
+        self._proj(wks, "NKCore", ProjectKind.STATIC_LIB, ["Foundation"])
+        self._proj(wks, "NKRHI", ProjectKind.STATIC_LIB, ["Metal", "QuartzCore"], ["NKCore"])
+        self._proj(wks, "NKCanvas", ProjectKind.STATIC_LIB, ["Metal", "MetalKit"], ["NKRHI"])
+        # une partagee coupe la chaine : elle se lie elle-meme a ses frameworks
+        self._proj(wks, "Plug", ProjectKind.SHARED_LIB, ["AudioToolbox"], ["NKCore"])
+        app = self._proj(wks, "App", ProjectKind.WINDOWED_APP, ["Cocoa"], ["NKCanvas", "Plug", "Inconnu"])
+        fws = b._FrameworksDesDependancesStatiques(app)
+        assert fws == ["Metal", "MetalKit", "QuartzCore", "Foundation"], fws
+        assert "AudioToolbox" not in fws
+
+    def test_cycle_de_dependances_ne_boucle_pas(self):
+        b, wks = self._mac()
+        b._ApplyProjectFilters = lambda p: None
+        self._proj(wks, "A", ProjectKind.STATIC_LIB, ["Metal"], ["B"])
+        self._proj(wks, "B", ProjectKind.STATIC_LIB, ["CoreAudio"], ["A"])
+        app = self._proj(wks, "App", ProjectKind.CONSOLE_APP, [], ["A"])
+        assert b._FrameworksDesDependancesStatiques(app) == ["Metal", "CoreAudio"]
+
+    def test_filtres_de_la_dependance_appliques(self):
+        # frameworks() pose sous filter("system:macos") : materialise par le filtre
+        b, wks = self._mac()
+        lib = self._proj(wks, "NKWindow", ProjectKind.STATIC_LIB)
+        vus = []
+        def filtre(p):
+            vus.append(p.name)
+            if p is lib and "GameController" not in p.frameworks:
+                p.frameworks.append("GameController")
+        b._ApplyProjectFilters = filtre
+        app = self._proj(wks, "App", ProjectKind.WINDOWED_APP, [], ["NKWindow"])
+        assert b._FrameworksDesDependancesStatiques(app) == ["GameController"]
+        assert vus == ["NKWindow"]
+
+    def test_objcarc_eteint_par_defaut_et_seulement_objc(self):
+        from pathlib import Path
+        from Jenga.Core.Builders.Macos import MacOSBuilder
+        p = Project(name="P")
+        assert p.objcArc is False
+        assert MacOSBuilder._DrapeauxArc(p, Path("a.mm")) == []
+        p.objcArc = True
+        assert MacOSBuilder._DrapeauxArc(p, Path("a.mm")) == ["-fobjc-arc"]
+        assert MacOSBuilder._DrapeauxArc(p, Path("b.M")) == ["-fobjc-arc"]
+        assert MacOSBuilder._DrapeauxArc(p, Path("c.cpp")) == []
+        assert MacOSBuilder._DrapeauxArc(p, Path("d.c")) == []
+
+    def test_objcarc_dsl(self):
+        from Jenga import objcarc
+        _reset()
+        with workspace("W"):
+            with project("P"):
+                objcarc()
+            with project("Q"):
+                pass
+        wks = Api._currentWorkspace
+        assert wks.projects["P"].objcArc is True
+        assert wks.projects["Q"].objcArc is False
+        with pytest.raises(RuntimeError):
+            objcarc()
+
+    def test_toolchain_inconnu_avertit_une_fois(self, monkeypatch):
+        from Jenga.Utils import Reporter
+        b, wks = self._mac()
+        b._ApplyProjectFilters = lambda p: None
+        b.toolchainManager = type("TM", (), {"GetToolchain": lambda self, n: None})()
+        msgs = []
+        monkeypatch.setattr(Reporter, "Warning", classmethod(lambda cls, m, critical=False: msgs.append(m)))
+        p = self._proj(wks, "Ani1071Log", ProjectKind.CONSOLE_APP)
+        p.toolchain, p._explicitToolchain = "clang-native", True
+        avant = b.toolchain
+        b.PrepareProjectForCompile(p)
+        b.PrepareProjectForCompile(p)
+        assert b.toolchain is avant  # comportement inchange (pour l'instant)
+        assert len(msgs) == 1, msgs
+        assert "clang-native" in msgs[0] and "host-apple-clang" in msgs[0]
+
+
 # ===========================================================================
 # Main entry point (for running without pytest)
 # ===========================================================================
