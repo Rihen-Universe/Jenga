@@ -453,9 +453,14 @@ fi
         if project.language.value == "C++":
             flags.append(f"-std={project.cppdialect.lower()}")
             flags.extend(self.toolchain.cxxflags)
+            # (2.8.7) ... PUIS celles du PROJET, comme Windows.py : jusqu'ici un
+            # cxxflags()/cflags() de projet etait IGNORE sur macOS, Linux et Web
+            # (trouve par Nkentseu : -ffp-contract=off n'arrivait pas au Mac).
+            flags.extend(project.cxxflags)
         else:
             flags.append(f"-std={project.cdialect.lower()}")
             flags.extend(self.toolchain.cflags)
+            flags.extend(project.cflags)
 
         # Flags d'importation des modules C++20 précompilés
         flags.extend(self._GetModuleImportFlags(project))

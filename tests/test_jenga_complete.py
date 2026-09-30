@@ -1427,6 +1427,62 @@ class TestIDECpp:
             assert p.read_text(encoding="utf-8") == user
 
 
+class TestFlagsDeProjetPosix:
+    """
+    (2.8.7) Un cxxflags()/cflags() de PROJET etait ignore sur macOS, Linux et
+    Web : seuls ceux du toolchain partaient au compilateur (Windows.py, lui,
+    passait les deux). Trouve par Nkentseu, dont le -ffp-contract=off
+    n'arrivait pas au Mac. Aucun compilateur n'est lance : on lit la liste
+    que le builder construit. Contre-epreuve faite a l'ecriture : sans le
+    correctif, les six cas disent « absent ».
+    """
+
+    CAS = [
+        ("Jenga.Core.Builders.Macos", "MacOSBuilder", CompilerFamily.APPLE_CLANG, TargetOS.MACOS,
+         TargetArch.ARM64, "macOS-arm64"),
+        ("Jenga.Core.Builders.Linux", "LinuxBuilder", CompilerFamily.CLANG, TargetOS.LINUX,
+         TargetArch.X86_64, "Linux-x86_64"),
+        ("Jenga.Core.Builders.Emscripten", "EmscriptenBuilder", CompilerFamily.EMSCRIPTEN, TargetOS.WEB,
+         TargetArch.WASM32, "Web-wasm32"),
+    ]
+
+    def _builder(self, module, classe, fam, tos, tarch, plat):
+        import importlib
+        cls = getattr(importlib.import_module(module), classe)
+        _reset()
+        wks = Workspace(name="W", location=tempfile.mkdtemp())
+        tc = Toolchain(name="tc", compilerFamily=fam, ccPath="cc", cxxPath="c++", arPath="ar",
+                       targetOs=tos, targetArch=tarch)
+        tc.cxxflags = ["-DTOOLCHAIN_CXX"]
+        tc.cflags = ["-DTOOLCHAIN_C"]
+        wks.toolchains["tc"] = tc
+        wks.defaultToolchain = "tc"
+        b = cls.__new__(cls)
+        b.workspace, b.config, b.platform = wks, "Debug", plat
+        b.targetOs, b.targetArch, b.targetEnv = tos, tarch, None
+        b.verbose, b.action, b.options, b.toolchain = False, "build", [], tc
+        b.jobs, b._expander, b._lastResult = 1, None, None
+        for attr in ("is_apple_clang", "is_clang", "is_gcc"):
+            setattr(b, attr, fam != CompilerFamily.GCC)
+        return b
+
+    @pytest.mark.parametrize("cas", CAS, ids=[c[1] for c in CAS])
+    def test_cxxflags_et_cflags_du_projet_passent(self, cas):
+        b = self._builder(*cas)
+        for lang, champ, propre, du_tc in ((Language.CPP, "cxxflags", "-ffp-contract=off", "-DTOOLCHAIN_CXX"),
+                                           (Language.C, "cflags", "-DPROJET_C", "-DTOOLCHAIN_C")):
+            p = Project(name="P")
+            p.kind = ProjectKind.STATIC_LIB
+            p.language = lang
+            setattr(p, champ, [propre])
+            f = b._GetCompilerFlags(p)
+            assert propre in f, f"{cas[1]} : {champ} du projet absent ({f})"
+            assert du_tc in f, f"{cas[1]} : {champ} du toolchain perdu ({f})"
+            # Meme ordre que Windows.py : le toolchain d'abord, le projet ensuite
+            # (le projet a le dernier mot quand deux drapeaux se contredisent).
+            assert f.index(du_tc) < f.index(propre)
+
+
 # ===========================================================================
 # Main entry point (for running without pytest)
 # ===========================================================================

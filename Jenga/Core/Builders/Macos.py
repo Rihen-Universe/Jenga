@@ -388,10 +388,15 @@ class MacOSBuilder(AppleUniversalMixin, Builder):
             if project.cppdialect:
                 flags.append(f"-std={project.cppdialect.lower()}")
             flags.extend(self.toolchain.cxxflags)
+            # (2.8.7) ... PUIS celles du PROJET, comme Windows.py : jusqu'ici un
+            # cxxflags()/cflags() de projet etait IGNORE sur macOS, Linux et Web
+            # (trouve par Nkentseu : -ffp-contract=off n'arrivait pas au Mac).
+            flags.extend(project.cxxflags)
         else:
             if project.cdialect:
                 flags.append(f"-std={project.cdialect.lower()}")
             flags.extend(self.toolchain.cflags)
+            flags.extend(project.cflags)
 
         # Position Independent Code
         if project.kind == ProjectKind.SHARED_LIB:
