@@ -63,6 +63,10 @@ public:
 
     // -----------------------------------------------------------------------
     // Queue FIFO
+    //
+    // La file possède ses événements (std::unique_ptr). Front() rend un
+    // pointeur non possédant vers le premier, ou nullptr si la file est vide ;
+    // il reste valide jusqu'au prochain Pop(). PushEvent() prend possession.
     // -----------------------------------------------------------------------
 
     virtual NkEvent*       Front()    const = 0;
@@ -89,7 +93,6 @@ public:
 
 protected:
     std::queue<std::unique_ptr<NkEvent>> mQueue;
-    NkEvent             mDummyEvent;
 };
 
 } // namespace nkentseu

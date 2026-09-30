@@ -7,6 +7,7 @@
 #include "NKWindow/Core/IEventImpl.h"
 #include "NKWindow/Core/Events/NkKeycodeMap.h"
 
+#include <memory>
 #include <queue>
 
 namespace
@@ -23,14 +24,14 @@ public:
         ++pollCalls;
         while (!mPending.empty())
         {
-            mQueue.push(mPending.front());
+            mQueue.push(std::make_unique<nkentseu::NkEvent>(mPending.front()));
             mPending.pop();
         }
     }
 
-    const nkentseu::NkEvent& Front() const override
+    nkentseu::NkEvent* Front() const override
     {
-        return mQueue.empty() ? mDummyEvent : mQueue.front();
+        return mQueue.empty() ? nullptr : mQueue.front().get();
     }
 
     void Pop() override
@@ -40,13 +41,13 @@ public:
     }
 
     bool IsEmpty() const override { return mQueue.empty(); }
-    void PushEvent(const nkentseu::NkEvent& event) override { mQueue.push(event); }
+    void PushEvent(std::unique_ptr<nkentseu::NkEvent> event) override { if (event) mQueue.push(std::move(event)); }
     std::size_t Size() const override { return mQueue.size(); }
 
     void SetEventCallback(nkentseu::NkEventCallback cb) override { mGlobalCallback = std::move(cb); }
     void SetWindowCallback(void* /*nativeHandle*/, nkentseu::NkEventCallback cb) override { mWindowCallback = std::move(cb); }
 
-    void DispatchEvent(nkentseu::NkEvent& event, void* /*nativeHandle*/) override
+    void DispatchEvent(nkentseu::NkEvent* event, void* /*nativeHandle*/) override
     {
         if (mGlobalCallback)
             mGlobalCallback(event);

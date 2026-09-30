@@ -48,12 +48,13 @@ void NkAndroidEventImpl::Shutdown(void* nativeHandle)
         sInstance = nullptr;
 }
 
-const NkEvent& NkAndroidEventImpl::Front() const
-{ return mQueue.empty() ? mDummyEvent : mQueue.front(); }
+NkEvent*    NkAndroidEventImpl::Front()   const
+{ return mQueue.empty() ? nullptr : mQueue.front().get(); }
 void        NkAndroidEventImpl::Pop()           { if (!mQueue.empty()) mQueue.pop(); }
 bool        NkAndroidEventImpl::IsEmpty() const { return mQueue.empty(); }
 std::size_t NkAndroidEventImpl::Size()    const { return mQueue.size(); }
-void        NkAndroidEventImpl::PushEvent(const NkEvent& e) { mQueue.push(e); }
+void        NkAndroidEventImpl::PushEvent(std::unique_ptr<NkEvent> e)
+{ if (e) mQueue.push(std::move(e)); }
 
 void NkAndroidEventImpl::PollEvents()
 {
@@ -84,7 +85,7 @@ void NkAndroidEventImpl::SetWindowCallback(void* nativeHandle, NkEventCallback c
         it->second.callback = std::move(cb);
 }
 
-void NkAndroidEventImpl::DispatchEvent(NkEvent& event, void* nativeHandle)
+void NkAndroidEventImpl::DispatchEvent(NkEvent* event, void* nativeHandle)
 {
     if (nativeHandle)
     {
@@ -128,11 +129,11 @@ void NkAndroidEventImpl::OnAppCmd(android_app* app, int32_t cmd)
     }
     if (ev.IsValid())
     {
-        sInstance->mQueue.push(ev);
+        sInstance->mQueue.push(std::make_unique<NkEvent>(ev));
         void* nativeHandle = app ? static_cast<void*>(app->window) : nullptr;
         if (!nativeHandle && !sInstance->mWindowMap.empty())
             nativeHandle = sInstance->mWindowMap.begin()->first;
-        sInstance->DispatchEvent(ev, nativeHandle);
+        sInstance->DispatchEvent(&ev, nativeHandle);
     }
 }
 
@@ -166,11 +167,11 @@ int32_t NkAndroidEventImpl::OnInputEvent(android_app* app, AInputEvent* aev)
     }
     if (ev.IsValid())
     {
-        sInstance->mQueue.push(ev);
+        sInstance->mQueue.push(std::make_unique<NkEvent>(ev));
         void* nativeHandle = app ? static_cast<void*>(app->window) : nullptr;
         if (!nativeHandle && !sInstance->mWindowMap.empty())
             nativeHandle = sInstance->mWindowMap.begin()->first;
-        sInstance->DispatchEvent(ev, nativeHandle);
+        sInstance->DispatchEvent(&ev, nativeHandle);
         return 1;
     }
     return 0;

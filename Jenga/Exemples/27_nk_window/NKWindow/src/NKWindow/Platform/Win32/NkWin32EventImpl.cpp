@@ -90,13 +90,14 @@ void           NkWin32EventImpl::PollEvents()
     }
 }
 
-const NkEvent& NkWin32EventImpl::Front()    const
-{ return mQueue.empty() ? mDummyEvent : mQueue.front(); }
+NkEvent*    NkWin32EventImpl::Front()   const
+{ return mQueue.empty() ? nullptr : mQueue.front().get(); }
 
 void        NkWin32EventImpl::Pop()           { if (!mQueue.empty()) mQueue.pop(); }
 bool        NkWin32EventImpl::IsEmpty() const { return mQueue.empty(); }
 std::size_t NkWin32EventImpl::Size()    const { return mQueue.size();  }
-void        NkWin32EventImpl::PushEvent(const NkEvent& e) { mQueue.push(e); }
+void        NkWin32EventImpl::PushEvent(std::unique_ptr<NkEvent> e)
+{ if (e) mQueue.push(std::move(e)); }
 
 // ---------------------------------------------------------------------------
 // Callbacks
@@ -115,7 +116,7 @@ void NkWin32EventImpl::SetWindowCallback(void* nativeHandle, NkEventCallback cb)
         it->second.callback = std::move(cb);
 }
 
-void NkWin32EventImpl::DispatchEvent(NkEvent& event, void* nativeHandle)
+void NkWin32EventImpl::DispatchEvent(NkEvent* event, void* nativeHandle)
 {
     HWND hwnd = static_cast<HWND>(nativeHandle);
 
@@ -182,12 +183,19 @@ void NkWin32EventImpl::BlitToHwnd(
 LRESULT CALLBACK NkWin32EventImpl::WindowProcStatic(
     HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    // EventImpl active du thread (une seule instance par thread dans ce
+    // design). Elle est retenue pendant le bootstrap, AVANT la remise à zéro
+    // de sPendingEventImpl : la retenir après (comme avant) la laissait
+    // toujours nulle, et plus aucun message n'atteignait ProcessWin32Message.
+    static thread_local NkWin32EventImpl* sCurrentImpl = nullptr;
+
     // Phase bootstrap : WM_CREATE arrive avant que la map soit remplie
     if (msg == WM_NCCREATE || msg == WM_CREATE)
     {
         if (sPendingOwner && sPendingEventImpl)
         {
             sWindowMap[hwnd] = { sPendingOwner, {} };
+            sCurrentImpl      = sPendingEventImpl;
             sPendingOwner     = nullptr;
             sPendingEventImpl = nullptr;
         }
@@ -196,24 +204,6 @@ LRESULT CALLBACK NkWin32EventImpl::WindowProcStatic(
     auto it = sWindowMap.find(hwnd);
     if (it == sWindowMap.end())
         return DefWindowProc(hwnd, msg, wp, lp);
-
-    NkWin32EventImpl* self  = nullptr;
-    // Retrouver l'EventImpl depuis le premier sWindowMap — on cherche
-    // l'instance qui contient cette HWND. Comme elle est thread_local,
-    // on utilise la variable statique courante.
-    // (Une seule instance d'EventImpl par thread dans ce design.)
-    // Le pattern est : WindowProcStatic → ProcessWin32Message via sPendingEventImpl.
-    // Mais après bootstrap, on doit localiser l'instance.
-    // Solution : stocker un backpointer dans WindowEntry.
-    // → On va l'ajouter dans la struct (voir ProcessWin32Message).
-
-    // Pour l'instant, on passe par le global sPendingEventImpl
-    // ou par un singleton de thread. On utilise une variable statique
-    // thread_local supplémentaire qui pointe vers l'EventImpl active.
-    static thread_local NkWin32EventImpl* sCurrentImpl = nullptr;
-
-    // Au RegisterPending on sauvegarde aussi sCurrentImpl
-    if (sPendingEventImpl) sCurrentImpl = sPendingEventImpl;
 
     if (!sCurrentImpl)
         return DefWindowProc(hwnd, msg, wp, lp);
@@ -564,11 +554,12 @@ LRESULT NkWin32EventImpl::ProcessWin32Message(
     default: break;
     }
 
-    // Dispatch
+    // Dispatch : une copie part dans la file (lue par EventSystem),
+    // l'original sert aux callbacks immédiats.
     if (nkEvent.IsValid())
     {
-        mQueue.push(nkEvent);
-        DispatchEvent(nkEvent, hwnd);
+        mQueue.push(std::make_unique<NkEvent>(nkEvent));
+        DispatchEvent(&nkEvent, hwnd);
     }
 
     if (suppressDefaultProc)

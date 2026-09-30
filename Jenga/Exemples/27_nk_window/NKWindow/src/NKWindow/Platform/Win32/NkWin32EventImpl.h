@@ -48,12 +48,12 @@ public:
     // IEventImpl — Queue
     // -----------------------------------------------------------------------
 
-    void           PollEvents()                    override;
-    const NkEvent& Front()    const                override;
-    void           Pop()                           override;
-    bool           IsEmpty()  const                override;
-    void           PushEvent(const NkEvent& event) override;
-    std::size_t    Size()     const                override;
+    void           PollEvents()                              override;
+    NkEvent*       Front()    const                          override;
+    void           Pop()                                     override;
+    bool           IsEmpty()  const                          override;
+    void           PushEvent(std::unique_ptr<NkEvent> event) override;
+    std::size_t    Size()     const                          override;
 
     // -----------------------------------------------------------------------
     // IEventImpl — Callbacks
@@ -61,7 +61,7 @@ public:
 
     void SetEventCallback  (NkEventCallback cb)                      override;
     void SetWindowCallback (void* nativeHandle, NkEventCallback cb)  override;
-    void DispatchEvent     (NkEvent& event, void* nativeHandle)      override;
+    void DispatchEvent     (NkEvent* event, void* nativeHandle)      override;
 
     // -----------------------------------------------------------------------
     // Bootstrap CreateWindowEx (appelé par NkWin32WindowImpl::Create)

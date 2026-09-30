@@ -11,6 +11,8 @@
 namespace nkentseu
 {
 
+extern xcb_connection_t* nk_xcb_global_connection; ///< Défini dans NkXCBWindowImpl.cpp
+
 struct NkXCBData
 {
     xcb_connection_t* connection  = nullptr;

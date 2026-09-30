@@ -48,13 +48,14 @@ void NkCocoaEventImpl::Shutdown(void* nativeHandle)
 // Queue
 // ---------------------------------------------------------------------------
 
-const NkEvent& NkCocoaEventImpl::Front() const
-{ return mQueue.empty() ? mDummyEvent : mQueue.front(); }
+NkEvent* NkCocoaEventImpl::Front() const
+{ return mQueue.empty() ? nullptr : mQueue.front().get(); }
 
 void NkCocoaEventImpl::Pop() { if (!mQueue.empty()) mQueue.pop(); }
 bool NkCocoaEventImpl::IsEmpty() const { return mQueue.empty(); }
 std::size_t NkCocoaEventImpl::Size() const { return mQueue.size(); }
-void NkCocoaEventImpl::PushEvent(const NkEvent& e) { mQueue.push(e); }
+void NkCocoaEventImpl::PushEvent(std::unique_ptr<NkEvent> e)
+{ if (e) mQueue.push(std::move(e)); }
 
 // ---------------------------------------------------------------------------
 // Callbacks
@@ -79,7 +80,7 @@ void NkCocoaEventImpl::SetWindowCallback(void* nativeHandle, NkEventCallback cb)
         it->second.callback = std::move(cb);
 }
 
-void NkCocoaEventImpl::DispatchEvent(NkEvent& event, void* nativeHandle)
+void NkCocoaEventImpl::DispatchEvent(NkEvent* event, void* nativeHandle)
 {
     if (nativeHandle)
     {
@@ -259,8 +260,8 @@ void NkCocoaEventImpl::PollEvents()
 
             if (nkEv.IsValid())
             {
-                mQueue.push(nkEv);
-                DispatchEvent(nkEv, nativeHandle);
+                mQueue.push(std::make_unique<NkEvent>(nkEv));
+                DispatchEvent(&nkEv, nativeHandle);
             }
         }
     }

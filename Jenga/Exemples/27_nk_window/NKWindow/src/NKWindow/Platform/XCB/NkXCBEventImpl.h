@@ -28,17 +28,17 @@ public:
     void Shutdown  (void* nativeHandle)                     override;
 
     // Queue
-    void           PollEvents()                    override;
-    const NkEvent& Front()    const                override;
-    void           Pop()                           override;
-    bool           IsEmpty()  const                override;
-    void           PushEvent(const NkEvent& event) override;
-    std::size_t    Size()     const                override;
+    void           PollEvents()                              override;
+    NkEvent*       Front()    const                          override;
+    void           Pop()                                     override;
+    bool           IsEmpty()  const                          override;
+    void           PushEvent(std::unique_ptr<NkEvent> event) override;
+    std::size_t    Size()     const                          override;
 
     // Callbacks
     void SetEventCallback(NkEventCallback cb)                            override;
     void SetWindowCallback(void* nativeHandle, NkEventCallback cb)       override;
-    void DispatchEvent(NkEvent& event, void* nativeHandle)               override;
+    void DispatchEvent(NkEvent* event, void* nativeHandle)               override;
 
 private:
     static NkKey           XcbKeysymToNkKey(xcb_keysym_t ks);
@@ -52,6 +52,7 @@ private:
 
     xcb_connection_t*  mConnection  = nullptr;
     xcb_key_symbols_t* mKeySymbols  = nullptr;
+    NkEventCallback    mGlobalCallback;
     std::unordered_map<xcb_window_t, WindowEntry> mWindowMap;
 };
 

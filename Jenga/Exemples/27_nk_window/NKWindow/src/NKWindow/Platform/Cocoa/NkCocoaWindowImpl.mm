@@ -41,8 +41,8 @@
         return;
 
     nkentseu::NkEvent ev(nkentseu::NkWindowCloseData(false));
-    eventImpl->PushEvent(ev);
-    eventImpl->DispatchEvent(ev, (__bridge void*)self);
+    eventImpl->PushEvent(std::make_unique<nkentseu::NkEvent>(ev));
+    eventImpl->DispatchEvent(&ev, (__bridge void*)self);
 }
 @end
 
@@ -79,8 +79,8 @@
     const nkentseu::NkU32 dpi = static_cast<nkentseu::NkU32>(96.0f * scale + 0.5f);
     nkentseu::NkEvent ev(nkentseu::NkWindowDpiData(scale, scale, dpi));
 
-    eventImpl->PushEvent(ev);
-    eventImpl->DispatchEvent(ev, (__bridge void*)[self window]);
+    eventImpl->PushEvent(std::make_unique<nkentseu::NkEvent>(ev));
+    eventImpl->DispatchEvent(&ev, (__bridge void*)[self window]);
 }
 @end
 
@@ -167,8 +167,8 @@ bool NkCocoaWindowImpl::Create(const NkWindowConfig& config)
             mEventImpl->Initialize(this, (__bridge void*)mWindow);
 
             NkEvent createEv(NkWindowCreateData(config.width, config.height));
-            mEventImpl->PushEvent(createEv);
-            mEventImpl->DispatchEvent(createEv, (__bridge void*)mWindow);
+            mEventImpl->PushEvent(std::make_unique<NkEvent>(createEv));
+            mEventImpl->DispatchEvent(&createEv, (__bridge void*)mWindow);
         }
     }
 

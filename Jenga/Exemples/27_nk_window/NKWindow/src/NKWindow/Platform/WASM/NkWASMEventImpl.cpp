@@ -79,9 +79,9 @@ void NkWASMEventImpl::Shutdown(void* nativeHandle)
         mPrimaryHandle = mWindowMap.begin()->first;
 }
 
-const NkEvent& NkWASMEventImpl::Front() const
+NkEvent* NkWASMEventImpl::Front() const
 {
-    return mQueue.empty() ? mDummyEvent : mQueue.front();
+    return mQueue.empty() ? nullptr : mQueue.front().get();
 }
 
 void NkWASMEventImpl::Pop()
@@ -100,9 +100,10 @@ std::size_t NkWASMEventImpl::Size() const
     return mQueue.size();
 }
 
-void NkWASMEventImpl::PushEvent(const NkEvent& e)
+void NkWASMEventImpl::PushEvent(std::unique_ptr<NkEvent> e)
 {
-    mQueue.push(e);
+    if (e)
+        mQueue.push(std::move(e));
 }
 
 void NkWASMEventImpl::PollEvents()
@@ -142,7 +143,7 @@ NkWebInputOptions NkWASMEventImpl::GetInputOptions()
     return gWebInputOptions;
 }
 
-void NkWASMEventImpl::DispatchEvent(NkEvent& event, void* nativeHandle)
+void NkWASMEventImpl::DispatchEvent(NkEvent* event, void* nativeHandle)
 {
     void* handle = nativeHandle;
     if (!handle)
@@ -158,9 +159,9 @@ void NkWASMEventImpl::DispatchEvent(NkEvent& event, void* nativeHandle)
 
 void NkWASMEventImpl::PushAndDispatch(NkEvent&& event, void* nativeHandle)
 {
-    mQueue.push(event);
+    mQueue.push(std::make_unique<NkEvent>(event));
     NkEvent dispatchCopy = event;
-    DispatchEvent(dispatchCopy, nativeHandle);
+    DispatchEvent(&dispatchCopy, nativeHandle);
 }
 
 struct NkCanvasCoordMap
