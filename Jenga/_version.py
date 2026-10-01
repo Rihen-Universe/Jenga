@@ -102,7 +102,12 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # d'un PROJET au compilateur (seul Windows le faisait) ; l'exemple 27 (NKWindow)
 # recompile sur toutes les plateformes -- ses neuf backends suivent l'API a
 # pointeurs, et Win32 livre ses evenements -- verifie sur un vrai Mac par la CI.
-__version__ = "2.8.7"
+# 2.8.8 (2026-10-01) : macOS -- les frameworks des bibliotheques STATIQUES
+# arrivent au lien de l'executable ; objcarc() (ARC sur les .m/.mm, eteint par
+# defaut) ; clang-native designe le clang de l'hote ; un toolchain introuvable
+# revient au defaut du build au lieu d'heriter du projet precedent. Verifie par
+# la CI macOS de Nkentseu (Metal dans NKRenderer et NKCanvas).
+__version__ = "2.8.8"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

@@ -3,6 +3,41 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.8
+
+### Corrigé : sur macOS, les frameworks d'une bibliothèque statique n'arrivaient pas au lien
+
+Une `.a` ne porte pas ses frameworks : un `frameworks(["Metal"])` posé sur une
+bibliothèque statique n'atteignait jamais l'édition de liens de l'exécutable,
+et chaque application devait les recopier. Le lien macOS ajoute désormais les
+frameworks des bibliothèques STATIQUES atteintes par `dependsOn`
+(transitivement, filtres appliqués, arrêt aux bibliothèques partagées), sans
+doublon. Vérifié par la CI macOS de Nkentseu (`otool -L` : MetalKit, déclaré
+par NKRHI seul, est lié dans Tuto02Renderer et NKCraft).
+
+### Nouveau : `objcarc()`
+
+Compile les `.m` / `.mm` du projet sous ARC (`-fobjc-arc`), et eux seuls.
+Éteint par défaut (du code en retain/release manuel ne compile pas sous ARC).
+Respecte les filtres : sous `filter("system:macOS")`, il ne vaut que pour macOS.
+
+### Corrigé : `usetoolchain("clang-native")` ne désignait aucun toolchain
+
+`clang-native` est un alias du clang de l'hôte : host-apple-clang puis
+host-clang sur macOS, host-clang sur Linux, le clang détecté sous Windows
+(host-clang, clang-mingw, clang-cl). Un toolchain déclaré sous ce nom
+l'emporte ; un candidat qui ne vise pas l'OS cible est écarté (build croisé).
+
+### Corrigé : un toolchain introuvable héritait de celui du projet précédent
+
+Un `usetoolchain(nom)` qui ne se résout pas ramène désormais le projet au
+toolchain par défaut du build (y compris après `--toolchain`), avec un
+avertissement nommé, une fois par projet ; avant, son compilateur dépendait
+de l'ordre de construction. Un projet **sans** `usetoolchain` garde le
+comportement d'avant (inchangé volontairement : les liens Windows en dépendent).
+
+pytest : 220 verts, 2 sautés.
+
 ## v2.8.7
 
 ### Corrigé : les options de compilation d'un projet sont ignorées sur macOS, Linux et Web
