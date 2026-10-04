@@ -30,10 +30,25 @@ def _HandleRemoveReadonly(func: Callable, path: str, exc_info) -> None:
     func(path)
 
 def _GlobRecursive(root: Path, pattern: str, ignoreHidden: bool = True) -> Iterator[Path]:
-    """Recursive glob that respects hidden‑file convention."""
-    for path in root.rglob(pattern):
-        if ignoreHidden and any(part.startswith('.') for part in path.relative_to(root).parts):
-            continue
+    """Recursive glob that respects hidden‑file convention.
+
+    Un motif qui nomme un dossier (il contient « / », ex. « src/**/*.cpp ») est
+    ANCRE a `root` : « src » y est un enfant direct de la location (Path.glob).
+    Un motif sans dossier (« *.obj ») reste cherche a toute profondeur
+    (Path.rglob). Jusqu'a 2.8.9 tout passait par rglob, qui revient a
+    « **/src/**/*.cpp » : un projet ramassait aussi les src/ de ses sous-dossiers
+    (constate le 04/10/2026 quand des applications sont passees sous
+    Engine/NKEditorKit/Applications/ : leurs main.cpp entraient dans la bibliotheque).
+    """
+    candidats = root.glob(pattern) if "/" in pattern else root.rglob(pattern)
+    for path in candidats:
+        if ignoreHidden:
+            try:
+                parts = path.relative_to(root).parts
+            except ValueError:  # motif « ../autre/** » : hors de root
+                parts = Path(os.path.relpath(path, root)).parts
+            if any(part.startswith('.') and part not in ('.', '..') for part in parts):
+                continue
         yield path
 
 def _NormalizeGlobPattern(pattern: str) -> str:

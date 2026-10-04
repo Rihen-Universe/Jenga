@@ -3,6 +3,31 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.10
+
+### Corrigé : un motif de fichiers qui nomme un dossier part de la location du projet
+
+`files(["src/**.cpp"])` désigne le dossier `src` placé **directement** dans la location
+du projet. Jusqu'ici, la recherche récursive passait par `Path.rglob`, qui cherche le motif
+à n'importe quelle profondeur : le motif revenait à `**/src/**/*.cpp`, et un projet
+ramassait aussi les `src/` de ses sous-dossiers. Le défaut est apparu quand des
+applications ont été rangées sous une bibliothèque (`Engine/NKEditorKit/Applications/…`) :
+leurs `main.cpp` entraient dans la bibliothèque.
+
+Désormais, dans `files()`, `excludefiles()`, `testfiles()`, `embedresources()` et
+`dependfiles()` :
+
+- un motif qui contient un `/` est **ancré à la location** (`src/**.cpp`,
+  `Applications/**.cpp`, `../voisin/src/**.cpp`) ;
+- un motif sans dossier reste cherché à toute profondeur (`**.cpp`, `*.obj`).
+
+Pour retrouver l'ancien sens d'un motif, l'écrire explicitement : `**/src/**.cpp`.
+Vérifié sur Nkentseu : sur 334 projets, aucun ensemble final de fichiers ne change. Trois
+motifs se comportent autrement : deux sont le défaut corrigé, et le troisième
+(`Synchronization/**.h` de NKThreading, redondant avec `src/NKThreading/**.h`) a été retiré
+de Nkentseu. Tests : `tests/test_glob_ancre.py` (6 cas, dont la contre-épreuve de
+l'application rangée sous la bibliothèque) ; suite complète : 226 réussis, 2 sautés.
+
 ## v2.8.9
 
 ### Licence : version 2.0, propriétaire et explicite
