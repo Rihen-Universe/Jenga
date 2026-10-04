@@ -3,6 +3,20 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.9
+
+### Licence : version 2.0, propriétaire et explicite
+
+La licence 1.0 s'intitulait « propriétaire » mais autorisait la modification, les œuvres
+dérivées et la redistribution, et sa date d'effet n'avait jamais été remplie. La version 2.0
+(en vigueur au 04/10/2026, bilingue) nomme l'auteur et titulaire des droits, TEUGUIA
+TADJUIDJE Rodolf Séderis (« Rihen »), qui exploite Jenga sous le nom Rihen Universe ; elle
+autorise l'utilisation de Jenga non modifié pour construire ses propres projets (les
+programmes construits appartiennent à l'utilisateur, les exemples peuvent servir de point de
+départ) et interdit sans autorisation écrite la copie, la modification, les œuvres dérivées,
+la redistribution, ainsi que l'usage par une intelligence artificielle (entraînement,
+alimentation, reproduction d'un produit concurrent). Aucun changement de code.
+
 ## v2.8.8
 
 ### Corrigé : sur macOS, les frameworks d'une bibliothèque statique n'arrivaient pas au lien

@@ -1,66 +1,132 @@
-PROPRIETARY LICENSE AGREEMENT
-For Jenga Build System
-Copyright © 2026 Rihen
+================================================================================
+                    JENGA BUILD SYSTEM - PROPRIETARY LICENSE
+                     LICENCE PROPRIETAIRE DU SYSTEME JENGA
+================================================================================
 
-IMPORTANT: READ CAREFULLY
+Copyright (c) 2022-2026 TEUGUIA TADJUIDJE Rodolf Sederis ("Rihen"),
+operating as Rihen Universe. All Rights Reserved. Tous droits reserves.
 
-This Proprietary License Agreement ("Agreement") is a legal agreement between you 
-(either an individual or a single entity) and Rihen for the Jenga Build 
-System software product ("Software").
+Version 2.0 - Effective Date / Date d'effet : 2026-10-04
+This version replaces version 1.0 for every copy of the Software obtained on or
+after its effective date. / Cette version remplace la version 1.0 pour toute
+copie du Logiciel obtenue a partir de sa date d'effet.
 
-BY INSTALLING, COPYING, OR OTHERWISE USING THE SOFTWARE, YOU AGREE TO BE BOUND 
-BY THE TERMS OF THIS AGREEMENT. IF YOU DO NOT AGREE TO THE TERMS OF THIS 
-AGREEMENT, DO NOT INSTALL OR USE THE SOFTWARE.
+--------------------------------------------------------------------------------
+ENGLISH
+--------------------------------------------------------------------------------
 
-1. GRANT OF LICENSE
-Rihen grants you a non-exclusive, worldwide, royalty-free license to:
-   a) Use the Software for any purpose, personal or commercial
-   b) Modify the source code to create derivative works
-   c) Distribute the Software or derivative works
-   
-   CONDITIONS:
-   - You must include this license in all distributions
-   - You must preserve all copyright notices
-   - You cannot remove license headers from source files
+1. OWNERSHIP
+   The Jenga Build System, including its source code, its domain-specific
+   language and public interfaces, its examples, documentation, file formats
+   and tools (the "Software"), is and remains the exclusive property of its
+   author, TEUGUIA TADJUIDJE Rodolf Sederis, known as "Rihen", operating as
+   Rihen Universe (the "Licensor"). It has been developed since 2022 (the
+   build scripts of the Nkentseu projects, then Jenga).
 
-2. RESTRICTIONS
-You may not:
-   a) Sell the Software as a standalone product
-   b) Grant sublicenses to others
-   c) Use the Rihen name for endorsement without permission
-   d) Remove or alter any proprietary notices
+2. WHAT YOU MAY DO
+   Subject to this license, the Licensor grants you a personal,
+   non-exclusive, non-transferable, revocable, royalty-free right to install
+   and run the unmodified Software in order to build, test and package your
+   own projects, for personal or commercial purposes. The programs you build
+   with the Software belong to you. The examples and project templates
+   shipped with the Software may be copied and modified solely as a starting
+   point for your own projects; they may not be used to build a competing
+   build system.
 
-3. COPYRIGHT
-All title and copyrights in and to the Software are owned by Rihen. 
-This license does not transfer ownership of the copyright.
+3. WHAT YOU MAY NOT DO
+   Without the prior written permission of the Licensor, you may not:
+     a) copy the Software except as needed to install and run it;
+     b) modify, adapt, translate or create derivative works of the Software,
+        in whole or in part, including its architecture, its language, its
+        examples and its documentation;
+     c) distribute, publish, sublicense, sell, rent or otherwise make the
+        Software or any part of it available to third parties;
+     d) reverse engineer the Software beyond what applicable law expressly
+        permits;
+     e) use the Software, in whole or in part, to train, fine-tune, evaluate
+        or otherwise feed any artificial intelligence or machine-learning
+        system, dataset or model;
+     f) submit the Software, in whole or in part, to an artificial
+        intelligence tool or service in order to reproduce, rewrite, port or
+        derive a competing or similar product;
+     g) remove or alter any copyright, license or proprietary notice.
+   Viewing the source code where it is publicly accessible grants none of
+   these rights. Every file of the Software remains covered by this license
+   even when it is copied separately.
 
 4. NO WARRANTY
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL 
-Rihen OR ITS CONTRIBUTORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN 
-THE SOFTWARE.
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. IN NO
+   EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
 
 5. TERMINATION
-This license is effective until terminated. Your rights under this license will 
-terminate automatically without notice from Rihen if you fail to comply 
-with any term(s) of this license.
+   This license terminates automatically if you breach any of its terms. You
+   must then stop using the Software and destroy all copies.
 
 6. GOVERNING LAW
-This Agreement shall be governed by the laws of the jurisdiction where 
-Rihen is established, without regard to its conflict of law provisions.
+   This license is governed by the laws of the place where the Licensor is
+   established, without regard to conflict-of-law rules.
 
-7. ENTIRE AGREEMENT
-This Agreement constitutes the entire agreement between the parties concerning 
-the Software and supersedes all prior or contemporaneous oral or written 
-agreements, proposals, representations, and communications.
+--------------------------------------------------------------------------------
+FRANCAIS
+--------------------------------------------------------------------------------
 
-8. ACKNOWLEDGMENT
-YOU ACKNOWLEDGE THAT YOU HAVE READ THIS AGREEMENT, UNDERSTAND IT, AND AGREE 
-TO BE BOUND BY ITS TERMS AND CONDITIONS.
+1. PROPRIETE
+   Le systeme de build Jenga, y compris son code source, son langage de
+   description et ses interfaces publiques, ses exemples, sa documentation,
+   ses formats de fichiers et ses outils (le « Logiciel »), est et reste la
+   propriete exclusive de son auteur, TEUGUIA TADJUIDJE Rodolf Sederis, dit
+   « Rihen », qui l'exploite sous le nom Rihen Universe (le « Concedant »).
+   Il est developpe depuis 2022 (les scripts de build des projets Nkentseu,
+   puis Jenga).
 
-For questions about this license, contact: rihen.universe@gmail.com
+2. CE QUE VOUS POUVEZ FAIRE
+   Sous reserve de cette licence, le Concedant vous accorde un droit
+   personnel, non exclusif, non transferable, revocable et gratuit
+   d'installer et d'executer le Logiciel non modifie pour construire, tester
+   et empaqueter vos propres projets, a titre personnel ou commercial. Les
+   programmes que vous construisez avec le Logiciel vous appartiennent. Les
+   exemples et modeles de projet fournis avec le Logiciel peuvent etre copies
+   et modifies uniquement comme point de depart de vos propres projets ; ils
+   ne peuvent pas servir a construire un systeme de build concurrent.
 
-Version 1.0 - Effective Date: [Current Date]
+3. CE QUE VOUS NE POUVEZ PAS FAIRE
+   Sans l'autorisation ecrite prealable du Concedant, il est interdit :
+     a) de copier le Logiciel au-dela de ce qu'exigent son installation et
+        son execution ;
+     b) de le modifier, l'adapter, le traduire ou en deriver une oeuvre, en
+        tout ou en partie, y compris son architecture, son langage, ses
+        exemples et sa documentation ;
+     c) de le distribuer, publier, sous-licencier, vendre, louer ou mettre a
+        la disposition de tiers, en tout ou en partie ;
+     d) de le retroconcevoir au-dela de ce que la loi applicable autorise
+        expressement ;
+     e) de l'utiliser, en tout ou en partie, pour entrainer, affiner, evaluer
+        ou alimenter tout systeme, jeu de donnees ou modele d'intelligence
+        artificielle ou d'apprentissage automatique ;
+     f) de le soumettre, en tout ou en partie, a un outil ou service
+        d'intelligence artificielle afin de reproduire, reecrire, porter ou
+        deriver un produit concurrent ou similaire ;
+     g) de retirer ou modifier toute mention de droit d'auteur, de licence ou
+        de propriete.
+   La consultation du code source la ou il est accessible publiquement ne
+   confere aucun de ces droits. Chaque fichier du Logiciel reste couvert par
+   cette licence, meme copie isolement.
+
+4. ABSENCE DE GARANTIE
+   LE LOGICIEL EST FOURNI « EN L'ETAT », SANS GARANTIE D'AUCUNE SORTE. LE
+   CONCEDANT NE PEUT ETRE TENU RESPONSABLE D'AUCUN DOMMAGE LIE AU LOGICIEL
+   OU A SON UTILISATION.
+
+5. RESILIATION
+   Cette licence prend fin automatiquement en cas de manquement a l'une de
+   ses clauses. Vous devez alors cesser d'utiliser le Logiciel et en detruire
+   toutes les copies.
+
+6. DROIT APPLICABLE
+   Cette licence est regie par le droit du lieu d'etablissement du
+   Concedant, sans egard aux regles de conflit de lois.
+
+--------------------------------------------------------------------------------
+Contact : rihen.universe@gmail.com
+================================================================================
