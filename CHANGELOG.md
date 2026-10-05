@@ -3,6 +3,26 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.11
+
+### Corrigé : sur ordinateur, `jenga run --target` nomme le projet à lancer
+
+`jenga build --target X` désigne le projet X ; `jenga run --target X`, lui, réservait
+`--target` à l'appareil mobile et ignorait le nom : sans projet positionnel, il lançait le
+premier exécutable du workspace, sans le dire (`jenga run --target TD` lançait Snake).
+
+Désormais :
+
+- sur ordinateur, `--target X` désigne le projet à lancer, comme pour `jenga build` ;
+- un projet positionnel et un `--target` différents sont refusés, avec les deux noms ;
+- sur Android et iOS, `--target` (et son alias `--device`) reste l'appareil ;
+- quand aucun projet n'est donné, le repli sur le premier exécutable est annoncé.
+
+Tests : `tests/test_run_target.py` (10 cas, sans compilateur, dont la contre-épreuve :
+l'ancien code cherche `Snake.exe`) ; suite complète : 235 réussis, 2 sautés, 1 échec
+instable sous charge (`test_missing_dll_is_said_with_its_name`, vert seul et avec le
+nouveau banc).
+
 ## v2.8.10
 
 ### Corrigé : un motif de fichiers qui nomme un dossier part de la location du projet
