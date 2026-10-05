@@ -26,6 +26,22 @@ from .Deploy import DeployCommand
 class RunCommand:
     """jenga run [PROJECT] [--config NAME] [--platform NAME] [--args ...]"""
 
+    _PLATEFORMES_MOBILES = ("android", "ios")
+
+    @staticmethod
+    def _TargetCommeProjet(parsed) -> Optional[str]:
+        """Sur ordinateur, `--target NOM` designe le projet a lancer.
+        Rend un message d'erreur, ou None. Sur mobile, `--target` reste l'appareil."""
+        plateforme = (parsed.platform or "").strip().lower()
+        if plateforme in RunCommand._PLATEFORMES_MOBILES or not parsed.target:
+            return None
+        if parsed.project and parsed.project != parsed.target:
+            return (f"Project '{parsed.project}' and --target '{parsed.target}' disagree "
+                    f"(on desktop, --target names the project to run).")
+        parsed.project = parsed.target
+        parsed.target = None
+        return None
+
     @staticmethod
     def Execute(args: List[str]) -> int:
         parser = argparse.ArgumentParser(prog="jenga run", description="Run a project executable.")
@@ -46,7 +62,8 @@ class RunCommand:
                                  "when running (checks the binary runs on its own).")
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
-        parser.add_argument("--target", help="Mobile only: device serial / UDID to run on (skip if a single device is connected)")
+        parser.add_argument("--target", help="Desktop: project to run (same as `jenga build --target`). "
+                                             "Mobile: device serial / UDID to run on (skip if a single device is connected)")
         # Une application CONSOLE lancee depuis un IDE herite d'un TUBE, pas d'une
         # console : elle ne peut rien lire au clavier. On lui ouvre donc une
         # console dediee. Ce drapeau permet de s'en passer (redirection voulue,
@@ -55,6 +72,15 @@ class RunCommand:
                             help="Ne pas ouvrir de console dediee pour une application console (Windows)")
         parser.add_argument("--device", help="Alias for --target")
         parsed = parser.parse_args(args)
+
+        # Sur ordinateur, `--target` n'a pas de sens d'appareil : `jenga build
+        # --target X` y nomme le PROJET, donc `jenga run --target X` aussi.
+        # Avant, le nom etait ignore et le premier executable du workspace se
+        # lancait sans rien dire (`--target TD` lancait Snake).
+        erreur = RunCommand._TargetCommeProjet(parsed)
+        if erreur:
+            Colored.PrintError(erreur)
+            return 1
 
         if parsed.device and not parsed.target:
             parsed.target = parsed.device
@@ -117,6 +143,7 @@ class RunCommand:
             for name, proj in workspace.projects.items():
                 if proj.kind in (Api.ProjectKind.CONSOLE_APP, Api.ProjectKind.WINDOWED_APP, Api.ProjectKind.TEST_SUITE):
                     project_name = name
+                    Colored.PrintInfo(f"No project given: running '{name}' (first executable project).")
                     break
         if not project_name:
             Colored.PrintError("No executable project found.")
