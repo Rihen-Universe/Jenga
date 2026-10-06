@@ -61,6 +61,12 @@ class InfoCommand:
         print(f"Platforms: {', '.join(workspace.platforms)}")
         print(f"Target OSes: {', '.join([os.value for os in workspace.targetOses])}")
         print(f"Target Architectures: {', '.join([arch.value for arch in workspace.targetArchs])}")
+        # Toolchains DECLAREES par le workspace (inclusions comprises) et celle par
+        # defaut. « Available Toolchains » plus bas liste tout ce que la MACHINE
+        # sait faire ; un IDE (NKCode) n'affiche que celles-ci quand il y en a.
+        print(f"Workspace toolchains: {', '.join(sorted(workspace.toolchains.keys()))}")
+        if workspace.defaultToolchain:
+            print(f"Default toolchain: {workspace.defaultToolchain}")
         if workspace.startProject:
             print(f"Start project: {workspace.startProject}")
         print()
