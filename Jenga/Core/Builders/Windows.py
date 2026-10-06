@@ -25,6 +25,22 @@ from ..IconConverter import (
 import shutil as _shutil
 
 
+def EcrireSiDifferent(chemin: Path, texte: str) -> bool:
+    """Ecrit `texte` dans `chemin` SEULEMENT s'il differe du contenu actuel.
+
+    Rend True si le fichier a ete (re)ecrit. Un fichier reecrit a l'identique
+    change quand meme de date, et tout test de fraicheur qui le compte parmi
+    ses entrees le croit modifie (cf. le stub du PCH, plus bas).
+    """
+    try:
+        if chemin.read_text(encoding="utf-8") == texte:
+            return False
+    except OSError:
+        pass
+    chemin.write_text(texte, encoding="utf-8")
+    return True
+
+
 class WindowsBuilder(Builder):
     """
     Builder pour Windows (PE/COFF).
@@ -80,7 +96,13 @@ class WindowsBuilder(Builder):
             project._jengaPchSourceResolved = str(source_path)
         else:
             source_path = objDir / "__jenga_pch.cpp"
-            source_path.write_text(f'#include "{header_token}"\n', encoding="utf-8")
+            # N'ECRIRE QUE SI LE CONTENU CHANGE. Reecrit a chaque build, ce fichier
+            # etait toujours plus recent que le PCH : PchIsFresh (plus bas) le
+            # compte parmi ses entrees, et le PCH etait donc refait A CHAQUE FOIS.
+            # Mesure du 06/10 (cours, kit Canvas, clang-mingw) : 5,9 s de PCH
+            # par build pour un main.cpp qui, avec un PCH reutilise, se compile
+            # en 0,9 s.
+            EcrireSiDifferent(source_path, f'#include "{header_token}"\n')
             project._jengaPchSourceResolved = str(source_path)
 
         # ── PCH DEJA A JOUR : sauter la COMPILATION, pas la preparation ──────
