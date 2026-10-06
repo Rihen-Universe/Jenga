@@ -70,11 +70,138 @@ class ToolchainManager:
     # chaque fois la meme chose.
     #
     # Le compilateur installe ne change pas pendant un build. On memorise donc
-    # le resultat. Portee volontairement limitee au PROCESSUS : un cache sur
-    # disque survivrait a une installation ou une desinstallation de toolchain
-    # et donnerait des reponses fausses.
+    # le resultat pour le PROCESSUS.
     _cacheRunnable: Dict[tuple, Optional[str]] = {}
     _cacheFamily: Dict[str, "CompilerFamily"] = {}
+
+    # ── Et d'un lancement a l'autre, sous conditions (2.8.14) ────────────────
+    # Mesure du 06/10/2026 sur un projet de cours : `jenga build` SANS rien a
+    # faire durait 2,0 s, dont 1,0 s a relancer 12 compilateurs pour verifier
+    # qu'ils repondent. Chaque « Construire » d'un IDE payait cette seconde.
+    #
+    # La crainte d'origine (« un cache sur disque survivrait a une installation
+    # ou une desinstallation ») est tenue par la CLE, pas par l'absence de cache :
+    #   - le chemin de l'executable, sa date et sa taille : une desinstallation
+    #     (plus de fichier), une reinstallation ou une mise a jour invalident ;
+    #   - une empreinte du PATH : une DLL devenue introuvable parce qu'un autre
+    #     compilateur passe devant est le cas reel du diagnostic 0xC0000135 ;
+    #   - 24 h au plus ;
+    #   - SEULS LES SUCCES sont memorises : un compilateur qui echoue est
+    #     re-sonde a chaque fois, sa reparation est vue aussitot.
+    # JENGA_SONDES_SANS_CACHE=1 le coupe ; JENGA_SONDES_CACHE=<fichier> le deplace.
+    _sondes: Optional[Dict[str, float]] = None
+    _sondesModifiees: bool = False
+    _SONDES_DUREE = 24 * 3600.0
+
+    @staticmethod
+    def _SondesFichier() -> Path:
+        force = os.environ.get("JENGA_SONDES_CACHE")
+        return Path(force) if force else Path.home() / ".jenga" / "cache" / "sondes_compilateurs.json"
+
+    @staticmethod
+    def _SondeCle(path: str, version_arg: str) -> Optional[str]:
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        import hashlib
+        empreinte = hashlib.sha1(os.environ.get("PATH", "").encode("utf-8", "replace")).hexdigest()[:16]
+        return f"{os.path.normcase(os.path.abspath(path))}|{version_arg}|{st.st_mtime_ns}|{st.st_size}|{empreinte}"
+
+    @staticmethod
+    def _SondesCharger() -> Dict[str, float]:
+        if ToolchainManager._sondes is None:
+            ToolchainManager._sondes = {}
+            if not os.environ.get("JENGA_SONDES_SANS_CACHE"):
+                try:
+                    import json
+                    brut = json.loads(ToolchainManager._SondesFichier().read_text(encoding="utf-8"))
+                    if isinstance(brut, dict):
+                        ToolchainManager._sondes = {
+                            str(k): v for k, v in brut.items()
+                            if isinstance(v, (int, float))
+                            or (isinstance(v, list) and len(v) == 2 and isinstance(v[0], (int, float)))}
+                except (OSError, ValueError, TypeError):
+                    pass  # absent ou illisible : on re-sonde, rien de plus
+        return ToolchainManager._sondes
+
+    @staticmethod
+    def _SondeConnue(path: str, version_arg: str) -> bool:
+        """Ce compilateur a-t-il deja repondu, dans le meme etat, depuis moins de 24 h ?"""
+        if os.environ.get("JENGA_SONDES_SANS_CACHE"):
+            return False
+        cle = ToolchainManager._SondeCle(path, version_arg)
+        if cle is None:
+            return False
+        import time
+        quand = ToolchainManager._SondesCharger().get(cle)
+        return isinstance(quand, (int, float)) and 0.0 <= time.time() - quand < ToolchainManager._SONDES_DUREE
+
+    @staticmethod
+    def _SondeNoter(path: str, version_arg: str) -> None:
+        """Memorise un SUCCES (jamais un echec), et l'ecrit a la sortie du processus."""
+        if os.environ.get("JENGA_SONDES_SANS_CACHE"):
+            return
+        cle = ToolchainManager._SondeCle(path, version_arg)
+        if cle is None:
+            return
+        import time
+        ToolchainManager._SondesCharger()[cle] = time.time()
+        ToolchainManager._SondesMarquer()
+
+    @staticmethod
+    def _SondesMarquer() -> None:
+        if not ToolchainManager._sondesModifiees:
+            ToolchainManager._sondesModifiees = True
+            import atexit
+            atexit.register(ToolchainManager._SondesEcrire)
+
+    @staticmethod
+    def _FamilleConnue(path: str) -> Optional["CompilerFamily"]:
+        """La famille deja lue de `--version`, meme cle que la sonde (executable, PATH, 24 h)."""
+        if os.environ.get("JENGA_SONDES_SANS_CACHE"):
+            return None
+        cle = ToolchainManager._SondeCle(path, "famille")
+        if cle is None:
+            return None
+        import time
+        v = ToolchainManager._SondesCharger().get(cle)
+        if isinstance(v, list) and 0.0 <= time.time() - v[0] < ToolchainManager._SONDES_DUREE:
+            try:
+                return CompilerFamily[str(v[1])]
+            except KeyError:
+                return None
+        return None
+
+    @staticmethod
+    def _FamilleNoter(path: str, famille: "CompilerFamily") -> None:
+        if os.environ.get("JENGA_SONDES_SANS_CACHE"):
+            return
+        cle = ToolchainManager._SondeCle(path, "famille")
+        if cle is None:
+            return
+        import time
+        ToolchainManager._SondesCharger()[cle] = [time.time(), famille.name]
+        ToolchainManager._SondesMarquer()
+
+    @staticmethod
+    def _SondesEcrire() -> None:
+        if not ToolchainManager._sondesModifiees or ToolchainManager._sondes is None:
+            return
+        try:
+            import json
+            import time
+            maintenant = time.time()
+            vivantes = {k: v for k, v in ToolchainManager._sondes.items()
+                        if 0.0 <= maintenant - (v[0] if isinstance(v, list) else v) < ToolchainManager._SONDES_DUREE}
+            fichier = ToolchainManager._SondesFichier()
+            fichier.parent.mkdir(parents=True, exist_ok=True)
+            provisoire = fichier.with_suffix(".tmp")
+            provisoire.write_text(json.dumps(vivantes, indent=0), encoding="utf-8")
+            os.replace(provisoire, fichier)
+            ToolchainManager._sondesModifiees = False
+        except OSError:
+            pass  # un cache qui ne s'ecrit pas ne doit jamais faire echouer un build
 
     # ── Ce que la detection a essaye, candidat par candidat ─────────────────
     # « No suitable toolchain found » ne disait ni ou Jenga avait cherche, ni
@@ -154,9 +281,14 @@ class ToolchainManager:
                                 + (" nor in " + ", ".join(str(d) for d in replis) if replis else ""))
                 continue
             origine = "" if Process.Which(name) else " (not in PATH, found in MSYS2 folder)"
+            if ToolchainManager._SondeConnue(path, version_arg):
+                diag[name] = f"OK: {path}{origine} (sonde memorisee)"
+                resultat = path
+                break
             try:
                 probe = Process.ExecuteCommand([path, version_arg], captureOutput=True, silent=True)
                 if probe.returnCode == 0:
+                    ToolchainManager._SondeNoter(path, version_arg)
                     diag[name] = f"OK: {path}{origine}"
                     resultat = path
                     break
@@ -470,17 +602,20 @@ class ToolchainManager:
         if clang_path and clangxx_path:
             for triple in ("x86_64-w64-windows-gnu", "x86_64-pc-windows-gnu"):
                 test_cmd = [clang_path, f"--target={triple}", "-c", "-x", "c", "-", "-o", os.devnull]
-                try:
-                    result = Process.ExecuteCommand(
-                        test_cmd,
-                        captureOutput=True,
-                        input="int main(){return 0;}\n",
-                        silent=True,
-                    )
-                except Exception:
-                    continue
-                if result.returnCode != 0:
-                    continue
+                # Essai de compilation memorise comme une sonde (meme cle, meme duree).
+                if not ToolchainManager._SondeConnue(clang_path, f"cible:{triple}"):
+                    try:
+                        result = Process.ExecuteCommand(
+                            test_cmd,
+                            captureOutput=True,
+                            input="int main(){return 0;}\n",
+                            silent=True,
+                        )
+                    except Exception:
+                        continue
+                    if result.returnCode != 0:
+                        continue
+                    ToolchainManager._SondeNoter(clang_path, f"cible:{triple}")
 
                 tc = Toolchain(
                     name="clang-mingw",
@@ -510,15 +645,25 @@ class ToolchainManager:
         """
         if compiler_path in ToolchainManager._cacheFamily:
             return ToolchainManager._cacheFamily[compiler_path]
-        famille = ToolchainManager._DetectCompilerFamilyImpl(compiler_path)
+        famille = ToolchainManager._FamilleConnue(compiler_path)
+        if famille is None:
+            ToolchainManager._familleLue = False
+            famille = ToolchainManager._DetectCompilerFamilyImpl(compiler_path)
+            # Seule une famille LUE dans la sortie est memorisee : le repli « GCC »
+            # d'un compilateur qui n'a pas repondu ne doit pas durer 24 h.
+            if ToolchainManager._familleLue:
+                ToolchainManager._FamilleNoter(compiler_path, famille)
         ToolchainManager._cacheFamily[compiler_path] = famille
         return famille
+
+    _familleLue: bool = False
 
     @staticmethod
     def _DetectCompilerFamilyImpl(compiler_path: str) -> CompilerFamily:
         try:
             out = Process.Capture([compiler_path, "--version"])
             out_lower = out.lower()
+            ToolchainManager._familleLue = True
             if "clang" in out_lower:
                 if "apple" in out_lower:
                     return CompilerFamily.APPLE_CLANG
@@ -531,6 +676,7 @@ class ToolchainManager:
                 return CompilerFamily.MSVC
             if "emscripten" in out_lower:
                 return CompilerFamily.EMSCRIPTEN
+            ToolchainManager._familleLue = False
         except:
             pass
         return CompilerFamily.GCC
@@ -694,8 +840,14 @@ class ToolchainManager:
             triple = "x86_64-unknown-linux-gnu"
             test_cmd = [clang_path, f"--target={triple}", "-c", "-x", "c", "-", "-o", os.devnull]
             try:
-                result = Process.ExecuteCommand(test_cmd, captureOutput=True, input="int main(){return 0;}\n", silent=True)
-                if result.returnCode == 0:
+                # Essai de compilation memorise comme une sonde (meme cle, meme duree).
+                reussi = ToolchainManager._SondeConnue(clang_path, f"cible:{triple}")
+                if not reussi:
+                    result = Process.ExecuteCommand(test_cmd, captureOutput=True, input="int main(){return 0;}\n", silent=True)
+                    reussi = result.returnCode == 0
+                    if reussi:
+                        ToolchainManager._SondeNoter(clang_path, f"cible:{triple}")
+                if reussi:
                     tc = Toolchain(
                         name="clang-cross-linux",
                         compilerFamily=CompilerFamily.CLANG,
