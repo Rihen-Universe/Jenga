@@ -3,6 +3,23 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.13
+
+### Corrigé : sous Windows, l'en-tête précompilé n'est plus refait à chaque build
+
+Avec `pchheader(...)` sans `pchsource(...)`, Jenga écrit lui-même un petit source
+(`__jenga_pch.cpp`). Il le réécrivait à chaque build, avant de vérifier si le PCH était à jour :
+ce fichier, toujours plus récent que le PCH, le faisait donc reconstruire **à chaque fois**.
+Mesure sur un projet de cours lié à un kit (clang-mingw) : 5,9 s de PCH par build, alors que le
+source modifié se compile en 0,9 s avec un PCH réutilisé ; un fichier touché passe de 9,9 s à 3,7 s.
+Le source n'est plus écrit que si son contenu change.
+
+### Ajouté : `jenga info` nomme les toolchains du workspace
+
+Deux lignes de plus : `Workspace toolchains:` (celles que le workspace déclare, inclusions comprises)
+et `Default toolchain:` (celle de `usetoolchain`). « Available Toolchains » liste ce que la machine
+détecte ; un IDE peut désormais n'afficher que ce que le workspace définit.
+
 ## v2.8.12
 
 ### Corrigé : tout ce que Jenga crée pour un workspace vit sous `.jenga/` de sa racine
