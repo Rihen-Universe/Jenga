@@ -3,6 +3,21 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.14
+
+### Plus rapide : les compilateurs ne sont plus interrogés à chaque commande
+
+Chaque `jenga build` relançait une douzaine de compilateurs (`clang++ --version`, `g++ --version`,
+un essai de compilation croisée par cible…) pour savoir lesquels répondent : environ une seconde,
+même quand il n'y avait rien à construire. Une réponse positive est désormais retenue 24 heures dans
+`~/.jenga/cache/sondes_compilateurs.json`. Elle tombe dès que quelque chose a pu changer :
+l'exécutable (date ou taille), le `PATH`, ou le temps écoulé. Un échec n'est jamais retenu : un
+compilateur qu'on vient d'installer ou de réparer est vu à la commande suivante.
+Mesure sur un workspace de cours (Windows, clang-mingw) : un build sans rien à faire passe de 2,1 s
+à 1,2 s.
+
+`JENGA_SONDES_SANS_CACHE=1` coupe ce cache ; `JENGA_SONDES_CACHE=<fichier>` le déplace.
+
 ## v2.8.13
 
 ### Corrigé : sous Windows, l'en-tête précompilé n'est plus refait à chaque build

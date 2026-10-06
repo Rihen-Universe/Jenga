@@ -107,7 +107,10 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # defaut) ; clang-native designe le clang de l'hote ; un toolchain introuvable
 # revient au defaut du build au lieu d'heriter du projet precedent. Verifie par
 # la CI macOS de Nkentseu (Metal dans NKRenderer et NKCanvas).
-__version__ = "2.8.13"
+# 2.8.14 (2026-10-06) : les sondes « ce compilateur repond-il ? » sont retenues 24 h
+# (~/.jenga/cache/sondes_compilateurs.json), invalidees par l'executable, le PATH ou
+# le temps ; un echec n'est jamais retenu. Un build sans rien a faire : 2,1 s -> 1,2 s.
+__version__ = "2.8.14"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer
