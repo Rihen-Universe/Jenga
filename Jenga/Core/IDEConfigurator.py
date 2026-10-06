@@ -204,7 +204,8 @@ def _Fingerprint(data: Dict[str, Any]) -> str:
 # voit pas statiquement. On genere donc un stub `.pyi` qui les DECLARE, ajoute au
 # `extraPaths`. L'editeur peut alors les resoudre (un `from jengaconfig import *`
 # optionnel donne go-to-def + autocomplete ; sinon la coloration reste).
-_STUB_DIR_NAME = ".jenga-typings"
+_STUB_DIR_NAME = ".jenga/typings"
+_LEGACY_STUB_DIR_NAME = ".jenga-typings"
 _STUB_MODULE   = "jengaconfig"
 
 
@@ -233,7 +234,7 @@ def _ExtractUseconfigSymbols(workspace_root: Path) -> Dict[str, str]:
     # .jenga du workspace (racine OU module) : le stub capture ainsi tous les
     # symboles, quel que soit l'endroit ou la config est chargee. Les chemins
     # useconfig sont relatifs a la racine du workspace (cwd au runtime).
-    _SKIP = ("Build", "Externals", _STUB_DIR_NAME, ".git", "__pycache__", "node_modules")
+    _SKIP = ("Build", "Externals", ".jenga", _LEGACY_STUB_DIR_NAME, ".git", "__pycache__", "node_modules")
     cfg_paths: List[str] = []
     seen: set = set()
     try:
@@ -329,12 +330,42 @@ def _RenderConfigStub(symbols: Dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def MigrateLegacyTypings(workspace_root: Path) -> bool:
+    """
+    Deplace une fois l'ancien <workspace>/.jenga-typings/ vers .jenga/typings.
+    Sans perte : un element deja present a la destination n'est pas ecrase (il
+    reste dans l'ancien dossier) ; l'ancien dossier n'est retire que vide.
+    Retourne True si quelque chose a ete deplace.
+    """
+    import shutil
+    root = Path(workspace_root)
+    old = root / _LEGACY_STUB_DIR_NAME
+    if not old.is_dir():
+        return False
+    new = root / _STUB_DIR_NAME
+    moved = False
+    try:
+        new.mkdir(parents=True, exist_ok=True)
+        for item in list(old.iterdir()):
+            target = new / item.name
+            if target.exists():
+                continue
+            shutil.move(str(item), str(target))
+            moved = True
+        if not any(old.iterdir()):
+            old.rmdir()
+    except Exception:
+        pass
+    return moved
+
+
 def GenerateConfigStubs(workspace_root: Path, verbose: bool = False) -> bool:
     """
-    Genere <workspace>/.jenga-typings/jengaconfig.pyi a partir des symboles des
+    Genere <workspace>/.jenga/typings/jengaconfig.pyi a partir des symboles des
     fichiers useconfig(). Retourne True si ecrit/mis a jour. Best-effort.
     """
     workspace_root = Path(workspace_root)
+    MigrateLegacyTypings(workspace_root)
     symbols = _ExtractUseconfigSymbols(workspace_root)
     if not symbols:
         return False
@@ -343,7 +374,7 @@ def GenerateConfigStubs(workspace_root: Path, verbose: bool = False) -> bool:
     stub_path = stub_dir / f"{_STUB_MODULE}.pyi"
     # Module no-op runtime : `from jengaconfig import *` doit etre importable au
     # runtime SANS rien faire (les vrais symboles viennent de la propagation
-    # useconfig). Le Loader ajoute .jenga-typings au sys.path -> l'import marche
+    # useconfig). Le Loader ajoute .jenga/typings au sys.path -> l'import marche
     # et reste cosmetique (purement pour l'editeur, via le .pyi).
     noop_path = stub_dir / f"{_STUB_MODULE}.py"
     noop_body = (
@@ -395,7 +426,7 @@ def _GetVSCodeJengaConfig(jenga_home: Optional[str]) -> Dict[str, Any]:
         "C_Cpp.default.compileCommands": "${workspaceFolder}/Build/" + COMPILE_COMMANDS_NAME,
     }
     # 4. extraPaths : Jenga (resolution de l'API) + dossier de stubs des symboles
-    #    charges via useconfig() (.jenga-typings).
+    #    charges via useconfig() (.jenga/typings).
     extra: List[str] = []
     if jenga_home:
         extra.append(jenga_home)

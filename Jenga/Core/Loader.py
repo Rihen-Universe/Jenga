@@ -272,7 +272,12 @@ class Loader:
         # `from jengaconfig import *` dans les .jenga (purement cosmetique pour
         # l'editeur ; les vrais symboles viennent de la propagation useconfig).
         import sys as _sys
-        _typings = str(filePath.parent / ".jenga-typings")
+        try:
+            from .IDEConfigurator import MigrateLegacyTypings as _mig
+            _mig(filePath.parent)
+        except Exception:
+            pass
+        _typings = str(filePath.parent / ".jenga" / "typings")
         _typings_added = _typings not in _sys.path
         if _typings_added:
             _sys.path.insert(0, _typings)

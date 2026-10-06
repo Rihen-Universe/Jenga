@@ -3,6 +3,20 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## Non publié
+
+### Corrigé : tout ce que Jenga crée pour un workspace vit sous `.jenga/` de sa racine
+
+`jenga workspace MonJeu` laissait un `.jenga\` vide à côté de `MonJeu\` (et même `jenga --version`
+en créait un) : le cache des outils externes était résolu relativement au dossier courant, et créé dès
+l'import. Il est désormais ancré à la racine du workspace (`<racine>/.jenga/tools_cache.json`), ou au
+dossier global `~/.jenga` hors workspace, et n'est créé qu'à l'écriture. Une commande sans workspace
+ne crée aucun dossier ; une commande lancée depuis un sous-dossier n'y écrit rien.
+
+Les stubs d'éditeur passent de `.jenga-typings/` à `.jenga/typings/` (pyrightconfig.json et
+configuration VS Code générée mises à jour). Un ancien `.jenga-typings/` est déplacé une fois vers
+`.jenga/typings`, sans rien écraser ni supprimer d'autre que le dossier vidé.
+
 ## v2.8.11
 
 ### Corrigé : sur ordinateur, `jenga run --target` nomme le projet à lancer

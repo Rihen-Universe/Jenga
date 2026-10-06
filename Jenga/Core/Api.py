@@ -3867,28 +3867,25 @@ class ExternalToolsManager:
     def __init__(self):
         self._tools: Dict[str, ToolConfig] = {}
         self._activeTools: List[str] = []
-        self._cacheFile = self._ResolveCacheFile()
         self._loaded = False
+
+    @property
+    def _cacheFile(self) -> Path:
+        return self._ResolveCacheFile()
 
     @staticmethod
     def _ResolveCacheFile() -> Path:
         """
-        Resolve a writable cache path.
-        Prefer local workspace .jenga, then Jenga root, then user home.
+        Chemin du cache d'outils, SANS rien creer (la creation se fait a
+        l'ecriture). Dans un workspace : <racine du workspace>/.jenga ; sans
+        workspace : le dossier global de l'utilisateur ~/.jenga. Jamais relatif
+        au dossier courant.
         """
-        candidates = [
-            Path(".jenga") / "tools_cache.json",
-            Path(__file__).resolve().parents[2] / ".jenga" / "tools_cache.json",
-            Path.home() / ".jenga" / "tools_cache.json",
-        ]
-        for cand in candidates:
-            try:
-                cand.parent.mkdir(parents=True, exist_ok=True)
-                return cand
-            except Exception:
-                continue
-        # Last-resort fallback; SaveCache already handles failures.
-        return Path(".jenga") / "tools_cache.json"
+        wks = globals().get("_currentWorkspace")
+        loc = getattr(wks, "location", "") if wks is not None else ""
+        if loc:
+            return Path(loc).resolve() / ".jenga" / "tools_cache.json"
+        return Path.home() / ".jenga" / "tools_cache.json"
 
     def LoadCache(self):
         if not self._loaded and self._cacheFile.exists():
