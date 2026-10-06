@@ -107,7 +107,7 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # defaut) ; clang-native designe le clang de l'hote ; un toolchain introuvable
 # revient au defaut du build au lieu d'heriter du projet precedent. Verifie par
 # la CI macOS de Nkentseu (Metal dans NKRenderer et NKCanvas).
-__version__ = "2.8.11"
+__version__ = "2.8.12"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

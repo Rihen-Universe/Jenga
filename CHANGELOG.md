@@ -3,7 +3,7 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
-## Non publié
+## v2.8.12
 
 ### Corrigé : tout ce que Jenga crée pour un workspace vit sous `.jenga/` de sa racine
 
