@@ -19,7 +19,59 @@ from .._version import __version__
 
 
 class InfoCommand:
-    """jenga info [--verbose] [--no-daemon]"""
+    """jenga info [--verbose] [--no-daemon] [--json]"""
+
+    # La ligne qui precede le JSON de `--json`. Le chargement d'un workspace peut
+    # ecrire sur la sortie (un .jenga est un programme) : celui qui lit cherche
+    # CETTE ligne, pas la premiere accolade.
+    JSON_MARKER = "@@JENGA-INFO-JSON@@"
+
+    @staticmethod
+    def Describe(workspace, entry_file) -> dict:
+        """Le workspace et ses projets, tels que Jenga les a charges : inclusions
+        suivies, variables evaluees, conditions resolues. Pour un outil (NKCode :
+        le graphe et l'architecture d'un workspace), pas pour un humain.
+
+        Rien n'est detecte ici (ni toolchains ni demon) : seulement ce que les
+        fichiers declarent. Les motifs de `files` sont rendus tels quels, sans
+        parcourir le disque.
+        """
+        def _val(x):
+            return getattr(x, "value", x) if x is not None else ""
+
+        projets = []
+        for name, proj in workspace.projects.items():
+            projets.append({
+                "name": name,
+                "kind": _val(proj.kind),
+                "language": _val(proj.language),
+                "cppdialect": proj.cppdialect or "",
+                "location": str(proj.location or ""),
+                # le fichier qui le declare : celui d'une inclusion, sinon le workspace
+                "file": str(getattr(proj, "_externalFile", "") or entry_file),
+                "external": bool(getattr(proj, "_external", False)),
+                "test": bool(getattr(proj, "isTest", False)),
+                "dependsOn": list(proj.dependsOn),
+                "links": list(proj.links),
+                "files": list(proj.files),
+                "defines": list(getattr(proj, "defines", []) or []),
+                "pch": proj.pchHeader or "",
+            })
+        return {
+            "jenga": __version__,
+            "workspace": {
+                "name": workspace.name,
+                "file": str(entry_file),
+                "location": str(workspace.location or ""),
+                "configurations": list(workspace.configurations),
+                "targetOses": [_val(o) for o in workspace.targetOses],
+                "targetArchs": [_val(a) for a in workspace.targetArchs],
+                "startProject": workspace.startProject or "",
+                "defaultToolchain": workspace.defaultToolchain or "",
+                "toolchains": sorted(workspace.toolchains.keys()),
+            },
+            "projects": projets,
+        }
 
     @staticmethod
     def Execute(args: List[str]) -> int:
@@ -27,6 +79,8 @@ class InfoCommand:
         parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed info")
         parser.add_argument("--no-daemon", action="store_true", help="Do not query daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
+        parser.add_argument("--json", action="store_true",
+                            help="Describe the workspace and its projects as JSON (for tools); nothing is detected")
         parsed = parser.parse_args(args)
 
         # Déterminer le répertoire de travail (workspace root)
@@ -49,6 +103,15 @@ class InfoCommand:
         if workspace is None:
             Colored.PrintError("Failed to load workspace.")
             return 1
+
+        if parsed.json:
+            import json
+            print(InfoCommand.JSON_MARKER)
+            # Une valeur par ligne : un lecteur qui borne la longueur d'une ligne
+            # (NKCode coupe a 8 Ko) lirait sinon un JSON tronque -- 424 Ko d'un
+            # seul tenant pour le workspace Nkentseu.
+            print(json.dumps(InfoCommand.Describe(workspace, entry_file), ensure_ascii=False, indent=1))
+            return 0
 
         # En-tête
         Display.PrintHeader(f"Jenga Workspace: {workspace.name}", char="=", color="cyan")

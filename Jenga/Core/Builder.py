@@ -1798,10 +1798,36 @@ class Builder(abc.ABC):
             # Signature sidecar is best effort; build outputs remain valid.
             pass
 
+    # Les jetons d'option qui disent COMMENT jenga a ete appele, pas comment un fichier
+    # se compile (voir _ComputeCompileSignature).
+    _INVOCATION_OPTION_PREFIXES = ("target:", "action:")
+    _INVOCATION_OPTION_FLAGS = ("verbose", "no-cache", "no-daemon")
+
+    @classmethod
+    def _IsInvocationOption(cls, token: str) -> bool:
+        tok = str(token).strip().lower()
+        return tok in cls._INVOCATION_OPTION_FLAGS or tok.startswith(cls._INVOCATION_OPTION_PREFIXES)
+
     def _ComputeCompileSignature(self, project: Project, sourceFile: str, objectFile: str) -> str:
         """
         Build a deterministic signature for one compile unit.
         Any change in compile-relevant context should invalidate cached objects.
+
+        ⚠️ CE QUI DECRIT L'APPEL NE DECRIT PAS L'OBJET (2.8.15). La signature portait
+        l'action (`build`, `run`, `test`) et tous les jetons d'option, dont
+        `target:<cible demandee>`, `verbose`, `no-daemon`. Demander une autre cible
+        changeait donc la signature de CHAQUE objet de CHAQUE projet dont elle depend :
+        tout se recompilait. Mesure sur le workspace Nkentseu : passer de
+        `--target PV3DE` a `--target NKCode` recompilait 380 fichiers, dont les 6 de
+        NKCore, sans qu'une ligne ait change ; de meme `jenga run --build` ou
+        `jenga test` apres `jenga build`, ou l'ajout de `--verbose`.
+
+        Ces jetons n'agissent sur la compilation que par les filtres
+        (`filter("options:...")`, `filter("action:...")`). Or `_ApplyProjectFilters` a
+        deja pose leurs effets sur le projet -- definitions, dossiers d'en-tetes,
+        drapeaux, PCH, optimisation -- et ces effets-la SONT dans la signature. Un
+        filtre qui change vraiment la compilation l'invalide donc toujours, par ce
+        qu'il change et non par le nom de celui qui le declenche.
         """
         try:
             module_flags = [str(f) for f in self.GetModuleFlags(project, sourceFile)]
@@ -1833,8 +1859,7 @@ class Builder(abc.ABC):
                 "target_os": self.targetOs.value,
                 "target_arch": self.targetArch.value,
                 "target_env": self.targetEnv.value if self.targetEnv else "",
-                "action": self.action,
-                "options": list(self.options),
+                "options": [o for o in self.options if not self._IsInvocationOption(o)],
             },
             "toolchain": toolchain_payload,
             "project": {
@@ -1852,6 +1877,9 @@ class Builder(abc.ABC):
                 "pch_header": str(getattr(project, "_jengaPchHeaderResolved", project.pchHeader or "")),
                 "pch_source": str(getattr(project, "_jengaPchSourceResolved", project.pchSource or "")),
                 "pch_binary": str(getattr(project, "_jengaPchFile", "")),
+                # le dernier reglage de compilation que les filtres posent sur le projet
+                # et que la signature ne voyait que par le jeton qui le declenchait
+                "objc_arc": bool(getattr(project, "objcArc", False)),
             },
             "source": str(Path(sourceFile).resolve()),
             "object": str(Path(objectFile).resolve()),

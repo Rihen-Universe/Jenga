@@ -110,7 +110,14 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # 2.8.14 (2026-10-06) : les sondes « ce compilateur repond-il ? » sont retenues 24 h
 # (~/.jenga/cache/sondes_compilateurs.json), invalidees par l'executable, le PATH ou
 # le temps ; un echec n'est jamais retenu. Un build sans rien a faire : 2,1 s -> 1,2 s.
-__version__ = "2.8.14"
+# 2.8.15 (2026-10-07) : la signature de compilation ne porte plus la facon d'appeler jenga
+# (cible demandee, action, verbose, no-daemon) : changer de cible ne recompile plus tout
+# (380 fichiers sur le workspace Nkentseu). Le premier build apres la mise a jour recompile
+# tout une derniere fois.
+# `jenga info --json` decrit le workspace et ses projets pour un
+# outil (inclusions suivies, variables et conditions resolues), derriere une ligne-repere
+# et une valeur par ligne. NKCode en tire le graphe et l'architecture d'un workspace.
+__version__ = "2.8.15"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

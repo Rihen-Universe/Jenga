@@ -3,6 +3,42 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.15
+
+### Corrigé : changer de cible ne recompile plus tout
+
+La signature qui décide si un objet est à jour portait la façon dont `jenga` avait été appelé :
+l'action (`build`, `run`, `test`) et tous les jetons d'option, dont `target:<cible demandée>`,
+`verbose` et `no-daemon`. Demander une autre cible changeait donc la signature de **chaque** objet
+de **chaque** projet dont elle dépend, et tout se recompilait — de même `jenga run --build` ou
+`jenga test` après `jenga build`, ou le simple ajout de `--verbose`.
+Mesure sur un workspace de 341 projets : passer de `--target PV3DE` à `--target NKCode`
+recompilait 380 fichiers, dont tout le noyau, sans qu'une ligne ait changé (5 à 10 minutes à
+chaque changement de cible).
+
+Ces jetons n'agissent sur la compilation que par les filtres (`filter("options:...")`,
+`filter("action:...")`), dont les effets — définitions, dossiers d'en-têtes, drapeaux, PCH,
+optimisation — sont déjà posés sur le projet et font partie de la signature. Un filtre qui change
+vraiment la compilation invalide donc toujours l'objet, par ce qu'il change.
+
+La signature change de forme : **le premier build après la mise à jour recompile tout, une
+dernière fois.**
+
+### Nouveau : `jenga info --json`, le workspace décrit pour un outil
+
+`jenga info --json` écrit le workspace et ses projets en JSON : pour chaque projet son type, son
+langage, sa norme, son emplacement, le fichier `.jenga` qui le déclare, ses dépendances
+(`dependson`), ses bibliothèques, ses motifs de sources et ses définitions. C'est ce que Jenga a
+réellement chargé : les fichiers inclus sont suivis, les variables évaluées, les conditions
+résolues — ce qu'une lecture du texte des `.jenga` ne peut pas voir. Rien n'est détecté
+(ni compilateurs ni démon), la commande est donc rapide : 6 s pour un workspace de 341 projets.
+
+La description suit une ligne-repère, `@@JENGA-INFO-JSON@@`, parce qu'un `.jenga` est un
+programme et peut écrire lui-même sur la sortie ; elle tient une valeur par ligne, pour les
+lecteurs qui bornent la longueur d'une ligne. Sans `--json`, `jenga info` ne change pas.
+
+NKCode s'en sert pour le graphe et l'architecture en couches d'un workspace.
+
 ## v2.8.14
 
 ### Plus rapide : les compilateurs ne sont plus interrogés à chaque commande
