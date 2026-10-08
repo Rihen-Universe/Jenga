@@ -127,7 +127,7 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # que libc++ et libstdc++ (ou clang et gcc) sont melanges est EXPLIQUE. Un kit dit ce qu'il
 # exige (kitrequire) et refuse une configuration qu'il ne contient pas (builderror), au lieu
 # de centaines de symboles introuvables. Chaque compilateur tourne avec son dossier en tete.
-__version__ = "2.8.17"
+__version__ = "2.8.18"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

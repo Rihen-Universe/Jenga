@@ -77,6 +77,11 @@ class ToolchainInfo:
     targetOs: str = ""
     arch: str = ""
     env: str = ""
+    # (2.8.18) QUEL compilateur, QUELLE bibliotheque C++ : ce que `jenga info` imprime dans
+    # son bloc « Toolchain compilers: ». Vides quand la chaine n'a pas de compilateur C++ sur
+    # cette machine, ou que sa bibliotheque ne se demande pas (chaine croisee, MSVC).
+    cxx: str = ""
+    stdlib: str = ""
 
 
 @dataclass
@@ -86,6 +91,13 @@ class WorkspaceInfo:
     configurations: List[str] = field(default_factory=list)
     projects: List[ProjectInfo] = field(default_factory=list)
     toolchains: List[ToolchainInfo] = field(default_factory=list)
+    # (2.8.18) Ce que le workspace DECLARE : les lignes « Target OSes », « Target
+    # Architectures », « Workspace toolchains » et « Default toolchain » de `jenga info`.
+    # Sans elles, un IDE embarque ne peut pas se limiter a ce que le workspace definit.
+    targetOses: List[str] = field(default_factory=list)
+    targetArchs: List[str] = field(default_factory=list)
+    workspaceToolchains: List[str] = field(default_factory=list)
+    defaultToolchain: str = ""
     errorMessage: str = ""
 
 
@@ -531,9 +543,19 @@ def Info(jenga_file: Optional[str] = None) -> WorkspaceInfo:
         out.name = getattr(workspace, "name", "") or ""
         out.startProject = getattr(workspace, "startProject", "") or ""
         out.configurations = list(getattr(workspace, "configurations", []) or [])
+
+        def _valeur(x):
+            return x.value if hasattr(x, "value") else (str(x) if x else "")
+
+        out.targetOses = [_valeur(o) for o in (getattr(workspace, "targetOses", []) or [])]
+        out.targetArchs = [_valeur(a) for a in (getattr(workspace, "targetArchs", []) or [])]
+        out.workspaceToolchains = sorted((getattr(workspace, "toolchains", {}) or {}).keys())
+        out.defaultToolchain = getattr(workspace, "defaultToolchain", "") or ""
         for name, proj in (getattr(workspace, "projects", {}) or {}).items():
-            kind = getattr(proj, "kind", "")
-            kind_str = kind.name if hasattr(kind, "name") else str(kind)
+            # (2.8.18) La VALEUR du genre (« ConsoleApp »), celle que `jenga info` imprime --
+            # pas le nom de l'enumeration (« CONSOLE_APP »). Un hote qui cherchait « Console »
+            # prenait une application pour une bibliotheque et refusait de la lancer.
+            kind_str = _valeur(getattr(proj, "kind", ""))
             deps = [d for d in (getattr(proj, "dependsOn", []) or [])]
             out.projects.append(ProjectInfo(name=name, kind=kind_str, dependsOn=deps))
         # Toolchains detectees — meme source que la table « Available Toolchains »
@@ -544,12 +566,19 @@ def Info(jenga_file: Optional[str] = None) -> WorkspaceInfo:
             for tcName, tc in (ToolchainManager(workspace).DetectAll() or {}).items():
                 def _v(x):
                     return x.value if hasattr(x, "value") else (str(x) if x else "")
+                # une chaine dont le compilateur ne se laisse pas decrire reste une chaine
+                try:
+                    cxx, stdlib = ToolchainManager.DescribeCompiler(tc)
+                except Exception:  # noqa: BLE001
+                    cxx, stdlib = "", ""
                 out.toolchains.append(ToolchainInfo(
                     name=tcName,
                     family=_v(getattr(tc, "compilerFamily", None)),
                     targetOs=_v(getattr(tc, "targetOs", None)),
                     arch=_v(getattr(tc, "targetArch", None)),
-                    env=_v(getattr(tc, "targetEnv", None))))
+                    env=_v(getattr(tc, "targetEnv", None)),
+                    cxx=cxx or "",
+                    stdlib=stdlib or ""))
         except Exception:  # noqa: BLE001
             pass
         return out

@@ -3,6 +3,27 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.18 — 2026-10-08
+
+### L'API embarquée dit la même chose que `jenga info`
+
+`Embed.Info()` sert les outils qui embarquent Jenga (NKCode). Elle rendait le genre d'un projet par le
+**nom** de l'énumération (`CONSOLE_APP`), là où `jenga info` imprime sa **valeur** (`ConsoleApp`). Un
+hôte qui cherchait « Console » ou « Windowed » prenait une application pour une bibliothèque : mesuré le
+08/10/2026 dans NKCode, « Démarrer » répondait « rien à exécuter » dans tous les paquets, dont le réglage
+par défaut est le Jenga embarqué.
+
+- **`ProjectInfo.kind`** vaut maintenant `ConsoleApp`, `WindowedApp`, `StaticLib`, `SharedLib` ou
+  `TestSuite`, comme la commande.
+- **`ToolchainInfo.cxx`** et **`ToolchainInfo.stdlib`** : le compilateur C++ de la chaîne et sa
+  bibliothèque C++ (le bloc `Toolchain compilers:` de `jenga info`).
+- **`WorkspaceInfo.targetOses`, `targetArchs`, `workspaceToolchains`, `defaultToolchain`** : ce que le
+  workspace déclare (les lignes `Target OSes`, `Target Architectures`, `Workspace toolchains` et
+  `Default toolchain`).
+
+Test : `tests/test_embed_info.py` compare, pour un même workspace, ce que rend `Embed.Info()` à ce
+qu'imprime `jenga info`.
+
 ## v2.8.17 — 2026-10-08
 
 ### Quel compilateur, quelle bibliothèque C++ : la chaîne le dit
