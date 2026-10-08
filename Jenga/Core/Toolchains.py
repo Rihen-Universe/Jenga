@@ -510,10 +510,11 @@ class ToolchainManager:
         if sys.platform != "win32":
             return None
         # Prefer clang/clang++ MinGW-style toolchain (MSYS2/UCRT) when present.
-        # (2.8.16) CLANG_MINGW_CC / CLANG_MINGW_CXX passent DEVANT : un hote (NKCode)
-        # qui a choisi son compilateur le dit par la, comme pour GlobalToolchains. Sans
-        # cela, le C venait du PATH (« clang » : msys64, llvm-mingw n'a que des noms
-        # prefixes) et le C++ d'ailleurs -- deux compilateurs pour un meme projet.
+        # (2.8.16) CLANG_MINGW_CC / CLANG_MINGW_CXX passent DEVANT le PATH : un hote
+        # (NKCode) qui a choisi son compilateur le dit par la, comme pour
+        # GlobalToolchains. Mesure du 08/10 : avec le lanceur de NKCode (llvm-mingw en
+        # tete du PATH), un projet lie a un kit compile par le clang de msys64 ne se
+        # lie qu'avec ces deux variables ; msys64 ajoute au PATH ne suffit pas.
         env_cc = os.environ.get("CLANG_MINGW_CC", "")
         env_cxx = os.environ.get("CLANG_MINGW_CXX", "")
         if env_cc and env_cxx and Path(env_cc).exists() and Path(env_cxx).exists():

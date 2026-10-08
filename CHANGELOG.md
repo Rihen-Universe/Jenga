@@ -44,10 +44,15 @@ maintenant enregistrés, et le cache les surveille.
 ### Corrigé : `CLANG_MINGW_CC` / `CLANG_MINGW_CXX` valent aussi pour la détection automatique
 
 Ces deux variables désignaient déjà le compilateur de `clang-mingw` pour `RegisterJengaGlobalToolchains()`.
-La détection automatique, elle, prenait `clang` puis `clang++` dans le PATH : le C pouvait venir d'un
-compilateur (le `clang.exe` de msys64 ; llvm-mingw n'a que des noms préfixés) et le C++ d'un autre. Un
-hôte qui choisit son compilateur (NKCode, Réglages › Jenga) le dit par ces variables, et toute la chaîne
-suit.
+La détection automatique, elle, ne lisait que le PATH. Un hôte qui choisit son compilateur (NKCode,
+Réglages › Jenga) le dit par ces variables, et les deux chemins de détection lui obéissent.
+
+Mesuré le 08/10 sur un projet lié à un kit compilé par le clang de msys64, avec le lanceur `jenga.cmd` de
+NKCode (qui met llvm-mingw en tête du PATH) : sans rien, le lien échoue (`std::__cxx11…`) ; msys64 ajouté
+en tête du PATH seulement, il échoue encore ; avec les deux variables, il réussit.
+
+*Rectification* : une première rédaction de cette note disait que llvm-mingw « n'a que des noms préfixés ».
+C'est faux : il a aussi `clang.exe` et `clang++.exe`.
 
 **À savoir** : `clang-mingw` cherche `C:\msys64\...` **avant** le PATH. Un kit compilé avec le clang de
 msys64 (libstdc++) ne se lie pas avec llvm-mingw (libc++) : `undefined symbol std::__cxx11::basic_string…`.
