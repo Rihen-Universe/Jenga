@@ -3,6 +3,11 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+**Ce que valent `x.y.z`** (règle du 08/10/2026, la même que pour NKCode) : `x` change quand quelque chose
+peut casser l'existant ; `y` quand des fonctions nouvelles arrivent ; `z` **compte les corrections** — une
+sortie qui en apporte cinq avance `z` de cinq, et non d'un. Quand `x` ou `y` augmente, les nombres à sa
+droite reviennent à zéro.
+
 ## v2.8.18 — 2026-10-08
 
 ### L'API embarquée dit la même chose que `jenga info`
