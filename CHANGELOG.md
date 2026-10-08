@@ -3,6 +3,56 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.16
+
+### Nouveau : la fiche d'identité de l'exécutable Windows
+
+Un exécutable construit par Jenga n'avait ni société, ni produit, ni description, ni version :
+`0.0.0.0` et des champs vides dans *Propriétés › Détails*. Sur une machine où Smart App Control
+est actif, le journal d'intégrité du code montre pour chaque exécutable refusé zéro signature **et**
+une fiche vide — un inconnu complet. Toute application (`consoleapp`, `windowedapp`) reçoit
+maintenant une ressource de version, tirée de son `.jenga` :
+
+```python
+with workspace("Studio"):
+    apppublisher("Mon Studio")              # l'éditeur par défaut de tous les projets
+    appcopyright("© 2026 Mon Studio")
+    with project("Jeu"):
+        windowedapp()
+        appversion("1.2.0")
+        appdescription("Le jeu du studio")  # à défaut : le nom du projet
+```
+
+- `appdescription(texte)` et `appcopyright(texte)` sont nouveaux ; `apppublisher` et
+  `appcopyright` s'écrivent aussi **au niveau du workspace**, comme valeur par défaut.
+- Sans rien écrire, la fiche porte le nom du projet, le nom du fichier et la version `1.0.0`.
+- La ressource est compilée en UTF-8 (un nom accentué), avec l'icône quand il y en a une ; si la
+  fiche ne se compile pas, l'icône est gardée et un avertissement le dit.
+
+Cette fiche ne remplace pas une signature de code : elle dit qui et quoi, à Windows comme à
+l'utilisateur.
+
+### Corrigé : un fichier inclus modifié était ignoré par le Jenga en processus
+
+`with include("Projet/Projet.jenga")` lit son fichier lui-même, sans passer par le chargeur : le
+registre des fichiers lus (`GetLoadedFiles`) ne contenait que le fichier d'entrée. Un hôte qui garde
+le workspace en cache — le Jenga embarqué de NKCode — ne voyait donc pas un fichier inclus changer,
+et reconstruisait avec l'ancien contenu : un `location("app")` corrigé en `location(".")` donnait
+toujours `Not a directory: ...\app`, jusqu'au redémarrage de NKCode. Les fichiers inclus sont
+maintenant enregistrés, et le cache les surveille.
+
+### Corrigé : `CLANG_MINGW_CC` / `CLANG_MINGW_CXX` valent aussi pour la détection automatique
+
+Ces deux variables désignaient déjà le compilateur de `clang-mingw` pour `RegisterJengaGlobalToolchains()`.
+La détection automatique, elle, prenait `clang` puis `clang++` dans le PATH : le C pouvait venir d'un
+compilateur (le `clang.exe` de msys64 ; llvm-mingw n'a que des noms préfixés) et le C++ d'un autre. Un
+hôte qui choisit son compilateur (NKCode, Réglages › Jenga) le dit par ces variables, et toute la chaîne
+suit.
+
+**À savoir** : `clang-mingw` cherche `C:\msys64\...` **avant** le PATH. Un kit compilé avec le clang de
+msys64 (libstdc++) ne se lie pas avec llvm-mingw (libc++) : `undefined symbol std::__cxx11::basic_string…`.
+Compilez un kit avec le compilateur qui le liera.
+
 ## v2.8.15
 
 ### Corrigé : changer de cible ne recompile plus tout

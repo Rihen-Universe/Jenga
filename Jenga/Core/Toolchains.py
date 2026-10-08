@@ -510,8 +510,17 @@ class ToolchainManager:
         if sys.platform != "win32":
             return None
         # Prefer clang/clang++ MinGW-style toolchain (MSYS2/UCRT) when present.
-        clang_path = ToolchainManager._FirstRunnable(["clang"])
-        clangpp_path = ToolchainManager._FirstRunnable(["clang++"])
+        # (2.8.16) CLANG_MINGW_CC / CLANG_MINGW_CXX passent DEVANT : un hote (NKCode)
+        # qui a choisi son compilateur le dit par la, comme pour GlobalToolchains. Sans
+        # cela, le C venait du PATH (« clang » : msys64, llvm-mingw n'a que des noms
+        # prefixes) et le C++ d'ailleurs -- deux compilateurs pour un meme projet.
+        env_cc = os.environ.get("CLANG_MINGW_CC", "")
+        env_cxx = os.environ.get("CLANG_MINGW_CXX", "")
+        if env_cc and env_cxx and Path(env_cc).exists() and Path(env_cxx).exists():
+            clang_path, clangpp_path = env_cc, env_cxx
+        else:
+            clang_path = ToolchainManager._FirstRunnable(["clang"])
+            clangpp_path = ToolchainManager._FirstRunnable(["clang++"])
         if clang_path and clangpp_path:
             tc = Toolchain(
                 name="clang-mingw",

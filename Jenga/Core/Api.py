@@ -312,6 +312,13 @@ class Project:
     createDesktopShortcut: bool = True
     appPublisher:          str  = ""
     appVersion:            str  = ""
+    #   appDescription / appCopyright : avec appPublisher et appVersion, la
+    #                 FICHE D'IDENTITE de l'executable -- la ressource de
+    #                 version Windows (Proprietes > Details), voir
+    #                 Builders/Windows.py. Un executable sans elle est un
+    #                 inconnu pour Windows (Smart App Control).
+    appDescription:        str  = ""
+    appCopyright:          str  = ""
     # Bag d'options libres lues par les builders installer. Permet a l'user
     # d'ajouter de nouvelles options (autostart, registry entries, branding,
     # etc.) sans qu'on doive elargir l'API. Voir installeroption() ci-dessous.
@@ -576,6 +583,11 @@ class Workspace:
     targetOses: List[TargetOS] = field(default_factory=list)
     targetArchs: List[TargetArch] = field(default_factory=list)
     startProject: str = ""
+    # L'editeur et le copyright PAR DEFAUT de tous les projets du workspace
+    # (apppublisher / appcopyright ecrits hors de tout projet) : un studio les
+    # dit une fois, chaque application peut les redire.
+    appPublisher: str = ""
+    appCopyright: str = ""
     options: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     projects: Dict[str, Project] = field(default_factory=dict)
     toolchains: Dict[str, Toolchain] = field(default_factory=dict)
@@ -633,6 +645,14 @@ class Workspace:
 # ---------------------------------------------------------------------------
 
 _currentWorkspace: Optional[Workspace] = None
+# (2.8.16) Les fichiers lus par `with include(...)` : include les lit LUI-MEME
+# (il ne passe pas par le Loader), et le registre du Loader (GetLoadedFiles)
+# les manquait. Un hote qui garde le workspace en cache -- le Jenga en
+# processus de NKCode, Core/Embed.py -- ne voyait donc pas un fichier inclus
+# changer, et reconstruisait avec l'ancien (2026-10-08 : un location("app")
+# corrige en location(".") donnait toujours « Not a directory: ...\app »).
+# Le Loader le vide au debut de chaque chargement.
+_includedFiles: List[Path] = []
 _currentProject: Optional[Project] = None
 _currentToolchain: Optional[Toolchain] = None
 _currentFilter: Optional[str] = None
@@ -1070,6 +1090,7 @@ class include:
             self._jengaPath = wksDir / self._jengaPath
         if not self._jengaPath.exists():
             raise FileNotFoundError(f"External file not found: {self._jengaPath}")
+        _includedFiles.append(self._jengaPath.resolve())
 
         self._externalDir = self._jengaPath.parent.absolute()
         self._tempWorkspace = Workspace(name=f"__include_{self._jengaPath.stem}__")
@@ -2473,9 +2494,33 @@ def createdesktopshortcut(enable: bool = True) -> None:
 
 def apppublisher(name: str) -> None:
     """Nom du publisher/editeur de l'application (affiche dans 'Programs and
-    Features' Windows + Info Inno + control panel macOS)."""
+    Features' Windows + Info Inno + control panel macOS), et « Societe » dans
+    la fiche d'identite de l'executable Windows.
+    Dans un projet : pour lui. Hors de tout projet, dans le workspace :
+    l'editeur par defaut de tous ses projets."""
+    v = str(name or "").strip()
     if _currentProject:
-        _currentProject.appPublisher = str(name or "").strip()
+        _currentProject.appPublisher = v
+    elif _currentWorkspace:
+        _currentWorkspace.appPublisher = v
+
+
+def appdescription(text: str) -> None:
+    """Ce qu'est l'application, en une ligne (« Description du fichier » dans
+    les proprietes de l'executable Windows). A defaut : le nom du projet."""
+    if _currentProject:
+        _currentProject.appDescription = str(text or "").strip()
+
+
+def appcopyright(text: str) -> None:
+    """La mention de copyright de l'application (fiche d'identite de
+    l'executable Windows). Dans un projet : pour lui. Hors de tout projet,
+    dans le workspace : celle par defaut de tous ses projets."""
+    v = str(text or "").strip()
+    if _currentProject:
+        _currentProject.appCopyright = v
+    elif _currentWorkspace:
+        _currentWorkspace.appCopyright = v
 
 
 def appversion(version: str) -> None:
@@ -4681,7 +4726,7 @@ _PROJECT_ONLY_WORDS = (
     "appurl",
     "iosbundleid", "iosversion", "iosminsdk", "iossigningidentity",
     "iosentitlements", "iosappicon", "appicon", "androidappicon", "windowsicon",
-    "macosicon", "webfavicon", "licensefile", "createdesktopshortcut", "apppublisher",
+    "macosicon", "webfavicon", "licensefile", "createdesktopshortcut", "appdescription",
     "appversion", "signingcertificate", "signingpassword", "signingthumbprint",
     "signingidentity", "signingtimestampurl", "signinggpgkey", "signingentitlements",
     "signingrequireadmin", "installeroption", "networkenabled", "networkusagedescription",
@@ -4701,6 +4746,8 @@ _PROJECT_OR_TOOLCHAIN_WORDS = (
 )
 _PROJECT_OR_WORKSPACE_WORDS = (
     "emscriptenfullscreenshell",
+    # l'editeur et le copyright : pour un projet, ou par defaut pour tout le workspace
+    "apppublisher", "appcopyright",
 )
 
 _API_PACKAGE_DIR = str(Path(__file__).resolve().parent.parent)

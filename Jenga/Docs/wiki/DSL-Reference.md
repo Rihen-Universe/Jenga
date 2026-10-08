@@ -253,7 +253,8 @@ les fusionner.
 ### Installer / packaging
 
 `licensefile(path)` (.txt/.md/.rtf) · `createdesktopshortcut(bool)` ·
-`apppublisher(name)` · `appversion(version)` · `installeroption(key, value)`.
+`apppublisher(name)` · `appversion(version)` · `appdescription(text)` · `appcopyright(text)` · `installeroption(key, value)`.
+`apppublisher` et `appcopyright` s'écrivent aussi au niveau du workspace (valeur par défaut de ses projets) ; avec `appversion` et `appdescription`, ils font la fiche d'identité de l'exécutable Windows (*Propriétés › Détails*).
 
 ### Réseau / pare-feu
 
@@ -513,7 +514,8 @@ function is available. See [HarmonyOS](HarmonyOS.md).
 ### Installer / packaging
 
 `licensefile(path)` (.txt/.md/.rtf) · `createdesktopshortcut(bool)` ·
-`apppublisher(name)` · `appversion(version)` · `installeroption(key, value)`.
+`apppublisher(name)` · `appversion(version)` · `appdescription(text)` · `appcopyright(text)` · `installeroption(key, value)`.
+`apppublisher` et `appcopyright` s'écrivent aussi au niveau du workspace (valeur par défaut de ses projets) ; avec `appversion` et `appdescription`, ils font la fiche d'identité de l'exécutable Windows (*Propriétés › Détails*).
 
 ### Networking / firewall
 

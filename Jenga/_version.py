@@ -117,7 +117,11 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # `jenga info --json` decrit le workspace et ses projets pour un
 # outil (inclusions suivies, variables et conditions resolues), derriere une ligne-repere
 # et une valeur par ligne. NKCode en tire le graphe et l'architecture d'un workspace.
-__version__ = "2.8.15"
+# 2.8.16 (2026-10-08) : la fiche d'identite de l'executable Windows (VERSIONINFO : editeur,
+# produit, description, version, copyright ; appdescription, appcopyright, apppublisher au niveau
+# du workspace). Le cache du Jenga embarque surveille aussi les fichiers INCLUS (un include
+# corrige n'etait pas relu). CLANG_MINGW_CC/CXX valent pour la detection automatique.
+__version__ = "2.8.16"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

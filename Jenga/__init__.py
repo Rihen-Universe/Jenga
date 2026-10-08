@@ -53,6 +53,7 @@ from .Core.Api import (
     appicon, androidappicon, windowsicon, macosicon, webfavicon,
     # Installer packaging DSL (MSI/EXE/DEB/PKG)
     licensefile, createdesktopshortcut, apppublisher, appversion, installeroption,
+    appdescription, appcopyright,
     harmonyminsdk, harmonysdk, harmonybundlename, harmonyversioncode, harmonyversionname, harmonytargetapi, harmonysign, harmonycertfile, harmonyprofile, harmonypermissions, harmonyassets,
     harmonyabis, harmonyappicon, harmonyorientation, harmonyets,
 
@@ -117,7 +118,7 @@ __all__ = [
     'appicon', 'androidappicon', 'windowsicon', 'macosicon', 'webfavicon',
     # Installer packaging DSL (MSI/EXE/DEB/PKG)
     'licensefile', 'createdesktopshortcut', 'apppublisher', 'appversion',
-    'installeroption',
+    'installeroption', 'appdescription', 'appcopyright',
     'harmonyminsdk', 'harmonysdk', 'harmonybundlename', 'harmonyversioncode', 'harmonyversionname', 'harmonytargetapi', 'harmonysign', 'harmonycertfile', 'harmonyprofile', 'harmonypermissions', 'harmonyassets',
     'harmonyabis', 'harmonyappicon', 'harmonyorientation', 'harmonyets',
     'gdkpath', 'xboxmode', 'xboxplatform', 'xboxsigningmode', 'xboxpackagename', 'xboxpublisher', 'xboxversion', 'xboxlekbpath', 'xboxassetchunks',

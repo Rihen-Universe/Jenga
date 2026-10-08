@@ -23,6 +23,87 @@ from ..IconConverter import (
     PLATFORM_WINDOWS, FORMAT_PNG, FORMAT_JPG, FORMAT_ICO,
 )
 import shutil as _shutil
+import re as _re
+
+
+# ---------------------------------------------------------------------------
+# LA FICHE D'IDENTITE D'UN EXECUTABLE (ressource VERSIONINFO)
+#
+# Un .exe sans elle n'a ni societe, ni produit, ni description, ni version :
+# « 0.0.0.0 » et des champs vides dans Proprietes > Details. Mesure le
+# 2026-10-08 sur une machine ou Smart App Control est actif : le journal
+# d'integrite du code montre, pour chaque executable refuse, zero signature
+# ET une fiche vide -- un inconnu complet. La fiche ne remplace pas une
+# signature ; elle dit au moins QUI et QUOI, a Windows comme a l'utilisateur.
+# Tout executable construit par Jenga la porte, tiree du .jenga :
+# apppublisher, appdescription, appversion, appcopyright (le nom du projet a
+# defaut de description ; « 1.0.0 » a defaut de version).
+# ---------------------------------------------------------------------------
+
+def VersionQuadruple(version: str) -> tuple:
+    """« 1.2.3-beta.4 » -> (1, 2, 3, 0) : les nombres de tete (quatre au plus,
+    bornes a 65535, ce que FILEVERSION sait porter). Rien de lisible -> (1, 0, 0, 0)."""
+    m = _re.match(r"\s*[vV]?(\d+(?:\.\d+){0,3})", version or "")
+    if not m:
+        return (1, 0, 0, 0)
+    nums = [min(int(x), 65535) for x in m.group(1).split(".")]
+    while len(nums) < 4:
+        nums.append(0)
+    return tuple(nums[:4])
+
+
+def _RcChaine(texte: str) -> str:
+    """Une chaine telle qu'un .rc la veut : sur une ligne, le guillemet double,
+    l'antislash double (rc.exe, llvm-rc et windres s'accordent la-dessus)."""
+    t = str(texte or "").replace("\r", " ").replace("\n", " ").strip()
+    return t.replace("\\", "\\\\").replace('"', '""')
+
+
+def WindowsVersionInfoRc(product: str, original: str, publisher: str = "", description: str = "",
+                         version: str = "", copyright: str = "") -> str:
+    """Le bloc VERSIONINFO d'un executable. Un champ vide n'est pas ecrit (une
+    « Societe » vide ne dit rien de plus que son absence)."""
+    v = VersionQuadruple(version)
+    texte = (version or "").strip() or "1.0.0"
+    valeurs = [
+        ("CompanyName", publisher),
+        ("FileDescription", description or product),
+        ("FileVersion", texte),
+        ("InternalName", product),
+        ("LegalCopyright", copyright),
+        ("OriginalFilename", original),
+        ("ProductName", product),
+        ("ProductVersion", texte),
+    ]
+    quad = f"{v[0]},{v[1]},{v[2]},{v[3]}"
+    lignes = [
+        "1 VERSIONINFO",
+        f"FILEVERSION {quad}",
+        f"PRODUCTVERSION {quad}",
+        "FILEFLAGSMASK 0x3fL",
+        "FILEFLAGS 0x0L",
+        "FILEOS 0x40004L",
+        "FILETYPE 0x1L",
+        "FILESUBTYPE 0x0L",
+        "BEGIN",
+        '    BLOCK "StringFileInfo"',
+        "    BEGIN",
+        '        BLOCK "040904B0"',
+        "        BEGIN",
+    ]
+    for cle, val in valeurs:
+        if str(val or "").strip():
+            lignes.append(f'            VALUE "{cle}", "{_RcChaine(val)}"')
+    lignes += [
+        "        END",
+        "    END",
+        '    BLOCK "VarFileInfo"',
+        "    BEGIN",
+        '        VALUE "Translation", 0x409, 1200',
+        "    END",
+        "END",
+    ]
+    return "\n".join(lignes) + "\n"
 
 
 def EcrireSiDifferent(chemin: Path, texte: str) -> bool:
@@ -268,8 +349,11 @@ class WindowsBuilder(Builder):
         # Icone d'app : on prepare un .res (resource object) que tous les
         # linkers Windows (link.exe, lld-link, gcc/clang+windres) acceptent en
         # entree comme un .obj normal. Ne s'applique pas aux libs (kind != APP).
-        if project.kind in (ProjectKind.CONSOLE_APP, ProjectKind.WINDOWED_APP):
-            res_obj = self._PrepareWindowsIconObject(project)
+        # (2.8.16) ... et sa fiche d'identite. Une suite de tests est un executable
+        # comme un autre : elle la porte aussi (mesure du 2026-10-08 : sous Smart
+        # App Control, `jenga test` voyait sa suite fraichement compilee refusee).
+        if project.kind in (ProjectKind.CONSOLE_APP, ProjectKind.WINDOWED_APP, ProjectKind.TEST_SUITE):
+            res_obj = self._PrepareWindowsIconObject(project, out.name)
             if res_obj is not None:
                 objectFiles = list(objectFiles) + [str(res_obj)]
 
@@ -287,99 +371,120 @@ class WindowsBuilder(Builder):
     # App icon : PNG/ICO -> .res (resource object embedded in PE/COFF)
     # -----------------------------------------------------------------------
 
-    def _PrepareWindowsIconObject(self, project: Project) -> Optional[Path]:
+    def _PrepareWindowsIconObject(self, project: Project, exe_name: str = "") -> Optional[Path]:
         """
-        Genere un fichier .res (ou .res.o pour MinGW) contenant l'icone d'app.
-        Retourne le path, ou None si pas d'icone configuree / si la compilation
-        ressource echoue (un warning est logue).
+        Genere un fichier .res (ou .res.o pour MinGW) : l'ICONE de l'application
+        si elle en a une, et sa FICHE D'IDENTITE (VERSIONINFO) -- toujours.
+        Retourne le path, ou None si la compilation ressource echoue (un
+        warning est logue).
 
         Etapes :
-          1. Resolve l'icone via IconConverter.
-          2. Si PNG -> convertit en .ico (Pillow).
-          3. Genere un .rc minimal qui declare IDI_ICON1 ICON "icon.ico".
-          4. Compile via rc.exe (MSVC) / llvm-rc (clang) / windres (MinGW).
+          1. Resolve l'icone via IconConverter ; PNG -> .ico (Pillow).
+          2. Genere le .rc : `1 ICON "app_icon.ico"` s'il y a une icone, puis le
+             bloc VERSIONINFO (WindowsVersionInfoRc).
+          3. Compile via rc.exe (MSVC) / llvm-rc (clang) / windres (MinGW), en
+             UTF-8 (un nom d'editeur accentue).
+          4. Si la compilation echoue AVEC la fiche, on reessaie avec l'icone
+             seule : une fiche qui manque ne doit pas couter l'icone.
         """
+        obj_dir = Path(self.GetObjectDir(project)) / "app-icon"
+        obj_dir.mkdir(parents=True, exist_ok=True)
+
+        ligne_icone = ""
+        if self._ResolveWindowsIco(project, obj_dir / "app_icon.ico"):
+            # Important : on utilise l'ID NUMERIQUE "1" plutot que le nom
+            # symbolique "IDI_ICON1". Windres stocke IDI_ICON1 comme STRING name
+            # alors que LoadImage(hInst, MAKEINTRESOURCEW(1), ...) cherche un ID
+            # numerique. Avec "1" en literal, le windres genere un resource avec
+            # ID=1, donc MAKEINTRESOURCEW(1) le trouve. Bonus : Windows utilise
+            # "le plus petit ID d'icone" comme icone principale de l'exe (visible
+            # dans Explorer + ExtractAssociatedIcon).
+            ligne_icone = '1 ICON DISCARDABLE "app_icon.ico"\n'
+
+        ws = getattr(self, "workspace", None)
+        nom = str(getattr(project, "targetName", "") or project.name)
+        fiche = WindowsVersionInfoRc(
+            product=nom,
+            original=exe_name or (nom + ".exe"),
+            publisher=str(getattr(project, "appPublisher", "") or getattr(ws, "appPublisher", "") or ""),
+            description=str(getattr(project, "appDescription", "") or ""),
+            version=str(getattr(project, "appVersion", "") or ""),
+            copyright=str(getattr(project, "appCopyright", "") or getattr(ws, "appCopyright", "") or ""),
+        )
+
+        # Pour eviter les soucis de chemin avec rc.exe, on utilise un nom
+        # relatif (l'icone et le .rc sont dans le meme dossier).
+        rc_path = obj_dir / "app_icon.rc"
+        res_out = self._CompileWindowsRc(rc_path, obj_dir, "#pragma code_page(65001)\n" + ligne_icone + fiche)
+        if res_out is None and ligne_icone:
+            Colored.PrintWarning(
+                "[Windows:identite] la fiche d'identite n'a pas pu etre compilee : "
+                "l'executable garde son icone, sans societe ni version."
+            )
+            res_out = self._CompileWindowsRc(rc_path, obj_dir, ligne_icone)
+        if res_out is None:
+            Colored.PrintWarning(
+                "[Windows:icon] compilation du .rc echouee. L'executable sera produit sans icone "
+                "ni fiche d'identite. Verifier rc.exe/llvm-rc/windres dans le PATH."
+            )
+        return res_out
+
+    def _ResolveWindowsIco(self, project: Project, ico_path: Path) -> bool:
+        """Pose l'icone de l'application en .ico a `ico_path`. Faux s'il n'y en a
+        pas, ou si elle ne peut pas etre convertie (un warning le dit)."""
         icon_src = ResolveIconFor(project, PLATFORM_WINDOWS)
         if not icon_src:
-            return None
-
+            return False
         icon_path = Path(self.ResolveProjectPath(project, icon_src))
         if not icon_path.exists():
             Colored.PrintWarning(
                 f"[Windows:icon] icone configuree introuvable : {icon_path}"
             )
-            return None
-
-        obj_dir = Path(self.GetObjectDir(project)) / "app-icon"
-        obj_dir.mkdir(parents=True, exist_ok=True)
-
-        # Etape 1 : on resout l'icone vers un .ico (convertit si necessaire).
+            return False
         fmt = DetectIconFormat(icon_path)
-        ico_path = obj_dir / "app_icon.ico"
         if fmt == FORMAT_ICO:
             _shutil.copy2(icon_path, ico_path)
-        elif fmt in (FORMAT_PNG, FORMAT_JPG):
+            return True
+        if fmt in (FORMAT_PNG, FORMAT_JPG):
             if not HasPillow():
                 Colored.PrintWarning(
                     "[Windows:icon] Pillow non installe -- conversion PNG->ICO "
                     "ignoree. Installer : pip install Pillow"
                 )
-                return None
+                return False
             if not ConvertPngToIco(icon_path, ico_path):
                 Colored.PrintWarning(f"[Windows:icon] conversion PNG->ICO echouee : {icon_path}")
-                return None
-        else:
-            Colored.PrintWarning(
-                f"[Windows:icon] format non supporte ({fmt}) pour Windows : {icon_path}"
-            )
-            return None
-
-        # Etape 2 : on genere le .rc. Pour eviter les soucis de chemin avec
-        # rc.exe, on utilise un nom relatif (les deux fichiers sont dans le
-        # meme dossier).
-        rc_path = obj_dir / "app_icon.rc"
-        # Important : on utilise l'ID NUMERIQUE "1" plutot que le nom
-        # symbolique "IDI_ICON1". Windres stocke IDI_ICON1 comme STRING name
-        # alors que LoadImage(hInst, MAKEINTRESOURCEW(1), ...) cherche un ID
-        # numerique. Avec "1" en literal, le windres genere un resource avec
-        # ID=1, donc MAKEINTRESOURCEW(1) le trouve. Bonus : Windows utilise
-        # "le plus petit ID d'icone" comme icone principale de l'exe (visible
-        # dans Explorer + ExtractAssociatedIcon).
-        rc_path.write_text(
-            '1 ICON DISCARDABLE "app_icon.ico"\n',
-            encoding="utf-8"
+                return False
+            return True
+        Colored.PrintWarning(
+            f"[Windows:icon] format non supporte ({fmt}) pour Windows : {icon_path}"
         )
+        return False
 
-        # Etape 3 : compilation .rc -> .res (ou .res.o pour MinGW).
+    def _CompileWindowsRc(self, rc_path: Path, obj_dir: Path, texte: str) -> Optional[Path]:
+        """Ecrit `texte` dans le .rc (UTF-8) et le compile en .res (ou .res.o
+        pour MinGW). None si aucun compilateur de ressources n'y arrive."""
+        rc_path.write_text(texte, encoding="utf-8")
         if self.is_mingw:
             res_out = obj_dir / "app_icon.res.o"
-            windres = "windres"
-            cmd = [windres, "-O", "coff", "-i", str(rc_path), "-o", str(res_out)]
+            cmd = ["windres", "-c", "65001", "-O", "coff", "-i", str(rc_path), "-o", str(res_out)]
         else:
             res_out = obj_dir / "app_icon.res"
             # Pour MSVC/clang-cl, on essaie rc.exe en premier (Windows SDK),
             # puis llvm-rc en fallback (LLVM bin). Les deux acceptent /fo et /nologo.
             tool = "rc.exe" if (self.is_msvc or self.is_clang_cl) else "llvm-rc"
-            cmd = [tool, "/nologo", f"/fo{res_out}", str(rc_path)]
+            cmd = [tool, "/nologo", "/c65001" if tool == "rc.exe" else "/C65001", f"/fo{res_out}", str(rc_path)]
 
         if self.verbose:
             Colored.PrintInfo(f"[Windows:icon] {' '.join(cmd)}")
 
         result = Process.ExecuteCommand(cmd, captureOutput=True, silent=False)
-        if result.returnCode != 0:
+        if result.returnCode != 0 and not self.is_mingw and cmd[0] == "rc.exe":
             # Fallback : si rc.exe absent, essayer llvm-rc.
-            if not self.is_mingw and cmd[0] == "rc.exe":
-                cmd[0] = "llvm-rc"
-                result = Process.ExecuteCommand(cmd, captureOutput=True, silent=False)
-
-        if result.returnCode != 0:
-            Colored.PrintWarning(
-                f"[Windows:icon] compilation du .rc echouee ({cmd[0]}). "
-                f"L'executable sera produit sans icone. Verifier rc.exe/llvm-rc dans le PATH."
-            )
-            return None
-
-        return res_out
+            cmd[0] = "llvm-rc"
+            cmd[2] = "/C65001"
+            result = Process.ExecuteCommand(cmd, captureOutput=True, silent=False)
+        return res_out if result.returnCode == 0 else None
 
     # -----------------------------------------------------------------------
     # Compilation MSVC

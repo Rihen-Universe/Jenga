@@ -37,8 +37,14 @@ _loadedFiles: List[Path] = []
 
 
 def GetLoadedFiles() -> List[Path]:
-    """Fichiers lus lors du dernier LoadWorkspace (entree + includes)."""
-    return list(_loadedFiles)
+    """Fichiers lus lors du dernier LoadWorkspace (entree + includes).
+    Les `with include(...)` sont lus par Api.include lui-meme : ils sont dans
+    Api._includedFiles (2.8.16 ; avant, un cache n'en voyait aucun)."""
+    vus = []
+    for f in list(_loadedFiles) + list(Api._includedFiles):
+        if f not in vus:
+            vus.append(f)
+    return vus
 
 
 class Loader:
@@ -251,6 +257,7 @@ class Loader:
         # Nouveau chargement : le registre repart de zero (sinon il accumule les
         # fichiers de tous les chargements precedents du processus).
         _loadedFiles.clear()
+        Api._includedFiles.clear()
 
         self._Log(f"Loading workspace from {filePath}")
 
