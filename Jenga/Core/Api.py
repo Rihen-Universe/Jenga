@@ -543,6 +543,12 @@ class Project:
     _filteredEmbedResources: Dict[str, List[str]] = field(default_factory=dict)
     _filteredDefines: Dict[str, List[str]] = field(default_factory=dict)
     _filteredLinks: Dict[str, List[str]] = field(default_factory=dict)
+    # (2.8.17) builderror() : ce projet REFUSE de se construire, avec un message (sous un
+    # filtre : seulement pour cette configuration / ce systeme). kitrequire() : ce qu'un kit
+    # de bibliotheques exige de la chaine qui le lie (sa bibliotheque C++).
+    buildErrors: List[str] = field(default_factory=list)
+    _filteredBuildErrors: Dict[str, List[str]] = field(default_factory=dict)
+    kitRequirements: List[Dict[str, str]] = field(default_factory=list)
     _filteredCFlags: Dict[str, List[str]] = field(default_factory=dict)
     _filteredCxxFlags: Dict[str, List[str]] = field(default_factory=dict)
     _filteredLdFlags: Dict[str, List[str]] = field(default_factory=dict)
@@ -1809,6 +1815,25 @@ def links(libs: List[str]) -> None:
                 _currentProject.systemLinks[system].extend(libs)
         else:
             _currentProject.links.extend(libs)
+
+def builderror(message: str) -> None:
+    if _currentProject:
+        texte = str(message or "").strip()
+        if not texte:
+            return
+        if _currentFilter:
+            _AppendFilteredValues(_currentProject._filteredBuildErrors, _currentFilter, [texte])
+        else:
+            _currentProject.buildErrors.append(texte)
+
+
+def kitrequire(name: str, stdlib: str = "", compiler: str = "", system: str = "") -> None:
+    if _currentProject:
+        exigence = {"name": str(name or ""), "stdlib": str(stdlib or ""), "compiler": str(compiler or ""),
+                    "system": str(system or "")}
+        if exigence not in _currentProject.kitRequirements:
+            _currentProject.kitRequirements.append(exigence)
+
 
 def removelinks(libs: List[str]) -> None:
     if _currentProject:
@@ -4552,7 +4577,7 @@ __all__ = [
     'location', 'files', 'excludefiles', 'removefiles', 'excludemainfiles', 'removemainfiles',
     'includedirs', 'externalincludedirs', 'sysincludedirs', 'removeincludedirs',
     'libdirs', 'syslibdirs', 'removelibdirs', 'objdir', 'targetdir', 'targetname',
-    'links', 'removelinks', 'dependson', 'removedependson', 'dependfiles', 'embedresources',
+    'links', 'removelinks', 'builderror', 'kitrequire', 'dependson', 'removedependson', 'dependfiles', 'embedresources',
     'defines', 'removedefines', 'undefines', 'optimize', 'symbols', 'warnings', 'runtime', 'staticruntime',
     'pchheader', 'pchsource',
     'prebuild', 'postbuild', 'prelink', 'postlink',
@@ -4708,7 +4733,7 @@ with batchinclude([
 _PROJECT_ONLY_WORDS = (
     "kind", "language", "cppdialect", "cdialect", "location", "files", "excludefiles",
     "excludemainfiles", "includedirs", "removeincludedirs", "libdirs", "removelibdirs",
-    "objdir", "targetdir", "targetname", "links", "removelinks", "dependson",
+    "objdir", "targetdir", "targetname", "links", "removelinks", "builderror", "kitrequire", "dependson",
     "removedependson", "dependfiles", "embedresources", "removedefines", "optimize",
     "symbols", "runtime", "staticruntime", "pchheader", "pchsource", "prebuild",
     "postbuild", "prelink", "postlink", "androidapplicationid", "androidversioncode",

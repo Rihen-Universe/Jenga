@@ -646,6 +646,14 @@ class BuildLogger:
                 Display.Error(f"Link failed: {display_path}")
                 _SinkCall("OnLinkError", self.project_name, output_file, output)
 
+    def LogRefus(self, titre: str, message: str) -> None:
+        # (2.8.17) Le projet ne sera pas construit, et voici pourquoi -- UNE erreur lisible.
+        with self._lock:
+            self.failed += 1
+            self.errors_count += 1
+            self._PrintErrorBox(titre, message)
+            _SinkCall("OnLinkError", self.project_name, "", message)
+
     def PrintProjectHeader(self) -> None:
         """Print a beautiful project header box with double borders."""
         w = self._BOX_WIDTH

@@ -172,6 +172,23 @@ exe autonome sans DLL runtime ; défaut projet = dynamique) ·
 `library(l)` · `rpath(p)` · `sanitize(s)` · `pic()` · `pie()` · `nostdlib()` ·
 `nostdinc()` · `buildoption(o, v)` · `buildoptions(opts)` · `linkoptions(f)`.
 
+### Refus et exigences _(2.8.17+)_
+
+`builderror(message)` — dans un projet, sous un filtre ou non : le projet **refuse de se construire** dans ce
+contexte, avec ce message, avant de compiler. `kitrequire(nom, stdlib=…, compiler=…, system=…)` — ce qu'un kit
+de bibliothèques exige de la chaîne qui le lie : une bibliothèque C++ différente (`libc++` / `libstdc++`) est
+refusée avec les chaînes qui conviendraient ; une autre famille de compilateur (`clang` / `gcc`) sous MinGW
+donne un avertissement. `jenga kit` écrit les deux dans le fichier du kit.
+
+```python
+with filter("configurations:Debug"):
+    builderror("Ce projet ne se construit qu'en Release.")
+```
+
+Sous Windows, chaque compilateur installé a aussi une chaîne à son nom (`msys2-ucrt64-clang`,
+`msys2-ucrt64-gcc`, `msys2-clang64`, `llvm-mingw`…) : `jenga build --toolchain msys2-ucrt64-clang`.
+`jenga info` dit le compilateur et la bibliothèque C++ de chacune.
+
 ### Android
 
 `androidsdkpath` · `androidndkpath` · `javajdkpath` · `androidapplicationid` ·
@@ -499,6 +516,18 @@ exe, no runtime DLL; project default = dynamic) · `pchheader(h)` · `pchsource(
 `framework(n)` / `frameworks(ns)` · `frameworkpath(p)` · `librarypath(p)` ·
 `library(l)` · `rpath(p)` · `sanitize(s)` · `pic()` · `pie()` · `nostdlib()` ·
 `nostdinc()` · `buildoption(o, v)` · `buildoptions(opts)` · `linkoptions(f)`.
+
+### Refusals and requirements _(2.8.17+)_
+
+`builderror(message)` — inside a project, under a filter or not: the project **refuses to build** in that
+context, with that message, before compiling. `kitrequire(name, stdlib=…, compiler=…, system=…)` — what a
+library kit requires from the toolchain that links it: a different C++ library (`libc++` / `libstdc++`) is
+refused, naming the toolchains that would fit; another compiler family (`clang` / `gcc`) under MinGW gives a
+warning. `jenga kit` writes both into the kit file.
+
+On Windows, every installed compiler also gets a toolchain of its own (`msys2-ucrt64-clang`,
+`msys2-ucrt64-gcc`, `msys2-clang64`, `llvm-mingw`…): `jenga build --toolchain msys2-ucrt64-clang`.
+`jenga info` tells the compiler and the C++ library of each.
 
 ### Android / Apple / Emscripten / HarmonyOS / Xbox
 

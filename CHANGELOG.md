@@ -3,6 +3,48 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
+## v2.8.17 — 2026-10-08
+
+### Quel compilateur, quelle bibliothèque C++ : la chaîne le dit
+
+« clang-mingw » ne dit pas *quel* clang. Celui de MSYS2 ucrt64 lie **libstdc++** ; llvm-mingw et MSYS2
+clang64 lient **libc++**. Des bibliothèques compilées avec l'une ne se lient pas avec l'autre. Mesuré le
+08/10/2026 sur le projet d'un cours : un kit fait avec le clang de MSYS2, lié par llvm-mingw, donnait
+600 lignes `undefined symbol: std::__cxx11::…` sans un mot sur la cause.
+
+- **Une chaîne par compilateur installé** (Windows), à son nom : `msys2-ucrt64-clang`, `msys2-ucrt64-gcc`,
+  `msys2-clang64`, `msys2-mingw64-clang`, `msys2-mingw64-gcc`, `llvm-mingw`. `--toolchain <nom>` désigne
+  un compilateur sans ambiguïté. `clang-mingw` et `mingw` gardent leur sens (le premier trouvé).
+- **`jenga info`** ajoute, après la table des chaînes, une ligne par chaîne :
+  `nom | compilateur C++ | bibliothèque C++` (bloc `Toolchain compilers:`, fait pour être lu par un outil).
+  La bibliothèque est demandée au compilateur lui-même, et retenue 24 h avec les autres sondes.
+- **Un lien manqué est expliqué.** Quand les symboles introuvables n'existent que dans une bibliothèque
+  C++, Jenga le dit sous l'erreur : quelles archives, compilées avec quoi, liées par quelle chaîne, et
+  quelles chaînes de la machine conviendraient. De même pour des objets de clang et de gcc mélangés
+  (`multiple definition of guard variable…` sous MinGW).
+- **Chaque compilateur tourne avec son propre dossier en tête du PATH** (Windows). Le `g++` de MSYS2,
+  lancé avec le `bin/` d'un autre compilateur devant lui, sortait en erreur sans un mot.
+
+### Un kit dit ce qu'il exige, et refuse ce qu'il ne sert pas
+
+Un kit qui ne contenait que `Release`, un projet construit en `Debug` : le kit ne branchait **aucune**
+bibliothèque, et l'utilisateur recevait 230 `undefined reference`.
+
+- **`builderror("message")`** (nouveau, dans un projet, sous un filtre ou non) : le projet refuse de se
+  construire dans ce contexte, avec ce message, **avant** de compiler.
+- **`kitrequire(nom, stdlib=…, compiler=…, system=…)`** (nouveau) : ce qu'un kit exige de la chaîne qui
+  le lie. Une bibliothèque C++ différente : refus, avec les chaînes qui conviendraient. Une autre
+  famille de compilateur (clang / gcc) sous MinGW : avertissement.
+- **`jenga kit`** lit dans les archives la bibliothèque C++ et la famille du compilateur
+  (`KIT_STDLIB`, `KIT_COMPILER`, et dans `KIT.txt`), écrit ces exigences dans le fichier du kit, et y
+  ajoute un refus pour chaque configuration du consommateur que le kit ne contient pas :
+  « Le kit X ne contient pas de bibliothèques pour Debug-Windows (il contient : Release)… ».
+  Il prévient aussi celui qui fabrique un kit partiel. Un kit écrit par une version antérieure garde son
+  ancien comportement : il faut le refaire.
+
+Tests : `tests/test_refus_et_chaines.py` (16). Contre-épreuve : sans le refus, les trois tests du refus
+rougissent (dont le kit Release seul construit en Debug).
+
 ## v2.8.16
 
 ### Nouveau : la fiche d'identité de l'exécutable Windows

@@ -121,7 +121,13 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # produit, description, version, copyright ; appdescription, appcopyright, apppublisher au niveau
 # du workspace). Le cache du Jenga embarque surveille aussi les fichiers INCLUS (un include
 # corrige n'etait pas relu). CLANG_MINGW_CC/CXX valent pour la detection automatique.
-__version__ = "2.8.16"
+# 2.8.17 (2026-10-08) : « quel compilateur, quelle bibliotheque C++ ». Une chaine PAR
+# compilateur installe (msys2-ucrt64-clang, msys2-ucrt64-gcc, msys2-clang64, llvm-mingw...),
+# et `jenga info` dit le compilateur et la bibliotheque C++ de chacune. Un lien manque parce
+# que libc++ et libstdc++ (ou clang et gcc) sont melanges est EXPLIQUE. Un kit dit ce qu'il
+# exige (kitrequire) et refuse une configuration qu'il ne contient pas (builderror), au lieu
+# de centaines de symboles introuvables. Chaque compilateur tourne avec son dossier en tete.
+__version__ = "2.8.17"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

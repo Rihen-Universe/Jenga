@@ -268,12 +268,24 @@ class KitCommand:
             extdirs[(config, os_name)] = KitCommand._ExternalLibDirs(
                 workspace, modules, config, os_name)
 
+        # (2.8.17) la bibliotheque C++ de chaque cible, lue dans ses archives
+        stdlibs: Dict[Tuple[str, str], str] = {}
+        for (config, os_name) in libs:
+            stdlibs[(config, os_name)] = KitCommand._StdlibOfArchives(
+                kit_root / "lib" / f"{config}-{os_name}")
+
+        familles: Dict[str, str] = {}
+        for os_name in sorted({o for (_c, o) in libs}):
+            vues = sorted({KitCommand._FamilyOfArchives(kit_root / "lib" / f"{c}-{o}")
+                           for (c, o) in libs if o == os_name} - {""})
+            familles[os_name] = vues[0] if (len(vues) == 1 and vues[0] != "mixte") else ""
+
         config_file = kit_root / f"{kit_name}.jenga"
         KitCommand._WriteKitConfig(config_file, kit_name, workspace,
-                                   modules, link_order, libs, syslibs, extdirs)
+                                   modules, link_order, libs, syslibs, extdirs, stdlibs, familles)
         KitCommand._WriteManifest(kit_root / "KIT.txt", kit_name, workspace,
                                   modules, link_order, libs, syslibs, extdirs,
-                                  header_count)
+                                  header_count, stdlibs)
 
         # ---- resume ---------------------------------------------------
         print()
@@ -304,6 +316,29 @@ class KitCommand:
         print()
         if missing:
             Colored.PrintWarning(f"{len(missing)} bibliotheque(s) manquante(s), kit partiel.")
+        # (2.8.17) Ce que ce kit ne sert PAS, dit a celui qui le fabrique : un projet construit
+        # dans une configuration absente sera REFUSE avec un message (il se liait a rien du
+        # tout, sans un mot : 230 symboles introuvables chez l'utilisateur, 08/10/2026).
+        toutes = list(workspace.configurations or [])
+        for os_name in sorted({o for (_c, o) in libs}):
+            servies = sorted(c for (c, o) in libs if o == os_name)
+            absentes = [c for c in toutes if c not in servies]
+            if absentes:
+                Colored.PrintWarning(
+                    f"Ce kit ne sert que {', '.join(servies)} pour {os_name} : un projet construit en "
+                    f"{', '.join(absentes)} sera refuse, avec ce message. Pour tout servir : --config all "
+                    "(apres avoir construit chaque configuration).")
+            libs_cpp = sorted({stdlibs.get((c, os_name), "") for c in servies} - {""})
+            if len(libs_cpp) > 1 or "mixte" in libs_cpp:
+                Colored.PrintWarning(
+                    f"Les cibles {os_name} n'ont pas toutes ete compilees avec la meme bibliotheque C++ ("
+                    + ", ".join(f"{c} : {stdlibs.get((c, os_name), '') or 'aucune'}" for c in servies)
+                    + ") : le kit ne peut pas dire laquelle il exige.")
+            elif libs_cpp:
+                Colored.PrintInfo(f"Bibliotheque C++ des archives {os_name} : {libs_cpp[0]} "
+                                  "(le consommateur devra lier avec la meme).")
+            if familles.get(os_name):
+                Colored.PrintInfo(f"Compilateur des archives {os_name} : {familles[os_name]}.")
         return 0
 
     # ------------------------------------------------------------------
@@ -615,6 +650,67 @@ class KitCommand:
         return found, absent
 
     # ------------------------------------------------------------------
+    # (2.8.17) La bibliotheque C++ contre laquelle les archives ont ete compilees
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _StdlibOfArchives(dossier: Path) -> str:
+        # Lue DANS les archives (les symboles qu'elles citent), pas devinee d'apres le
+        # compilateur du moment : c'est ce que l'editeur de liens du consommateur verra.
+        # « libc++ », « libstdc++ », « mixte », ou vide (aucune bibliotheque C++ citee).
+        import mmap
+        gnu = llvm = False
+        try:
+            fichiers = sorted(f for f in dossier.iterdir() if f.is_file())
+        except OSError:
+            return ""
+        for f in fichiers:
+            try:
+                if f.stat().st_size == 0:
+                    continue
+                with open(f, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as m:
+                    if not llvm and (m.find(b"St3__1") >= 0):
+                        llvm = True
+                    if not gnu and (m.find(b"St7__cxx11") >= 0 or m.find(b"__glibcxx") >= 0):
+                        gnu = True
+            except (OSError, ValueError):
+                continue
+            if gnu and llvm:
+                break
+        if gnu and llvm:
+            return "mixte"
+        return "libstdc++" if gnu else ("libc++" if llvm else "")
+
+    @staticmethod
+    def _FamilyOfArchives(dossier: Path) -> str:
+        # « clang », « gcc », « mixte » ou vide, d'apres ce que chaque compilateur laisse dans
+        # ses objets : la section « .llvm_addrsig » de clang, la marque « GCC: ( » de gcc.
+        # Mesure du 08/10/2026 : des archives de clang liees par g++ (MinGW, meme libstdc++)
+        # echouent sur « multiple definition of guard variable » -- les variables statiques
+        # des fonctions inline ne sont pas rangees de la meme facon.
+        import mmap
+        clang = gcc = False
+        try:
+            fichiers = sorted(f for f in dossier.iterdir() if f.is_file())
+        except OSError:
+            return ""
+        for f in fichiers:
+            try:
+                if f.stat().st_size == 0:
+                    continue
+                with open(f, "rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as m:
+                    if not clang and m.find(b".llvm_addrsig") >= 0:
+                        clang = True
+                    if not gcc and m.find(b"GCC: (") >= 0:
+                        gcc = True
+            except (OSError, ValueError):
+                continue
+            if clang and gcc:
+                break
+        if clang and gcc:
+            return "mixte"
+        return "clang" if clang else ("gcc" if gcc else "")
+
+    # ------------------------------------------------------------------
     # Bibliotheques SYSTEME heritees des modules
     # ------------------------------------------------------------------
     @staticmethod
@@ -787,7 +883,9 @@ class KitCommand:
                         modules: List[str], link_order: List[str],
                         libs: Dict[Tuple[str, str], Dict[str, str]],
                         syslibs: Dict[Tuple[str, str], List[str]],
-                        extdirs: Dict[Tuple[str, str], List[str]]) -> None:
+                        extdirs: Dict[Tuple[str, str], List[str]],
+                        stdlibs: Optional[Dict[Tuple[str, str], str]] = None,
+                        familles: Optional[Dict[str, str]] = None) -> None:
         """Ecrit le .jenga que le workspace consommateur charge par useconfig().
 
         Le fichier ne declare AUCUN projet : il n'a pas de sources, un projet
@@ -870,6 +968,24 @@ class KitCommand:
             add(f'    ("{config}", "{os_name}"): {syslibs.get((config, os_name), [])!r},')
         add("}")
         add("")
+        # (2.8.17) La bibliotheque C++ des archives, par systeme, quand toutes ses cibles
+        # s'accordent. Celui qui lie doit utiliser la meme : libc++ et libstdc++ ne se
+        # melangent pas.
+        add("# Bibliotheque C++ contre laquelle les archives ont ete compilees (lue dans")
+        add("# les archives). Le consommateur doit lier avec la meme.")
+        add("KIT_STDLIB = {")
+        for os_name in sorted({o for (_c, o) in libs}):
+            valeurs = sorted({(stdlibs or {}).get((c, o), "") for (c, o) in libs if o == os_name} - {""})
+            accord = valeurs[0] if (len(valeurs) == 1 and valeurs[0] != "mixte") else ""
+            add(f'    "{os_name}": "{accord}",')
+        add("}")
+        add("# Famille du compilateur qui a produit les archives (clang ou gcc). Sous MinGW,")
+        add("# les objets de l'un ne se lient pas toujours avec ceux de l'autre.")
+        add("KIT_COMPILER = {")
+        for os_name in sorted({o for (_c, o) in libs}):
+            add(f'    "{os_name}": "{(familles or {}).get(os_name, "")}",')
+        add("}")
+        add("")
         add("")
         add("def _kit_selection(modules=None):")
         add('    """Les modules demandes plus leurs dependances, en ordre de lien."""')
@@ -903,6 +1019,36 @@ class KitCommand:
         add("    for extra in (extra_includes or []):")
         add("        includes.append(extra)")
         add("    includedirs(includes)")
+        add("")
+        # (2.8.17) Ce que le kit EXIGE, et ce qu'il ne sert PAS : dit avant de compiler.
+        add("    # Ce que ce kit exige de la chaine qui le lie, et les configurations qu'il")
+        add("    # ne sert pas : un message clair avant de compiler (Jenga >= 2.8.17), au")
+        add("    # lieu de centaines de symboles introuvables a l'edition de liens.")
+        add("    _exiger = globals().get(\"kitrequire\")")
+        add("    _refuser = globals().get(\"builderror\")")
+        add("    for _os, _lib in sorted(KIT_STDLIB.items()):")
+        add("        _fam = KIT_COMPILER.get(_os, \"\")")
+        add("        if _exiger and (_lib or _fam):")
+        add("            _exiger(KIT_NAME, stdlib=_lib, compiler=_fam, system=_os)")
+        add("    try:")
+        add("        from Jenga.Core.Api import getcurrentworkspace as _ws_courant")
+        add("        _configs = list(_ws_courant().configurations or [])")
+        add("    except Exception:")
+        add("        _configs = []")
+        add("    for _os in sorted({_o for (_c, _o) in KIT_TARGETS}):")
+        add("        _servies = sorted(_c for (_c, _o) in KIT_TARGETS if _o == _os)")
+        add("        for _cfg in _configs:")
+        add("            if (_cfg, _os) in KIT_TARGETS:")
+        add("                continue")
+        add("            _msg = (\"Le kit %s ne contient pas de bibliotheques pour %s-%s (il contient : %s). \"")
+        add("                    \"Construisez en %s, ou refaites le kit avec cette configuration \"")
+        add("                    \"(jenga kit ... --config %s).\"")
+        add("                    % (KIT_NAME, _cfg, _os, \", \".join(_servies), \" ou \".join(_servies), _cfg))")
+        add("            if _refuser:")
+        add("                with filter(\"system:%s && configurations:%s\" % (_os, _cfg)):")
+        add("                    _refuser(_msg)")
+        add("            else:")
+        add("                print(\"[kit %s] ATTENTION : %s\" % (KIT_NAME, _msg))")
         add("")
 
         # Un bloc par cible presente : chemins litteraux, aucune variable a
@@ -946,7 +1092,8 @@ class KitCommand:
                        libs: Dict[Tuple[str, str], Dict[str, str]],
                        syslibs: Dict[Tuple[str, str], List[str]],
                        extdirs: Dict[Tuple[str, str], List[str]],
-                       header_count: int) -> None:
+                       header_count: int,
+                       stdlibs: Optional[Dict[Tuple[str, str], str]] = None) -> None:
         """Un kit sans date ment en silence : le moteur avance, le kit non, et
         un rapport de bug ne dit plus contre quoi il a ete constate."""
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -967,8 +1114,10 @@ class KitCommand:
         for (config, os_name) in sorted(libs):
             system = syslibs.get((config, os_name)) or []
             suffix = f", + systeme : {', '.join(system)}" if system else ""
+            cpp = (stdlibs or {}).get((config, os_name), "")
+            cpp_dit = f" [bibliotheque C++ : {cpp}]" if cpp else ""
             lines.append(
-                f"    {config}-{os_name} : {len(libs[(config, os_name)])} bibliotheques{suffix}")
+                f"    {config}-{os_name} : {len(libs[(config, os_name)])} bibliotheques{cpp_dit}{suffix}")
         externes = sorted({d for values in extdirs.values() for d in values})
         if externes:
             lines += [

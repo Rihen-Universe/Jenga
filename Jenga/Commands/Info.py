@@ -174,6 +174,15 @@ class InfoCommand:
                 headers=["Name", "Family", "Target OS", "Arch", "Env"],
                 headerColor="white"
             )
+            # (2.8.17) QUEL compilateur, QUELLE bibliotheque C++ : « clang-mingw » ne le dit
+            # pas. Une ligne par chaine, « nom | compilateur C++ | bibliotheque C++ », faite pour
+            # etre lue par un outil (les chemins peuvent contenir des espaces).
+            print()
+            print("Toolchain compilers:")
+            for name, tc in toolchains.items():
+                cxx, stdlib = ToolchainManager.DescribeCompiler(tc)
+                if cxx:
+                    print(f"  {name} | {cxx} | {stdlib}")
         else:
             print("No toolchains detected.")
         print()

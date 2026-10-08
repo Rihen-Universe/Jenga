@@ -577,6 +577,163 @@ class ToolchainManager:
         tc.targetEnv = TargetEnv.MINGW
         return tc
 
+    # ------------------------------------------------------------------
+    # (2.8.17) LA BIBLIOTHEQUE C++ D'UN COMPILATEUR, ET UNE CHAINE PAR INSTALLATION
+    #
+    # « clang-mingw » ne dit pas QUEL clang : celui de MSYS2 ucrt64 lie libstdc++,
+    # llvm-mingw et MSYS2 clang64 lient libc++. Des bibliotheques compilees avec
+    # l'une ne se lient pas avec l'autre (mesure du 08/10/2026 : un kit fait avec le
+    # clang de msys64, lie par llvm-mingw : 600 symboles « std::__cxx11 » introuvables).
+    # Chaque compilateur installe recoit donc AUSSI une chaine a son nom, que
+    # --toolchain designe sans ambiguite, et dont on sait dire la bibliotheque C++.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def PathAvecLeCompilateurEnTete(compilateur: str, path: Optional[str] = None) -> str:
+        # Le PATH dans lequel un compilateur doit tourner : SON dossier d'abord.
+        # Mesure du 08/10/2026 : le g++ de MSYS2, lance avec le bin/ de llvm-mingw en tete
+        # du PATH (ce que fait un IDE qui embarque son compilateur), sort en erreur sans un
+        # mot -- son cc1plus charge les DLL d'un autre. Un compilateur designe par son
+        # chemin complet travaille avec les DLL de sa propre installation.
+        actuel = os.environ.get("PATH", "") if path is None else path
+        chemin = str(compilateur or "")
+        if not chemin or not os.path.isabs(chemin):
+            return actuel
+        dossier = os.path.dirname(chemin)
+        morceaux = [m for m in actuel.split(os.pathsep) if m]
+        if morceaux and os.path.normcase(os.path.normpath(morceaux[0])) == os.path.normcase(os.path.normpath(dossier)):
+            return actuel
+        reste = [m for m in morceaux
+                 if os.path.normcase(os.path.normpath(m)) != os.path.normcase(os.path.normpath(dossier))]
+        return os.pathsep.join([dossier] + reste)
+
+    @staticmethod
+    def StdlibDepuisMacros(texte: str) -> str:
+        # Ce que `<compilateur> -dM -E` dit, sur un fichier qui inclut <version>.
+        if "_LIBCPP_VERSION" in texte:
+            return "libc++"
+        if "__GLIBCXX__" in texte:
+            return "libstdc++"
+        if "_MSVC_STL_VERSION" in texte or "_CPPLIB_VER" in texte:
+            return "msvc-stl"
+        return ""
+
+    @staticmethod
+    def StdlibOf(cxx_path: str) -> str:
+        # « libc++ », « libstdc++ », « msvc-stl », ou vide si on ne sait pas.
+        # Demande au compilateur lui-meme (les dossiers ne prouvent rien : MSYS2 ucrt64
+        # peut avoir les deux installees). Memorise 24 h avec les autres sondes.
+        if not cxx_path:
+            return ""
+        chemin = str(cxx_path)
+        if not os.path.isfile(chemin):
+            trouve = ToolchainManager._FindExecutable(chemin)
+            if not trouve:
+                return ""
+            chemin = trouve
+        import time
+        cle = ToolchainManager._SondeCle(chemin, "stdlib")
+        if cle and not os.environ.get("JENGA_SONDES_SANS_CACHE"):
+            v = ToolchainManager._SondesCharger().get(cle)
+            if isinstance(v, list) and 0.0 <= time.time() - v[0] < ToolchainManager._SONDES_DUREE:
+                return str(v[1])
+        resultat = ""
+        try:
+            import subprocess
+            drapeaux = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+            env = dict(os.environ)
+            env["PATH"] = ToolchainManager.PathAvecLeCompilateurEnTete(chemin)
+            r = subprocess.run([chemin, "-x", "c++", "-dM", "-E", "-"], input="#include <version>\n",
+                               capture_output=True, text=True, timeout=20, creationflags=drapeaux, env=env)
+            if r.returncode == 0:
+                resultat = ToolchainManager.StdlibDepuisMacros(r.stdout or "")
+        except Exception:
+            resultat = ""
+        if resultat and cle and not os.environ.get("JENGA_SONDES_SANS_CACHE"):
+            ToolchainManager._SondesCharger()[cle] = [time.time(), resultat]
+            ToolchainManager._SondesMarquer()
+        return resultat
+
+    @staticmethod
+    def _ChaineGnuWindows(name: str, cc: Path, cxx: Path, gcc: bool) -> Optional[Toolchain]:
+        if not (cc.is_file() and cxx.is_file()):
+            return None
+        if not ToolchainManager._FirstRunnable([str(cxx)]):
+            return None  # present mais ne demarre pas : on ne le propose pas
+        tc = Toolchain(
+            name=name,
+            compilerFamily=CompilerFamily.GCC if gcc else CompilerFamily.CLANG,
+            ccPath=str(cc),
+            cxxPath=str(cxx),
+            arPath=ToolchainManager._ToolNextTo(str(cc), ["ar"] if gcc else ["llvm-ar", "ar"]),
+            ldPath=(ToolchainManager._ToolNextTo(str(cc), ["ld"]) or str(cxx)) if gcc else str(cxx),
+        )
+        tc.targetOs = TargetOS.WINDOWS
+        tc.targetArch = Platform.GetHostArchitecture()
+        tc.targetEnv = TargetEnv.MINGW
+        return tc
+
+    @staticmethod
+    def DetectWindowsGnuInstallations() -> List[Toolchain]:
+        # Une chaine PAR compilateur installe : msys2-ucrt64-clang, msys2-ucrt64-gcc,
+        # msys2-clang64, msys2-mingw64-clang, msys2-mingw64-gcc, llvm-mingw.
+        if sys.platform != "win32":
+            return []
+        trouvees: List[Toolchain] = []
+        for d in ToolchainManager._WindowsFallbackDirs():
+            sous = d.parent.name.lower()  # ucrt64, clang64, mingw64
+            nom_clang = "msys2-clang64" if sous == "clang64" else f"msys2-{sous}-clang"
+            tc = ToolchainManager._ChaineGnuWindows(nom_clang, d / "clang.exe", d / "clang++.exe", False)
+            if tc:
+                trouvees.append(tc)
+            if sous != "clang64":
+                tc = ToolchainManager._ChaineGnuWindows(f"msys2-{sous}-gcc", d / "gcc.exe", d / "g++.exe", True)
+                if tc:
+                    trouvees.append(tc)
+        # llvm-mingw : designe (LLVM_MINGW_BIN), embarque (JENGA_COMPILERS_DIR), ou dans le PATH.
+        candidats: List[Path] = []
+        for v in (os.environ.get("LLVM_MINGW_BIN", ""),):
+            if v.strip():
+                candidats.append(Path(v.strip()))
+        racine = os.environ.get("JENGA_COMPILERS_DIR", "").strip()
+        if racine:
+            candidats.append(Path(racine) / "llvm-mingw" / "bin")
+        for morceau in os.environ.get("PATH", "").split(os.pathsep):
+            if morceau.strip():
+                candidats.append(Path(morceau.strip()))
+        for d in candidats:
+            try:
+                if not (d / "x86_64-w64-mingw32-clang++.exe").is_file():
+                    continue
+            except OSError:
+                continue
+            cc = d / "clang.exe"
+            cxx = d / "clang++.exe"
+            if not cc.is_file():
+                cc, cxx = d / "x86_64-w64-mingw32-clang.exe", d / "x86_64-w64-mingw32-clang++.exe"
+            tc = ToolchainManager._ChaineGnuWindows("llvm-mingw", cc, cxx, False)
+            if tc:
+                trouvees.append(tc)
+                break
+        return trouvees
+
+    @staticmethod
+    def DescribeCompiler(tc: Toolchain) -> Tuple[str, str]:
+        # (chemin du compilateur C++, bibliotheque C++) d'une chaine ; vides si sans objet.
+        cxx = str(getattr(tc, "cxxPath", "") or getattr(tc, "ccPath", "") or "")
+        if not cxx:
+            return "", ""
+        chemin = cxx if os.path.isfile(cxx) else (ToolchainManager._FindExecutable(cxx) or "")
+        if not chemin:
+            return cxx, ""
+        famille = getattr(tc, "compilerFamily", None)
+        if famille not in (CompilerFamily.CLANG, CompilerFamily.GCC, CompilerFamily.APPLE_CLANG):
+            return chemin, ""
+        if getattr(tc, "targetOs", None) not in (TargetOS.WINDOWS, TargetOS.LINUX, TargetOS.MACOS):
+            return chemin, ""
+        if getattr(tc, "targetOs", None) != Platform.GetHostOS():
+            return chemin, ""  # une chaine croisee : son <version> n'est pas celui de l'hote
+        return chemin, ToolchainManager.StdlibOf(chemin)
+
     @staticmethod
     def DetectCrossWindows() -> Optional[Toolchain]:
         """
@@ -987,6 +1144,9 @@ class ToolchainManager:
                 self._AddToolchainIfValid(toolchains, self.DetectClangOnWindows())
                 self._AddToolchainIfValid(toolchains, self.DetectMinGW())
                 self._AddToolchainIfValid(toolchains, self.DetectCrossLinuxOnWindows())
+                # (2.8.17) une chaine par compilateur installe, a son nom
+                for _tc in self.DetectWindowsGnuInstallations():
+                    self._AddToolchainIfValid(toolchains, _tc)
             else:
                 self._AddToolchainIfValid(toolchains, self.DetectCrossWindows())
 

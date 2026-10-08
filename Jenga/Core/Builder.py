@@ -14,6 +14,7 @@ import glob
 import re
 import fnmatch
 import os
+import sys
 import shutil
 import multiprocessing
 import concurrent.futures
@@ -187,6 +188,161 @@ class Builder(abc.ABC):
             raise RuntimeError("watchOS builds require macOS.")
         if self.targetOs == TargetOS.VISIONOS and host_os != TargetOS.MACOS:
             raise RuntimeError("visionOS builds require macOS with Xcode 15+.")
+
+    # ------------------------------------------------------------------
+    # (2.8.17) Refus de construire, et explication d'un lien manque
+    # ------------------------------------------------------------------
+    @staticmethod
+    def DiagnostiquerLien(sortie: str) -> Optional[Dict[str, Any]]:
+        # Des symboles introuvables qui n'existent QUE dans une bibliotheque C++ disent laquelle
+        # les archives attendaient : « std::__cxx11:: » / « __glibcxx » = libstdc++ ;
+        # « std::__1:: » = libc++. Rend {'attendue': ..., 'archives': [...]} ou None.
+        import re
+        if not sortie:
+            return None
+        n_gnu = n_llvm = 0
+        archives: List[str] = []
+        courant_manque = False
+        for ligne in sortie.splitlines():
+            manque = ("undefined symbol" in ligne) or ("undefined reference" in ligne)
+            if manque:
+                courant_manque = True
+                if re.search(r"std::__cxx11::|__glibcxx|_ZNK?St7__cxx11|std::__throw_|std::__detail::", ligne):
+                    n_gnu += 1
+                if re.search(r"std::__1::|_ZNK?St3__1", ligne):
+                    n_llvm += 1
+            double = ("multiple definition" in ligne) or ("duplicate symbol" in ligne)
+            if manque or double or (courant_manque and "referenced" in ligne):
+                for nom in re.findall(r"([A-Za-z0-9_.+\-]+\.(?:lib|a))\(", ligne):
+                    if nom not in archives:
+                        archives.append(nom)
+        if n_gnu and not n_llvm:
+            return {"attendue": "libstdc++", "archives": archives[:8]}
+        if n_llvm and not n_gnu:
+            return {"attendue": "libc++", "archives": archives[:8]}
+        if not n_gnu and not n_llvm and re.search(
+                r"multiple definition of [`'\"]?guard variable|duplicate symbol: guard variable", sortie):
+            # clang et gcc ne rangent pas de la meme facon les variables statiques des fonctions
+            # inline : les memes en-tetes, compiles par les deux, se definissent deux fois.
+            return {"attendue": "", "melange": "compilateurs", "archives": archives[:8]}
+        return None
+
+    def _FamilleDe(self, tc) -> str:
+        f = getattr(tc, "compilerFamily", None)
+        if f in (CompilerFamily.CLANG, CompilerFamily.APPLE_CLANG):
+            return "clang"
+        return "gcc" if f == CompilerFamily.GCC else ""
+
+    def _ChainesPourStdlib(self, stdlib: str, famille: str = "") -> List[str]:
+        # Les chaines de CETTE machine qui visent le meme systeme et lient cette bibliotheque C++
+        # (et, si `famille` est dite, sont de cette famille de compilateur).
+        noms: List[str] = []
+        try:
+            if not self.toolchainManager._detected:
+                self.toolchainManager.DetectAll(self.workspace)
+            actuel = os.path.normcase(str(getattr(self.toolchain, "cxxPath", "") or ""))
+            for nom, tc in self.toolchainManager._detected.items():
+                if getattr(tc, "targetOs", None) != self.targetOs:
+                    continue
+                cxx, lib = ToolchainManager.DescribeCompiler(tc)
+                if famille and self._FamilleDe(tc) != famille:
+                    continue
+                if (not stdlib or lib == stdlib) and cxx and os.path.normcase(cxx) != actuel and nom not in noms:
+                    noms.append(nom)
+        except Exception:
+            pass
+        return noms
+
+    def _PhraseDeLaChaine(self) -> Tuple[str, str]:
+        nom = str(getattr(self.toolchain, "name", "") or "")
+        cxx, lib = ("", "")
+        try:
+            cxx, lib = ToolchainManager.DescribeCompiler(self.toolchain)
+        except Exception:
+            pass
+        return (f"« {nom} » ({cxx})" if cxx else f"« {nom} »"), lib
+
+    def _MettreLeCompilateurEnTete(self) -> None:
+        # Sous Windows, le compilateur de la chaine travaille avec SON dossier en tete du
+        # PATH (voir ToolchainManager.PathAvecLeCompilateurEnTete). Pose avant chaque projet :
+        # plusieurs chaines peuvent se suivre dans le meme processus.
+        if sys.platform != "win32" or self.toolchain is None:
+            return
+        cxx = str(getattr(self.toolchain, "cxxPath", "") or getattr(self.toolchain, "ccPath", "") or "")
+        if cxx and not os.path.isabs(cxx):
+            cxx = ToolchainManager._FindExecutable(cxx) or ""
+        if cxx:
+            os.environ["PATH"] = ToolchainManager.PathAvecLeCompilateurEnTete(cxx)
+
+    def _RefusDeConstruire(self, project: Project) -> List[str]:
+        messages: List[str] = list(getattr(project, "buildErrors", []) or [])
+        exigences = getattr(project, "kitRequirements", None) or []
+        if exigences and project.kind in (ProjectKind.CONSOLE_APP, ProjectKind.WINDOWED_APP,
+                                          ProjectKind.SHARED_LIB, ProjectKind.TEST_SUITE):
+            chaine, lib = self._PhraseDeLaChaine()
+            for e in exigences:
+                voulue = str(e.get("stdlib", "") or "")
+                systeme = str(e.get("system", "") or "")
+                if systeme and self._NormalizeSystemName(systeme) != self._NormalizeSystemName(self.targetOs.value):
+                    continue  # l'exigence vaut pour un autre systeme que celui que l'on construit
+                famille_kit = str(e.get("compiler", "") or "")
+                famille_ici = self._FamilleDe(self.toolchain)
+                if (not voulue or not lib or voulue == lib):
+                    # meme bibliotheque C++ (ou inconnue) : reste la FAMILLE du compilateur. Un
+                    # avertissement, pas un refus -- ce melange echoue souvent, pas toujours.
+                    if (famille_kit and famille_ici and famille_kit != famille_ici
+                            and self.targetOs == TargetOS.WINDOWS):
+                        memes = self._ChainesPourStdlib(voulue, famille_kit)
+                        Colored.PrintWarning(
+                            f"Le kit {e.get('name', '')} a ete compile par {famille_kit} ; la chaine {chaine} est "
+                            f"{famille_ici}. Sous MinGW ce melange echoue souvent au lien (definitions multiples)."
+                            + (f" Preferez : --toolchain {' | '.join(memes)}" if memes else ""))
+                    continue
+                autres = self._ChainesPourStdlib(voulue, famille_kit) or self._ChainesPourStdlib(voulue)
+                messages.append(
+                    f"Le kit {e.get('name', '')} a ete compile avec {voulue} ; la chaine {chaine} lie {lib}. "
+                    "Ces deux bibliotheques C++ ne se melangent pas : le lien echouerait sur des centaines de symboles.")
+                if autres:
+                    messages.append("  Choisissez une chaine qui lie " + voulue + " : --toolchain " + " | ".join(autres))
+                messages.append("  Ou refaites le kit avec le compilateur de cette chaine.")
+        return messages
+
+    def _ExpliquerEchecDeLien(self, result) -> None:
+        try:
+            sortie = ((getattr(result, "stderr", "") or "") + "\n" + (getattr(result, "stdout", "") or "")) if result else ""
+            d = Builder.DiagnostiquerLien(sortie)
+            if not d:
+                return
+            voulue = d["attendue"]
+            chaine, lib = self._PhraseDeLaChaine()
+            qui = ", ".join(d["archives"]) if d["archives"] else "des bibliotheques liees"
+            if d.get("melange") == "compilateurs":
+                ici = self._FamilleDe(self.toolchain)
+                autre = "clang" if ici == "gcc" else ("gcc" if ici == "clang" else "")
+                print()
+                Colored.PrintWarning("CAUSE PROBABLE : des objets de clang et de gcc melanges.")
+                Colored.PrintInfo(f"  {qui} : compilees par un autre compilateur que la chaine {chaine}.")
+                Colored.PrintInfo("  Sous MinGW, clang et gcc ne rangent pas de la meme facon les variables statiques")
+                Colored.PrintInfo("  des fonctions inline : les memes en-tetes se definissent deux fois.")
+                memes = self._ChainesPourStdlib(lib, autre) if autre else []
+                if memes:
+                    Colored.PrintInfo("  -> choisir une chaine " + autre + " : --toolchain " + " | ".join(memes))
+                Colored.PrintInfo("  -> ou recompiler ces bibliotheques avec le compilateur de cette chaine.")
+                print()
+                return
+            origine = ("GCC, ou le clang de MSYS2 ucrt64/mingw64" if voulue == "libstdc++"
+                       else "llvm-mingw, ou le clang de MSYS2 clang64")
+            print()
+            Colored.PrintWarning("CAUSE PROBABLE : deux bibliotheques C++ melangees.")
+            Colored.PrintInfo(f"  {qui} : compilees avec {voulue} ({origine}).")
+            Colored.PrintInfo(f"  Ce lien se fait avec la chaine {chaine}" + (f", qui lie {lib}." if lib else "."))
+            autres = self._ChainesPourStdlib(voulue)
+            if autres:
+                Colored.PrintInfo(f"  -> choisir une chaine qui lie {voulue} : --toolchain " + " | ".join(autres))
+            Colored.PrintInfo("  -> ou recompiler ces bibliotheques avec le compilateur de cette chaine.")
+            print()
+        except Exception:
+            pass
 
     def _ForcedToolchainName(self) -> Optional[str]:
         """Nom de toolchain imposé via `--toolchain` (token `toolchain:<name>` dans
@@ -1479,6 +1635,7 @@ class Builder(abc.ABC):
                 "symbols": project.symbols,
                 "warnings": project.warnings,
                 "objcArc": getattr(project, "objcArc", False),
+                "buildErrors": list(getattr(project, "buildErrors", []) or []),
             }
             project._jenga_filter_base_state = base
 
@@ -1509,6 +1666,10 @@ class Builder(abc.ABC):
         project.symbols = base["symbols"]
         project.warnings = base["warnings"]
         project.objcArc = base.get("objcArc", False)
+        project.buildErrors = list(base.get("buildErrors", []))
+        for filter_name, messages in getattr(project, "_filteredBuildErrors", {}).items():
+            if self._FilterMatches(filter_name, project):
+                self._AppendUnique(project.buildErrors, list(messages))
 
         # 1) system links collected via links() inside filter("system:...")
         active_system = self._NormalizeSystemName(self.targetOs.value)
@@ -2479,6 +2640,19 @@ class Builder(abc.ABC):
         # Print beautiful project header
         logger.PrintProjectHeader()
 
+        self._MettreLeCompilateurEnTete()  # (2.8.17) le compilateur de la chaine, avec ses propres DLL
+
+        # (2.8.17) Ce projet refuse-t-il de se construire dans ce contexte ? builderror() sous un
+        # filtre, ou un kit dont la bibliotheque C++ n'est pas celle de la chaine choisie. Dit
+        # AVANT de compiler, une fois, au lieu de centaines de symboles introuvables au lien.
+        refus = self._RefusDeConstruire(project)
+        if refus:
+            logger.LogRefus("Build Refused", "\n".join(refus))
+            self.state.MarkProjectCompiled(project.name, success=False, platform=self.platform,
+                                        targetArch=self.targetArch.value if self.targetArch else "")
+            logger.PrintResultBox(False)
+            return False
+
         obj_dir = self.GetObjectDir(project)
         FileSystem.MakeDirectory(obj_dir)
         sources = self._CollectSourceFiles(project)
@@ -2756,6 +2930,8 @@ class Builder(abc.ABC):
             # Link - capture ProcessResult pour afficher les erreurs
             link_ok = self.Link(project, object_files, str(target_path))
             logger.LogLink(str(target_path), self._lastResult)  # Affiche les erreurs de linking si le linking échoue
+            if not link_ok:
+                self._ExpliquerEchecDeLien(self._lastResult)  # (2.8.17) deux bibliotheques C++ melangees ?
 
             self.CopyRuntimeDependencies(project, target_path)
 
