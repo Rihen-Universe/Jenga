@@ -58,6 +58,8 @@ class GdbCommand:
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
+        parser.add_argument("--toolchain", default=None,
+                            help="Toolchain to build and debug with (same as `jenga build --toolchain`).")
         parsed = parser.parse_args(args)
 
         # ── 1. Localiser le workspace ─────────────────────────────────────
@@ -110,8 +112,10 @@ class GdbCommand:
             return 1
 
         # ── 4. Build si demande (ou si l'exe manque) ──────────────────────
-        platform = parsed.platform or (
-            workspace.targetOses[0].value if workspace.targetOses else "Windows")
+        # (2.8.19) Sans --platform, CreateBuilder choisit comme `jenga build` : la machine hote si le
+        # workspace la declare. Avant : `parsed.platform or (workspace.targetOses[0].value if
+        # workspace.targetOses else "Windows")`.
+        platform = parsed.platform
 
         try:
             builder = BuildCommand.CreateBuilder(
@@ -128,7 +132,8 @@ class GdbCommand:
                     verbose=parsed.verbose,
                     no_cache=False,
                     no_daemon=parsed.no_daemon,
-                    extra=["action:debug"]
+                    extra=["action:debug"] + ([f"toolchain:{str(parsed.toolchain).strip()}"]
+                                              if parsed.toolchain else [])
                 )
             )
         except Exception as e:
@@ -144,6 +149,8 @@ class GdbCommand:
                 build_args += ["--platform", parsed.platform]
             if parsed.jenga_file:
                 build_args += ["--jenga-file", str(entry_file)]
+            if parsed.toolchain:  # (2.8.19) la meme chaine que `build --toolchain`
+                build_args += ["--toolchain", str(parsed.toolchain).strip()]
             if BuildCommand.Execute(build_args) != 0:
                 return 1
             exe_path = builder.GetTargetPath(project)

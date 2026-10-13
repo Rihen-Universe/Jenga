@@ -3,10 +3,51 @@
 Toutes les modifications notables de Jenga sont documentées ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com) ; versionnage [SemVer](https://semver.org).
 
-**Ce que valent `x.y.z`** (règle du 08/10/2026, la même que pour NKCode) : `x` change quand quelque chose
-peut casser l'existant ; `y` quand des fonctions nouvelles arrivent ; `z` **compte les corrections** — une
-sortie qui en apporte cinq avance `z` de cinq, et non d'un. Quand `x` ou `y` augmente, les nombres à sa
-droite reviennent à zéro.
+**Ce que valent `x.y.z`** (règle du 12/10/2026, la même que pour NKCode) : `x` change quand quelque chose
+peut casser l'existant ; `y` avance d'**un** pas quand une sortie apporte des fonctions nouvelles ; `z`
+avance d'**un** pas par sortie de corrections. Le nombre ne compte ni les fonctions ni les corrections :
+c'est le journal ci-dessous qui les dit. Quand `x` ou `y` augmente, les nombres à sa droite reviennent à
+zéro. (La règle du 08/10/2026 faisait avancer `z` d'autant de pas que de corrections ; elle a été
+abandonnée le 12/10 : un numéro qui saute de cinq inquiète sans rien apprendre.)
+
+## v2.8.19 — 2026-10-13
+
+### Six retours de terrain
+
+Des étudiants, un utilisateur de NKCode et nos propres essais sous Linux ont rencontré ces six points
+entre le 8 et le 13 octobre 2026.
+
+- **Le cadre d'erreur vide.** Un compilateur (ou un éditeur de liens) qui s'arrête sans écrire une
+  ligne — vu chez un utilisateur : le clang de MSYS2 lancé depuis PowerShell, ses DLL hors du PATH —
+  laissait un cadre rouge sans rien dedans. Le cadre dit maintenant la commande, le code de retour et
+  ce que ce code veut dire (« il n'a PAS démarré : une DLL dont il a besoin est introuvable », la liste
+  des DLL manquantes quand elle se lit, le dossier absent du PATH), puis quoi faire. Une exception
+  pendant une compilation parallèle affichait « ✓ Compiled module » en vert pour un fichier jamais
+  compilé : c'est un échec, compté et dit.
+- **`--toolchain` pour `run`, `rebuild`, `test`, `gdb` et `clean`.** Seul `build` connaissait l'option.
+  Les quatre premiers construisent eux aussi : sans elle, ils refaisaient avec la chaîne par défaut ce
+  que `build --toolchain X` venait de faire avec X, ou refusaient la ligne (« unrecognized
+  arguments »). `clean` l'accepte pour qu'une même ligne de commande serve partout.
+- **`run` et `gdb` sans `--platform` prennent la machine hôte**, comme `build` et `test`. Ils prenaient
+  le premier système déclaré par le workspace : sous Linux et macOS, `jenga run` cherchait un `.exe`
+  que `jenga build` n'avait jamais produit.
+- **Jenga vit sans flux standard.** Lancé par `pythonw` ou par une application fenêtrée sans console,
+  `sys.stdout` et `sys.stderr` valent `None` ; cinq endroits les touchaient sans regarder
+  (`Commands/Docs.py` à l'import, `Commands/Run.py`, `Core/Daemon.py`, `Utils/Colored.py`).
+- **Le compilateur de NKCode est trouvé.** NKCode embarque llvm-mingw, qui lie libc++. Le Jenga du
+  système ne le cherchait que par `LLVM_MINGW_BIN`, `JENGA_COMPILERS_DIR` et le PATH. Il regarde
+  maintenant aussi là où un NKCode se trouve : `JENGA_NKCODE_DIR`, puis
+  `%LOCALAPPDATA%\NKCode\emplacement.cfg` (lignes `dossier = <chemin>`, écrites par NKCode à son
+  démarrage — le seul moyen de trouver un NKCode simplement décompressé), puis la clé de l'installateur
+  Windows, puis `%LOCALAPPDATA%\Programs\NKCode`. La chaîne s'appelle `llvm-mingw`, comme avant.
+- **Un kit refusé dit quoi faire.** Quand la chaîne lie une autre bibliothèque C++ que celle du kit,
+  Jenga refuse avant de compiler (2.8.17) et nomme les chaînes qui conviennent. S'il n'y en avait
+  aucune sur la machine, il ne restait que « Ou refaites le kit », que celui qui reçoit un kit ne peut
+  pas faire. Le refus dit maintenant où trouver le compilateur : NKCode pour libc++ (trois façons de
+  s'en servir), MSYS2 pour libstdc++.
+
+Test : `tests/test_lot_2819.py`, 19 témoins. Sur 2.8.18, 18 sont rouges ; le dix-neuvième (« un
+compilateur qui parle est laissé tel quel ») garde le comportement d'avant.
 
 ## v2.8.18 — 2026-10-08
 

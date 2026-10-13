@@ -43,6 +43,14 @@ class RunCommand:
         return None
 
     @staticmethod
+    def _SansTerminal() -> bool:
+        """(2.8.19) Vrai quand la sortie n'est pas un terminal -- ou n'existe pas : sans console
+        (pythonw, application fenetree qui lance Jenga), sys.stdout vaut None. Avant :
+        not sys.stdout.isatty(), qui levait AttributeError."""
+        import sys as _s
+        return not (_s.stdout is not None and _s.stdout.isatty())
+
+    @staticmethod
     def Execute(args: List[str]) -> int:
         parser = argparse.ArgumentParser(prog="jenga run", description="Run a project executable.")
         parser.add_argument("project", nargs="?", default=None, help="Project name to run (default: startProject or first executable)")
@@ -62,6 +70,8 @@ class RunCommand:
                                  "when running (checks the binary runs on its own).")
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
+        parser.add_argument("--toolchain", default=None,
+                            help="Toolchain to build and run with (same as `jenga build --toolchain`).")
         parser.add_argument("--target", help="Desktop: project to run (same as `jenga build --target`). "
                                              "Mobile: device serial / UDID to run on (skip if a single device is connected)")
         # Une application CONSOLE lancee depuis un IDE herite d'un TUBE, pas d'une
@@ -257,6 +267,8 @@ class RunCommand:
                 build_args += ["--platform", parsed.platform]
             if parsed.jenga_file:
                 build_args += ["--jenga-file", str(entry_file)]
+            if parsed.toolchain:  # (2.8.19) la meme chaine que `build --toolchain`
+                build_args += ["--toolchain", str(parsed.toolchain).strip()]
             build_args += ["--target", project_name]
             ret = BuildCommand.Execute(build_args)
             if ret != 0:
@@ -268,7 +280,11 @@ class RunCommand:
             builder = BuildCommand.CreateBuilder(
                 workspace,
                 config=parsed.config,
-                platform=parsed.platform or (workspace.targetOses[0].value if workspace.targetOses else "Windows"),
+                # (2.8.19) Sans --platform, CreateBuilder choisit comme `jenga build` : la machine hote
+                # si le workspace la declare. Avant : `parsed.platform or (workspace.targetOses[0].value
+                # if workspace.targetOses else "Windows")` -- sous Linux et macOS, `run` cherchait
+                # l'executable Windows que `build` n'avait pas produit.
+                platform=parsed.platform,
                 target=project_name,
                 verbose=False,
                 action="run",
@@ -279,7 +295,8 @@ class RunCommand:
                     verbose=False,
                     no_cache=False,
                     no_daemon=parsed.no_daemon,
-                    extra=["action:run"]
+                    extra=["action:run"] + ([f"toolchain:{str(parsed.toolchain).strip()}"]
+                                            if parsed.toolchain else [])
                 )
             )
         except Exception as e:
@@ -355,7 +372,7 @@ class RunCommand:
                 import sys as _sys
                 from ..Core.Platform import Platform as _Plat
                 est_console = getattr(project, 'kind', None) == Api.ProjectKind.CONSOLE_APP
-                sans_terminal = not _sys.stdout.isatty()
+                sans_terminal = RunCommand._SansTerminal()  # (2.8.19) sys.stdout peut valoir None
                 if _Plat.GetHostOS() == Api.TargetOS.WINDOWS and est_console and sans_terminal:
                     import subprocess as _sp
                     Colored.PrintInfo("Application console sans terminal : ouverture d'une console dediee.")
@@ -519,7 +536,8 @@ class RunCommand:
         # memoire pour toujours et l'URL n'apparait NULLE PART, alors que le
         # serveur tourne reellement. Vecu : 5 minutes d'attente sur un fichier
         # de sortie vide pendant que le serveur repondait deja aux requetes.
-        sys.stdout.flush()
+        if sys.stdout is not None:  # (2.8.19) None sans console
+            sys.stdout.flush()
         _wb.open(url)
         try:
             srv.serve_forever()

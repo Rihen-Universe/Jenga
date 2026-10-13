@@ -214,7 +214,12 @@ def _stripped_path() -> str:
         if not d:
             continue
         p = Path(d)
-        if any((p / n).exists() for n in ("libstdc++-6.dll", "clang++.exe", "clang++", "g++.exe", "g++")):
+        # (2.8.19) libwinpthread-1.dll et libgcc_s_seh-1.dll aussi : un dossier garde qui porte l'une
+        # d'elles dans l'AUTRE architecture (mesure le 13/10/2026 : C:\Android\Sdk\platform-tools, 32
+        # bits) fait echouer le chargeur en 0xC000007B avant qu'il ne constate la DLL manquante, et le
+        # temoin attendait 0xC0000135. Le critere dependait de la machine.
+        if any((p / n).exists() for n in ("libstdc++-6.dll", "libwinpthread-1.dll", "libgcc_s_seh-1.dll",
+                                          "clang++.exe", "clang++", "g++.exe", "g++")):
             continue
         keep.append(d)
     return os.pathsep.join(keep)

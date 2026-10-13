@@ -26,6 +26,8 @@ class RebuildCommand:
         parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
+        parser.add_argument("--toolchain", default=None,
+                            help="Toolchain to rebuild with (same as `jenga build --toolchain`).")
         parser.add_argument("--keep-going", "-k", action="store_true",
                             help="Build everything that can be built instead of stopping at the "
                                  "first failure (see `jenga build --keep-going`)")
@@ -60,6 +62,8 @@ class RebuildCommand:
             build_args += ["--platform", parsed.platform]
         if parsed.target:
             build_args += ["--target", parsed.target]
+        if parsed.toolchain:  # (2.8.19) la meme chaine que `build --toolchain`
+            build_args += ["--toolchain", str(parsed.toolchain).strip()]
         if parsed.jenga_file:
             build_args += ["--jenga-file", parsed.jenga_file]
         build_args = [arg for arg in build_args if arg]  # enlever les chaînes vides

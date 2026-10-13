@@ -672,6 +672,76 @@ class ToolchainManager:
         tc.targetEnv = TargetEnv.MINGW
         return tc
 
+    # ------------------------------------------------------------------
+    # (2.8.19) LE COMPILATEUR DE NKCODE, CHERCHE LA OU NKCODE EST
+    # ------------------------------------------------------------------
+    # Retour d'une promotion (10/10/2026) : un kit compile avec libc++, des etudiants qui tapent
+    # `jenga build` dans PowerShell avec le Jenga du systeme, dont la seule chaine GNU est le clang de
+    # MSYS2 (libstdc++). Jenga refusait, a raison, et ne proposait rien : le compilateur qui lie libc++
+    # etait pourtant sur la machine, dans le dossier de NKCode, ou personne ne le cherchait.
+    _NKCODE_LLVM_MINGW = ("tools", "compilers", "llvm-mingw", "bin")
+    # L'identite de l'installateur Windows de NKCode (Inno Setup). Le nom de la cle porte une accolade
+    # de trop depuis le premier installateur : les deux formes sont lues.
+    _NKCODE_CLES_DESINSTALLATION = (
+        r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{B7E4B4C1-3F2A-4E77-9C2E-6E4B3D1A7C05}}_is1",
+        r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{B7E4B4C1-3F2A-4E77-9C2E-6E4B3D1A7C05}_is1",
+    )
+
+    @staticmethod
+    def _NkCodeDepuisLeRegistre() -> List[Path]:
+        """Le dossier d'un NKCode pose par son installateur : InstallLocation de sa cle de
+        desinstallation, pour l'utilisateur puis pour la machine."""
+        if sys.platform != "win32":
+            return []
+        try:
+            import winreg
+        except ImportError:
+            return []
+        dossiers: List[Path] = []
+        for racine in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            for cle in ToolchainManager._NKCODE_CLES_DESINSTALLATION:
+                try:
+                    with winreg.OpenKey(racine, cle) as k:
+                        valeur, _type = winreg.QueryValueEx(k, "InstallLocation")
+                except OSError:
+                    continue
+                if str(valeur).strip():
+                    dossiers.append(Path(str(valeur).strip()))
+        return dossiers
+
+    @staticmethod
+    def DossiersDeNkCode() -> List[Path]:
+        r"""Les dossiers ou un NKCode peut se trouver sur cette machine, du plus sur au moins sur :
+          1. JENGA_NKCODE_DIR : designe a la main ;
+          2. %LOCALAPPDATA%\NKCode\emplacement.cfg, lignes `dossier = <chemin>` : ce que NKCode ecrit a
+             son demarrage. C'est le SEUL moyen de trouver un NKCode simplement decompresse ;
+          3. l'installateur Windows : sa cle de desinstallation ;
+          4. le dossier par defaut de l'installateur : %LOCALAPPDATA%\Programs\NKCode.
+        Rien n'est verifie ici : l'appelant regarde si le compilateur s'y trouve."""
+        dossiers: List[Path] = []
+
+        def ajouter(chemin: str) -> None:
+            chemin = (chemin or "").strip().strip('"')
+            if chemin and Path(chemin) not in dossiers:
+                dossiers.append(Path(chemin))
+
+        ajouter(os.environ.get("JENGA_NKCODE_DIR", ""))
+        local = os.environ.get("LOCALAPPDATA", "").strip()
+        if local:
+            try:
+                texte = (Path(local) / "NKCode" / "emplacement.cfg").read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                texte = ""
+            for ligne in texte.splitlines():
+                cle, egal, valeur = ligne.partition("=")
+                if egal and cle.strip().lower() == "dossier":
+                    ajouter(valeur)
+        for d in ToolchainManager._NkCodeDepuisLeRegistre():
+            ajouter(str(d))
+        if local:
+            ajouter(str(Path(local) / "Programs" / "NKCode"))
+        return dossiers
+
     @staticmethod
     def DetectWindowsGnuInstallations() -> List[Toolchain]:
         # Une chaine PAR compilateur installe : msys2-ucrt64-clang, msys2-ucrt64-gcc,
@@ -689,7 +759,8 @@ class ToolchainManager:
                 tc = ToolchainManager._ChaineGnuWindows(f"msys2-{sous}-gcc", d / "gcc.exe", d / "g++.exe", True)
                 if tc:
                     trouvees.append(tc)
-        # llvm-mingw : designe (LLVM_MINGW_BIN), embarque (JENGA_COMPILERS_DIR), ou dans le PATH.
+        # llvm-mingw : designe (LLVM_MINGW_BIN), embarque (JENGA_COMPILERS_DIR), dans le PATH, ou --
+        # (2.8.19) en dernier -- dans le dossier d'un NKCode present sur la machine.
         candidats: List[Path] = []
         for v in (os.environ.get("LLVM_MINGW_BIN", ""),):
             if v.strip():
@@ -700,6 +771,8 @@ class ToolchainManager:
         for morceau in os.environ.get("PATH", "").split(os.pathsep):
             if morceau.strip():
                 candidats.append(Path(morceau.strip()))
+        for nkcode in ToolchainManager.DossiersDeNkCode():
+            candidats.append(nkcode.joinpath(*ToolchainManager._NKCODE_LLVM_MINGW))
         for d in candidats:
             try:
                 if not (d / "x86_64-w64-mingw32-clang++.exe").is_file():

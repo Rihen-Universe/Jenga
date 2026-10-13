@@ -668,17 +668,26 @@ def StartDaemon(workspace_root: Path, entry_file: Path,
             sys.exit(1)
 
         # Rediriger stdin/stdout/stderr
-        sys.stdout.flush()
-        sys.stderr.flush()
+        # (2.8.19) Un flux standard peut manquer (None) : on vide ceux qui existent, et on redirige
+        # les descripteurs 0, 1 et 2 eux-memes quand l'objet Python n'est pas la.
+        def _descripteur(flux, defaut):
+            try:
+                return flux.fileno() if flux is not None else defaut
+            except (AttributeError, OSError, ValueError):
+                return defaut
+
+        for _flux in (sys.stdout, sys.stderr):
+            if _flux is not None:
+                _flux.flush()
         log_dir = workspace_root / Daemon._DAEMON_DIR
         FileSystem.MakeDirectory(log_dir)
 
         with open('/dev/null', 'r') as f:
-            os.dup2(f.fileno(), sys.stdin.fileno())
+            os.dup2(f.fileno(), _descripteur(sys.stdin, 0))
         with open(log_dir / 'daemon.out', 'a') as f:
-            os.dup2(f.fileno(), sys.stdout.fileno())
+            os.dup2(f.fileno(), _descripteur(sys.stdout, 1))
         with open(log_dir / 'daemon.err', 'a') as f:
-            os.dup2(f.fileno(), sys.stderr.fileno())
+            os.dup2(f.fileno(), _descripteur(sys.stderr, 2))
 
         # Lancer le daemon
         daemon = Daemon(workspace_root, entry_file)

@@ -61,6 +61,8 @@ class TestCommand:
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
+        parser.add_argument("--toolchain", default=None,
+                            help="Toolchain to build and run the tests with (same as `jenga build --toolchain`).")
         parsed = parser.parse_args(args)
 
         # Déterminer le répertoire de travail (workspace root)
@@ -201,6 +203,8 @@ class TestCommand:
                     build_args += ["--platform", parsed.platform]
                 if parsed.jenga_file:
                     build_args += ["--jenga-file", str(entry_file)]
+                if parsed.toolchain:  # (2.8.19) la meme chaine que `build --toolchain`
+                    build_args += ["--toolchain", str(parsed.toolchain).strip()]
                 build_args += ["--target", name]
                 ret = BuildCommand.Execute(build_args)
                 if ret != 0:
@@ -229,7 +233,8 @@ class TestCommand:
                         verbose=parsed.verbose,
                         no_cache=False,
                         no_daemon=parsed.no_daemon,
-                        extra=["action:test"]
+                        extra=["action:test"] + ([f"toolchain:{str(parsed.toolchain).strip()}"]
+                                                 if parsed.toolchain else [])
                     )
                 )
             except Exception as e:

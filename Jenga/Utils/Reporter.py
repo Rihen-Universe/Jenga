@@ -542,6 +542,10 @@ class BuildLogger:
 
             # Fusionner stdout et stderr pour avoir tout le message
             output = (result.stderr or "") + (result.stdout or "")
+            # (2.8.19) Un echec SANS une ligne : le cadre d'erreur sortait vide. On y met la commande,
+            # le code de retour et ce qu'il veut dire.
+            if result.returnCode != 0 and not output.strip():
+                output = self._DireSilence(result, "Le compilateur")
 
             if result.returnCode == 0:
                 # Compilation réussie – on vérifie les warnings
@@ -641,8 +645,11 @@ class BuildLogger:
                 self.errors_count += max(1, self._CountPattern(output, r'\bError\b|\bunresolved\b|\bundefined reference\b'))
 
                 Display.Info("Linking...")
-                if output.strip():
-                    self._PrintErrorBox("Link Failed", output)
+                # (2.8.19) Avant : `if output.strip():` -- un editeur de liens mort sans une ligne ne
+                # laissait que « Link failed ». Le cadre dit maintenant la commande et le code.
+                if not output.strip():
+                    output = self._DireSilence(result, "L'editeur de liens")
+                self._PrintErrorBox("Link Failed", output)
                 Display.Error(f"Link failed: {display_path}")
                 _SinkCall("OnLinkError", self.project_name, output_file, output)
 
@@ -748,6 +755,82 @@ class BuildLogger:
         # This method is kept for backwards compatibility but does nothing
         # The new design uses PrintResultBox() instead
         pass
+
+    # ------------------------------------------------------------------
+    # (2.8.19) UN OUTIL QUI SE TAIT
+    # ------------------------------------------------------------------
+    # Codes de retour Windows d'un programme qui a demarre puis est mort (les codes « pas demarre »
+    # sont dans RuntimeDiag.LOADER_CODES).
+    _CODES_DE_PANNE = {
+        0xC0000005: "il a plante (violation d'acces)",
+        0xC00000FD: "il a plante (pile debordee)",
+        0xC000001D: "instruction illegale : ce binaire n'est pas fait pour ce processeur",
+        0xC0000409: "il s'est arrete lui-meme sur une erreur interne (arret de securite)",
+        0xC000013A: "il a ete interrompu (Ctrl+C, ou la fenetre fermee)",
+        0xC0000017: "la memoire a manque",
+        0xC000012D: "la memoire a manque (fichier d'echange plein)",
+    }
+
+    @staticmethod
+    def _ProgrammeDe(commande: str) -> Optional[Path]:
+        """Le programme d'une ligne de commande telle que Process la rend (premier mot, guillemets retires)."""
+        import shlex
+        commande = (commande or "").strip()
+        if not commande:
+            return None
+        try:
+            mots = shlex.split(commande)
+        except ValueError:
+            mots = commande.split()
+        return Path(mots[0]) if mots else None
+
+    @staticmethod
+    def _DireSilence(result, qui: str) -> str:
+        """L'outil s'est arrete avec un code d'erreur SANS ecrire une ligne : un cadre d'erreur vide
+        n'apprend rien. On dit le code, ce qu'il veut dire, et la commande, pour qu'elle se rejoue."""
+        import os
+        from .RuntimeDiag import RuntimeDiag
+        code = getattr(result, "returnCode", None)
+        commande = (getattr(result, "command", "") or "").strip()
+        non_signe = RuntimeDiag.Unsigned32(code) if isinstance(code, int) else 0
+        if isinstance(code, int) and non_signe >= 0x80000000 and sys.platform == "win32":
+            nom_code = RuntimeDiag.CodeName(code) if non_signe in RuntimeDiag.LOADER_CODES else f"0x{non_signe:08X}"
+        else:
+            nom_code = str(code)
+        lignes = [f"{qui} s'est arrete sans rien ecrire. Code de retour : {nom_code}."]
+        exe = BuildLogger._ProgrammeDe(commande)
+        if isinstance(code, int) and RuntimeDiag.IsLoaderFailure(code):
+            quoi = {
+                RuntimeDiag.STATUS_DLL_NOT_FOUND: "une DLL dont il a besoin est introuvable",
+                RuntimeDiag.STATUS_ENTRYPOINT_NOT_FOUND:
+                    "une DLL a ete trouvee, mais ce n'est pas la bonne version (deux compilateurs se melangent dans le PATH)",
+                RuntimeDiag.STATUS_INVALID_IMAGE_FORMAT: "une DLL de la mauvaise architecture (32 ou 64 bits) a ete trouvee d'abord",
+            }.get(non_signe, "le programme, ou une bibliotheque partagee dont il a besoin, est introuvable")
+            lignes.append(f"Ce code veut dire qu'il n'a PAS demarre : {quoi}.")
+            chemin = os.environ.get("PATH", "")
+            try:
+                if exe is not None and exe.is_file():
+                    manquantes = RuntimeDiag.MissingImports(exe, chemin)
+                    if manquantes:
+                        lignes.append("DLL introuvable(s) : " + ", ".join(manquantes) + ".")
+                    dossiers = {os.path.normcase(os.path.normpath(d)) for d in chemin.split(os.pathsep) if d}
+                    if os.path.normcase(os.path.normpath(str(exe.parent))) not in dossiers:
+                        lignes.append(f"Son dossier n'est pas dans le PATH de ce terminal : {exe.parent}")
+            except OSError:
+                pass
+            lignes.append("Lancez Jenga depuis le terminal de ce compilateur, ou ajoutez son dossier au PATH, "
+                          "ou choisissez une autre chaine : `jenga info` les liste, `--toolchain <nom>` en choisit une.")
+        elif isinstance(code, int) and non_signe in BuildLogger._CODES_DE_PANNE and sys.platform == "win32":
+            lignes.append(f"Ce code veut dire : {BuildLogger._CODES_DE_PANNE[non_signe]}.")
+        elif isinstance(code, int) and code < 0 and sys.platform != "win32":
+            precision = {9: " (SIGKILL : souvent la memoire qui manque)", 11: " (SIGSEGV : il a plante)",
+                         6: " (SIGABRT : il s'est arrete lui-meme)", 2: " (interrompu)"}.get(-code, "")
+            lignes.append(f"Il a ete arrete par le signal {-code}{precision}.")
+        else:
+            lignes.append("Rejouez la commande ci-dessous dans un terminal pour voir ce qu'il repond.")
+        if commande:
+            lignes.append("Commande : " + commande)
+        return "\n".join(lignes)
 
     def _PrintErrorBox(self, title: str, output: str) -> None:
         """Print a double-bordered error box with enhanced file:line:column parsing."""

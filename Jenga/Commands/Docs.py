@@ -26,10 +26,14 @@ from ..Core.Cache import Cache
 from ..Core import Api
 
 # Fix encoding for Windows terminals that don't support UTF-8
-if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
+# (2.8.19) sys.stdout et sys.stderr valent None sans console (pythonw, application fenetree qui
+# lance Jenga) : ce module doit quand meme s'importer. Avant : `if sys.stdout.encoding and ...`.
+_encodage_sortie = getattr(sys.stdout, 'encoding', None)
+if _encodage_sortie and _encodage_sortie.lower() not in ('utf-8', 'utf8'):
     try:
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+        if sys.stderr is not None:
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
     except Exception:
         pass
 

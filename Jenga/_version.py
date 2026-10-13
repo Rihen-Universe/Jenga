@@ -127,7 +127,14 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # que libc++ et libstdc++ (ou clang et gcc) sont melanges est EXPLIQUE. Un kit dit ce qu'il
 # exige (kitrequire) et refuse une configuration qu'il ne contient pas (builderror), au lieu
 # de centaines de symboles introuvables. Chaque compilateur tourne avec son dossier en tete.
-__version__ = "2.8.18"
+# 2.8.19 (2026-10-13) : six retours de terrain. Un compilateur ou un editeur de liens mort sans
+# ecrire une ligne ne laisse plus un cadre d'erreur vide : la commande, le code de retour et ce
+# qu'il veut dire. `--toolchain` vaut pour run, rebuild, test, gdb et clean. `run` et `gdb` sans
+# `--platform` prennent la machine hote, comme `build` (sous Linux et macOS ils cherchaient un
+# .exe). Jenga vit sans flux standard (sys.stdout None). Le compilateur d'un NKCode present sur
+# la machine est trouve (JENGA_NKCODE_DIR, emplacement.cfg, installateur). Un kit refuse faute
+# de chaine qui lie sa bibliotheque C++ dit quoi faire.
+__version__ = "2.8.19"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

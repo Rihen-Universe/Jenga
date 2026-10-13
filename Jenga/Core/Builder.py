@@ -304,8 +304,39 @@ class Builder(abc.ABC):
                     "Ces deux bibliotheques C++ ne se melangent pas : le lien echouerait sur des centaines de symboles.")
                 if autres:
                     messages.append("  Choisissez une chaine qui lie " + voulue + " : --toolchain " + " | ".join(autres))
+                else:
+                    messages.extend(self._IssuesSansChaine(voulue))  # (2.8.19) le refus dit quoi faire
                 messages.append("  Ou refaites le kit avec le compilateur de cette chaine.")
         return messages
+
+    @staticmethod
+    def _EchecDepuisException(exc: BaseException) -> ProcessResult:
+        # (2.8.19) Une exception pendant la compilation d'un fichier devient le resultat d'un echec :
+        # 127 quand le programme est introuvable (le code qu'un shell rend), 1 sinon.
+        code = 127 if isinstance(exc, FileNotFoundError) else 1
+        message = str(exc).strip() or type(exc).__name__
+        return ProcessResult(code, "", message, "")
+
+    def _IssuesSansChaine(self, voulue: str) -> List[str]:
+        # (2.8.19) Aucune chaine de cette machine ne lie la bibliotheque C++ du kit. Le refus etait
+        # juste, mais il laissait devant un mur : « Ou refaites le kit », que celui qui RECOIT un kit
+        # ne peut pas faire. Il dit maintenant ou trouver le compilateur qui convient.
+        lignes = [f"  Aucune chaine de cette machine ne lie {voulue} (`jenga info` liste celles qui sont la)."]
+        if self.targetOs != TargetOS.WINDOWS:
+            return lignes
+        if voulue == "libc++":
+            lignes += [
+                "  NKCode embarque un compilateur qui la lie (llvm-mingw). Trois facons de s'en servir :",
+                "    - construire depuis NKCode ;",
+                "    - dans ce dossier, lancer <dossier de NKCode>\\tools\\jenga.cmd build ;",
+                "    - dire a ce Jenga ou il est : JENGA_NKCODE_DIR=<dossier de NKCode>, puis --toolchain llvm-mingw.",
+            ]
+        elif voulue == "libstdc++":
+            lignes += [
+                "  MSYS2 fournit des compilateurs qui la lient (https://www.msys2.org, environnement ucrt64 :",
+                "  gcc ou clang). Une fois installe : --toolchain msys2-ucrt64-gcc ou msys2-ucrt64-clang.",
+            ]
+        return lignes
 
     def _ExpliquerEchecDeLien(self, result) -> None:
         try:
@@ -2735,7 +2766,12 @@ class Builder(abc.ABC):
                     logger.LogCached(str(src_path))
                     continue
 
-                result = self.Compile(project, str(src_path), str(obj_path))
+                # (2.8.19) Une exception (compilateur introuvable, delai depasse) est un ECHEC DIT de ce
+                # fichier, pas une trace Python qui coupe la construction.
+                try:
+                    result = self.Compile(project, str(src_path), str(obj_path))
+                except Exception as exc:
+                    result = self._EchecDepuisException(exc)
                 if result.returnCode == 0:
                     signature = self._ComputeCompileSignature(project, str(src_path), str(obj_path))
                     self._WriteCompileSignature(str(obj_path), signature)
@@ -2785,8 +2821,11 @@ class Builder(abc.ABC):
                             logger.LogCompile(src_path, result)
                             success = False
                     except Exception as exc:
-                        logger.LogCompile(src_path, None)
-                        Reporter.Error(f"Compilation exception for {src_path}: {exc}")
+                        # (2.8.19) Avant : `logger.LogCompile(src_path, None)` -- qui affichait
+                        # « Compiled module » en VERT pour un fichier jamais compile -- puis
+                        # `Reporter.Error(f"Compilation exception for {src_path}: {exc}")`.
+                        # Le fichier est maintenant compte comme un echec, l'exception est son message.
+                        logger.LogCompile(src_path, self._EchecDepuisException(exc))
                         success = False
 
         if not success:

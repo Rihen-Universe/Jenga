@@ -123,7 +123,8 @@ class Colored:
                 return Colored._supportsColor
 
         # Unix-like
-        if not sys.stdout.isatty():
+        # (2.8.19) sys.stdout vaut None sans console : pas de couleur, et surtout pas d'exception.
+        if sys.stdout is None or not sys.stdout.isatty():
             Colored._supportsColor = False
             return False
         term = os.environ.get("TERM", "")

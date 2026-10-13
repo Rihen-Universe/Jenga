@@ -30,6 +30,8 @@ class CleanCommand:
         parser.add_argument("--all", action="store_true", help="Remove all build artifacts and cache")
         parser.add_argument("--no-daemon", action="store_true", help="Do not use daemon")
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
+        parser.add_argument("--toolchain", default=None,
+                            help="Accepted so that one command line serves build, run, test and clean; clean removes the outputs of every toolchain.")
         parsed = parser.parse_args(args)
 
         # Déterminer le répertoire de travail (workspace root)
