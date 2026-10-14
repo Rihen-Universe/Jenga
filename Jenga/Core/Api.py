@@ -1370,6 +1370,149 @@ def useconfig(*paths: str) -> None:
             _workspaceGlobals[name] = val
 
 
+# --- Les kits, ou qu'ils soient sur la machine (2.8.20) ---
+# Rodolf, 14/10/2026 : « jenga recherche le kit forcement a la racine du workspace,
+# pourtant on peut mettre une bibliotheque n'importe ou sur le systeme ». Le kit, lui,
+# n'a jamais tenu a sa place (son .jenga calcule KIT_ROOT d'apres son propre fichier) ;
+# ce qui l'attachait a la racine, c'etait la facon de le charger : useconfig() part de
+# la racine du workspace pour un chemin relatif, rien ne cherche un kit par son NOM, et
+# `jenga kit` conseillait useconfig("<dossier>/<kit>.jenga"). loadkit() le trouve ou
+# qu'il soit. Son nom n'est pas « usekit » : la fonction qu'un kit genere s'appelle
+# « use » + son nom (KitCommand._FunctionName), et un kit nomme « Kit » l'ecraserait.
+_kitPaths: List[str] = []
+
+
+def _kitCallerDir() -> Path:
+    """Le dossier du .jenga qui appelle loadkit()/kitpaths(). Les cadres du paquet Jenga
+    (Api, Loader...) et les sources sans fichier (« <string> ») sont sautes ; a defaut,
+    le dossier courant, qui est celui du workspace pendant sa lecture (Loader)."""
+    paquet = os.path.normcase(str(Path(__file__).resolve().parents[1])) + os.sep
+    frame = sys._getframe(1)
+    while frame is not None:
+        name = frame.f_code.co_filename
+        if name and not name.startswith("<"):
+            full = os.path.normcase(os.path.abspath(name))
+            if not full.startswith(paquet):
+                return Path(name).resolve().parent
+        frame = frame.f_back
+    return Path.cwd()
+
+
+def _kitUserDir() -> Path:
+    """Le dossier de kits de l'utilisateur : %LOCALAPPDATA%\\Jenga\\kits, sinon ~/.jenga/kits."""
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        return Path(local) / "Jenga" / "kits"
+    return Path.home() / ".jenga" / "kits"
+
+
+def _kitPathIsBroken(raw: str) -> Optional[str]:
+    """Un chemin Windows ecrit avec des « \\ » dans une chaine Python ordinaire perd ses
+    separateurs : « C:\\kits\\tests » contient une TABULATION. On le dit au lieu de
+    chercher un dossier qui n'existe pas."""
+    for ch, nom in (("\t", "une tabulation (\\t)"), ("\n", "un saut de ligne (\\n)"),
+                    ("\r", "un retour chariot (\\r)"), ("\a", "un \\a"), ("\b", "un \\b"),
+                    ("\f", "un \\f"), ("\v", "un \\v")):
+        if ch in raw:
+            return nom
+    return None
+
+
+def kitpaths(*dirs: str) -> None:
+    """Ajoute des dossiers ou loadkit() cherche les kits, avant JENGA_KITS et le dossier
+    de l'utilisateur. Un chemin relatif part du .jenga qui appelle kitpaths()."""
+    base = _kitCallerDir()
+    for raw in dirs:
+        broken = _kitPathIsBroken(raw)
+        if broken:
+            raise ValueError(f"kitpaths: le chemin {raw!r} contient {broken}. Ecrivez-le avec des / "
+                             f"(\"D:/Kits\") ou en chaine brute (r\"D:\\Kits\").")
+        p = Path(raw)
+        if not p.is_absolute():
+            p = base / p
+        _kitPaths.append(str(p.resolve()))
+
+
+def findkit(name: str) -> Tuple[Optional[Path], List[str]]:
+    """Cherche le .jenga d'un kit, SANS le charger. Rend (chemin ou None, endroits fouilles).
+
+    `name` est un NOM (« R3D ») ou un CHEMIN (« D:/Kits/R3D », « ../kits/R3D/R3D.jenga »).
+    Pour un chemin : tel quel s'il est absolu ; sinon depuis le .jenga qui appelle, puis
+    depuis la racine du workspace. Un dossier vaut <dossier>/<nom du dossier>.jenga.
+    Pour un nom, dans chaque dossier fouille : <dossier>/<nom>/<nom>.jenga puis
+    <dossier>/<nom>.jenga. Ordre des dossiers : celui du .jenga qui appelle ; kitpaths() ;
+    JENGA_KITS (plusieurs dossiers separes par os.pathsep) ; le dossier de l'utilisateur ;
+    la racine du workspace, puis ses dossiers Kits/ et kits/ (l'usage d'avant 2.8.20).
+    """
+    broken = _kitPathIsBroken(name)
+    if broken:
+        raise ValueError(f"loadkit: {name!r} contient {broken}. Ecrivez le chemin avec des / "
+                         f"(\"D:/Kits/R3D\") ou en chaine brute (r\"D:\\Kits\\R3D\"), ou donnez seulement le nom du kit.")
+    caller = _kitCallerDir()
+    root = Path(_currentWorkspace.location).resolve() if (_currentWorkspace and _currentWorkspace.location) else Path.cwd()
+    searched: List[str] = []
+
+    def candidate(p: Path) -> Optional[Path]:
+        if p.suffix.lower() == ".jenga":
+            searched.append(str(p))
+            return p.resolve() if p.is_file() else None
+        for c in (p / f"{p.name}.jenga",):
+            searched.append(str(c))
+            if c.is_file():
+                return c.resolve()
+        return None
+
+    looks_like_path = ("/" in name or "\\" in name or name.lower().endswith(".jenga")
+                       or Path(name).is_absolute())
+    if looks_like_path:
+        p = Path(name)
+        bases = [None] if p.is_absolute() else [caller, root]
+        for b in bases:
+            found = candidate(p if b is None else b / p)
+            if found:
+                return found, searched
+        return None, searched
+
+    dirs: List[Path] = [caller]
+    dirs += [Path(d) for d in _kitPaths]
+    for d in os.environ.get("JENGA_KITS", "").split(os.pathsep):
+        if d.strip():
+            dirs.append(Path(d.strip()))
+    dirs += [_kitUserDir(), root, root / "Kits", root / "kits"]
+    seen = set()
+    for d in dirs:
+        key = os.path.normcase(str(d.resolve()) if d.exists() else str(d))
+        if key in seen:
+            continue
+        seen.add(key)
+        found = candidate(d / name) or candidate(d / f"{name}.jenga")
+        if found:
+            return found, searched
+    return None, searched
+
+
+def loadkit(name: str) -> str:
+    """Charge un kit par son NOM ou son CHEMIN, ou qu'il soit sur la machine, comme
+    useconfig() charge son .jenga ; rend le chemin charge. Voir findkit() pour l'ordre
+    de recherche. Exemples :
+
+        loadkit("R3D")                      # cherche le kit R3D
+        loadkit("D:/Rihen/Kits/R3D")        # ce dossier precis
+        kitpaths("../kits"); loadkit("Canvas")
+
+    Introuvable : l'erreur dit chaque endroit fouille, et comment en ajouter un.
+    """
+    found, searched = findkit(name)
+    if found is None:
+        lignes = "\n".join(f"    {s}" for s in searched)
+        raise FileNotFoundError(
+            f"loadkit: kit {name!r} introuvable. Endroits fouilles, dans l'ordre :\n{lignes}\n"
+            f"  Donnez son chemin (loadkit(\"D:/Kits/{name}\")), ajoutez son dossier par kitpaths(...) "
+            f"ou par la variable JENGA_KITS, ou copiez-le dans {_kitUserDir()}.")
+    useconfig(str(found))
+    return str(found)
+
+
 def configurations(names: List[str]) -> None:
     if _currentWorkspace:
         _currentWorkspace.configurations = names
@@ -3853,6 +3996,7 @@ def resetstate() -> None:
     _currentProject = None
     _currentToolchain = None
     _currentFilter = None
+    _kitPaths.clear()  # (2.8.20) les dossiers de kits d'un workspace ne fuient pas dans le suivant
 
 # ---------------------------------------------------------------------------
 # External Tools Management (complete)
@@ -4570,7 +4714,7 @@ __all__ = [
     # Context managers
     'workspace', 'project', 'toolchain', 'filter', 'unitest', 'test', 'include', 'batchinclude', 'addtools',
     # User functions (lowercase)
-    'useconfig',
+    'useconfig', 'loadkit', 'kitpaths', 'findkit',
     'configurations', 'platforms', 'targetoses', 'targetarchs', 'targetos', 'targetarch', 'platform', 'architecture', 'startproject', 'disableunittestcompilation', 'disableunittestexecution', 'dutc', 'dute', 'newoption',
     'consoleapp', 'windowedapp', 'staticlib', 'sharedlib', 'testsuite', 'kind',
     'language', 'cppdialect', 'cdialect',

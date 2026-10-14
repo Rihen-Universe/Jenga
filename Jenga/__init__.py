@@ -28,7 +28,7 @@ from .Core.Api import (
     # Context managers
     workspace, project, toolchain, filter, unitest, test, include, batchinclude, addtools,
     # User functions (lowercase DSL)
-    useconfig,
+    useconfig, loadkit, kitpaths, findkit,
     configurations, platforms, targetoses, targetarchs, targetos, targetarch, platform, architecture, startproject, disableunittestcompilation, disableunittestexecution, dutc, dute, newoption,
     consoleapp, windowedapp, staticlib, sharedlib, testsuite, kind, kindexport,
     language, cppdialect, cdialect,
@@ -93,7 +93,7 @@ __all__ = [
     'TargetOS', 'TargetArch', 'TargetEnv', 'CompilerFamily',
     'workspace', 'project', 'toolchain', 'filter', 'unitest', 'test',
     'include', 'batchinclude', 'addtools',
-    'useconfig',
+    'useconfig', 'loadkit', 'kitpaths', 'findkit',
     'configurations', 'platforms', 'targetoses', 'targetarchs', 'targetos', 'targetarch', 'platform', 'architecture', 'startproject', 'disableunittestcompilation', 'disableunittestexecution', 'dutc', 'dute', 'newoption',
     'consoleapp', 'windowedapp', 'staticlib', 'sharedlib', 'testsuite', 'kind', 'kindexport',
     'language', 'cppdialect', 'cdialect',

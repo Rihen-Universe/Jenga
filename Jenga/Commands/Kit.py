@@ -304,10 +304,13 @@ class KitCommand:
         Colored.PrintInfo("Pour l'utiliser depuis un autre workspace :")
         print()
         print(f'    with workspace("MonJeu"):')
-        # Le dossier reel, et non le nom du kit : avec --output les deux
-        # peuvent differer, et une instruction fausse se recopie telle
-        # quelle dans le workspace du consommateur.
-        print(f'        useconfig("{kit_root.name}/{kit_name}.jenga")')
+        # (2.8.20) Le chemin ABSOLU du kit, avec des « / » : il marche quel que soit le
+        # dossier du workspace consommateur (avant : « <dossier>/<kit>.jenga », relatif a
+        # sa racine, qui obligeait a poser le kit a la racine). Avant encore : le dossier
+        # reel et non le nom du kit, avec --output les deux peuvent differer.
+        print(f'        loadkit("{kit_root.resolve().as_posix()}")')
+        print(f'        # ou loadkit("{kit_name}") si son dossier est dans kitpaths(...), JENGA_KITS,')
+        print("        # le dossier de kits de l'utilisateur ou la racine du workspace")
         print()
         print(f'        with project("Jeu"):')
         print(f'            consoleapp()')
@@ -918,8 +921,15 @@ class KitCommand:
         add(f"# Kit extrait du workspace '{workspace.name}' le {stamp}")
         add(f"# Jenga {__version__}")
         add("#")
-        add("# Chargez-le dans le .jenga de VOTRE workspace :")
+        add("# Chargez-le dans le .jenga de VOTRE workspace, ou qu'il soit sur la machine")
+        add("# (Jenga 2.8.20 et plus) :")
         add("#")
+        add(f'#     loadkit("{kit_name}")              # cherche le kit par son nom')
+        add(f'#     loadkit("D:/chemin/vers/{kit_name}")  # ou ce dossier precis')
+        add("#")
+        add("# Par son nom, il est cherche : a cote du .jenga qui l'appelle, dans les")
+        add("# dossiers de kitpaths(...), dans JENGA_KITS, dans le dossier de kits de")
+        add("# l'utilisateur, puis a la racine du workspace. Avec un Jenga plus ancien :")
         add(f'#     useconfig("chemin/vers/{kit_name}.jenga")')
         add("#")
         add("# puis, dans chaque projet qui utilise le kit :")
