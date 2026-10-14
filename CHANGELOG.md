@@ -10,6 +10,50 @@ c'est le journal ci-dessous qui les dit. Quand `x` ou `y` augmente, les nombres 
 zéro. (La règle du 08/10/2026 faisait avancer `z` d'autant de pas que de corrections ; elle a été
 abandonnée le 12/10 : un numéro qui saute de cinq inquiète sans rien apprendre.)
 
+## v2.9.0 (2026-10-14)
+
+### Un kit se charge où qu'il soit sur la machine
+
+Rodolf : « Jenga recherche le kit forcément à la racine du workspace, pourtant on peut mettre une
+bibliothèque n'importe où sur le système ». Le kit n'a jamais tenu à sa place : son `.jenga` calcule
+`KIT_ROOT` d'après son propre fichier. Ce qui l'attachait à la racine, c'était la façon de le charger :
+`useconfig()` part de la racine du workspace pour un chemin relatif, rien ne cherchait un kit par son
+nom, et `jenga kit` conseillait un chemin relatif à la racine.
+
+- **`loadkit("R3D")`** charge un kit par son NOM. Il le cherche, dans l'ordre :
+  1. à côté du `.jenga` qui appelle ;
+  2. dans les dossiers donnés par **`kitpaths("D:/MesKits", ...)`** ;
+  3. dans la variable **`JENGA_KITS`**, plusieurs dossiers séparés par `;` sous Windows et `:` ailleurs ;
+  4. dans le dossier de kits de l'utilisateur, `%LOCALAPPDATA%\Jenga\kits` ou `~/.jenga/kits` ;
+  5. enfin à la racine du workspace et dans ses dossiers `Kits/`, comme avant.
+
+  Dans chaque dossier, il cherche `<nom>/<nom>.jenga` puis `<nom>.jenga`.
+- **`loadkit("D:/Kits/R3D")`** charge par un CHEMIN : absolu, ou relatif au `.jenga` qui appelle (puis à la
+  racine). Un dossier vaut `<dossier>/<nom du dossier>.jenga`.
+- **Introuvable, l'erreur dit chaque endroit fouillé**, et comment en ajouter un.
+- **Un chemin Windows dont les `\` sont devenus une tabulation ou un saut de ligne** dans une chaîne Python
+  (`"C:\kits\tests"`) est dit tel quel, avec le conseil d'écrire `/` ou `r"..."`.
+- **`findkit()`** cherche sans charger.
+- **Le nom n'est pas `usekit`** : la fonction qu'un kit génère s'appelle « use » + son nom, et un kit
+  nommé « Kit » l'aurait écrasée.
+- **`jenga kit` conseille `loadkit("<chemin absolu du kit>")`**, juste quel que soit le dossier du
+  consommateur, et l'en-tête du `.jenga` écrit dans le kit dit les deux façons.
+- **`jenga kit --build` passe le fichier du workspace à chaque construction.** Lancé depuis un autre
+  dossier (NKCode), il ne trouvait plus ses projets (« Target project ... not found »).
+
+Rien ne casse : `useconfig()` et les kits déjà livrés restent valables, d'où `y` et non `x`.
+
+Preuves : `tests/test_loadkit.py`, 9 essais :
+- un kit hors du workspace ;
+- par nom, dans `JENGA_KITS`, dans `kitpaths` relatif, dans le dossier de l'utilisateur ;
+- l'usage d'avant à la racine ;
+- un chemin relatif depuis un sous-dossier ;
+- un kit introuvable ;
+- un chemin cassé par les antislashs ;
+- un kit nommé « Kit ».
+
+Cinq contre-épreuves rougissent chacune leur essai. Suite entière : 327 verts, 3 sautés.
+
 ## v2.8.19 — 2026-10-13
 
 ### Six retours de terrain

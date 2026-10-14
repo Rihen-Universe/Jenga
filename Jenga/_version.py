@@ -134,7 +134,13 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # .exe). Jenga vit sans flux standard (sys.stdout None). Le compilateur d'un NKCode present sur
 # la machine est trouve (JENGA_NKCODE_DIR, emplacement.cfg, installateur). Un kit refuse faute
 # de chaine qui lie sa bibliotheque C++ dit quoi faire.
-__version__ = "2.8.19"
+# 2.9.0 (2026-10-14) : un kit se charge ou qu'il soit sur la machine. loadkit("R3D") ou
+# loadkit("D:/Kits/R3D") ; un nom se cherche a cote du .jenga qui appelle, dans kitpaths(...),
+# dans JENGA_KITS, dans le dossier de kits de l'utilisateur, puis a la racine du workspace.
+# findkit() cherche sans charger. `jenga kit` conseille loadkit avec le chemin absolu du kit,
+# et `jenga kit --build` passe le fichier du workspace a chaque construction. Rien ne casse :
+# useconfig() et les kits deja livres restent valables (d'ou y, pas x : regle du 12/10).
+__version__ = "2.9.0"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer
