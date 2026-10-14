@@ -204,7 +204,7 @@ class KitCommand:
 
         # ---- construire d'abord, si on le demande ---------------------
         if parsed.build:
-            ok = KitCommand._BuildTargets(targets, configs, platforms, parsed.verbose)
+            ok = KitCommand._BuildTargets(targets, configs, platforms, parsed.verbose, entry_file)
             # Chaque `jenga build` recharge le workspace et remet a zero l'etat
             # global du DSL : il faut relire le notre avant de recolter.
             workspace = Loader(verbose=parsed.verbose).LoadWorkspace(str(entry_file))
@@ -363,7 +363,8 @@ class KitCommand:
     # ------------------------------------------------------------------
     @staticmethod
     def _BuildTargets(targets: List[str], configs: List[str],
-                      platforms: List[str], verbose: bool) -> bool:
+                      platforms: List[str], verbose: bool,
+                      entry_file: Optional[Path] = None) -> bool:
         """Construit chaque cible pour chaque couple demande.
 
         On appelle `jenga build`, on ne le reecrit pas : c'est lui qui connait
@@ -371,6 +372,12 @@ class KitCommand:
         n'arrete pas les autres ; une chaine croisee absente (viser Linux
         depuis Windows sans toolchain) est un echec normal, et le kit dira
         simplement que cette cible manque.
+
+        Le fichier du workspace (`entry_file`) est transmis a chaque
+        construction. Sans lui, `jenga build` cherchait le workspace dans le
+        dossier courant : `jenga kit --jenga-file X --build` lance d'ailleurs
+        (un IDE, un script) construisait dans le mauvais workspace, ou nulle
+        part (« Target project ... not found in workspace »).
         """
         from .Build import BuildCommand
 
@@ -380,6 +387,8 @@ class KitCommand:
                 for target in targets:
                     Display.Subsection(f"Construction : {target} {config}-{platform}")
                     args = ["--target", target, "--config", config, "--platform", platform]
+                    if entry_file is not None:
+                        args += ["--jenga-file", str(entry_file)]
                     if verbose:
                         args.append("--verbose")
                     try:
