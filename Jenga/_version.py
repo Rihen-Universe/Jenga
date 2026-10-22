@@ -140,7 +140,13 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # findkit() cherche sans charger. `jenga kit` conseille loadkit avec le chemin absolu du kit,
 # et `jenga kit --build` passe le fichier du workspace a chaque construction. Rien ne casse :
 # useconfig() et les kits deja livres restent valables (d'ou y, pas x : regle du 12/10).
-__version__ = "2.9.0"
+# 2.10.0 (2026-10-22) : la famille du compilateur suit `--toolchain` (gcc ne recoit plus `-include-pch`
+# quand clang est aussi installe) ; `jenga run` propose `--args` quand le projet et --target se
+# contredisent ; les objets orphelins (source retiree ou renommee) sont retires apres un lien reussi, la
+# cible ne passe plus pour a jour, une archive statique se refait de zero ; `jenga clean --taille` dit la
+# place prise par configuration et plateforme, sans rien supprimer. y et non z (regle du 12/10) :
+# `clean --taille` est une fonction nouvelle ; rien ne casse l'existant.
+__version__ = "2.10.0"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

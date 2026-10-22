@@ -56,6 +56,13 @@ class TestRegle:
         msg = RunCommand._TargetCommeProjet(_parsed(project="Snake", target="TD"))
         assert msg and "Snake" in msg and "TD" in msg
 
+    def test_desaccord_propose_args(self):
+        """(2.10.0) `jenga run --target Context vulkan` (Rodolf, 22/10) : « vulkan » voulait etre un argument
+        du programme. Le refus propose la commande qui le passe."""
+        msg = RunCommand._TargetCommeProjet(_parsed(project="vulkan", target="Context"))
+        assert "Pour passer des arguments au programme : jenga run --target Context --args vulkan" in msg, msg
+        assert "jenga run --target Context --args vulkan" in msg.split("\n")[-1], msg
+
     @pytest.mark.parametrize("plateforme", ["android", "Android", "ios"])
     def test_mobile_garde_l_appareil(self, plateforme):
         p = _parsed(target="emulator-5554", platform=plateforme)

@@ -36,8 +36,12 @@ class RunCommand:
         if plateforme in RunCommand._PLATEFORMES_MOBILES or not parsed.target:
             return None
         if parsed.project and parsed.project != parsed.target:
+            # (2.10.0) Rodolf a tape `jenga run --target Context vulkan` : « vulkan » etait un ARGUMENT du
+            # programme, lu comme un second nom de projet. Le refus dit maintenant comment passer un argument.
             return (f"Project '{parsed.project}' and --target '{parsed.target}' disagree "
-                    f"(on desktop, --target names the project to run).")
+                    f"(on desktop, --target names the project to run).\n"
+                    f"Pour passer des arguments au programme : jenga run --target {parsed.target} --args {parsed.project}\n"
+                    f"To pass arguments to the program: jenga run --target {parsed.target} --args {parsed.project}")
         parsed.project = parsed.target
         parsed.target = None
         return None

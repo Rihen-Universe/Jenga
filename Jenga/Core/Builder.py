@@ -2939,7 +2939,12 @@ class Builder(abc.ABC):
             # On compare donc la date de la cible a celle de ses entrees :
             # objets, et sorties des dependances (une bibliotheque rebattie doit
             # faire relier ce qui en depend).
-            if self._CibleDejaAJour(target_path, object_files, dep_link_map.values()):
+            #
+            # (2.10.0) ... sauf s'il reste des OBJETS ORPHELINS : une source retiree ou renommee laisse son
+            # objet dans le dossier, et la cible (plus recente que les objets restants) passait pour a jour
+            # alors qu'elle contient encore le code retire. Il faut alors relier (sans rien recompiler).
+            orphelins = self._ObjetsOrphelins(project, obj_dir, object_files)
+            if not orphelins and self._CibleDejaAJour(target_path, object_files, dep_link_map.values()):
                 # Pas de message supplementaire : « All files up to date » est
                 # deja affiche plus haut. Le gain est invisible, sauf en temps.
                 self.state.MarkProjectCompiled(project.name, success=True, platform=self.platform,
@@ -2966,8 +2971,19 @@ class Builder(abc.ABC):
             if not self._VerifierCibleEcrivable(target_path):
                 return False
 
+            # (2.10.0) Une ARCHIVE statique se refait de zero : `ar rcs` sur une archive existante remplace
+            # et ajoute des membres, mais n'en retire aucun ; l'objet d'une source retiree ou renommee y
+            # restait (code mort, ou symbole en double avec son remplacant).
+            if project.kind == ProjectKind.STATIC_LIB and target_path.exists():
+                try:
+                    target_path.unlink()
+                except OSError:
+                    pass
+
             # Link - capture ProcessResult pour afficher les erreurs
             link_ok = self.Link(project, object_files, str(target_path))
+            if link_ok and orphelins:
+                self._RetirerObjetsOrphelins(project, orphelins)
             logger.LogLink(str(target_path), self._lastResult)  # Affiche les erreurs de linking si le linking échoue
             if not link_ok:
                 self._ExpliquerEchecDeLien(self._lastResult)  # (2.8.17) deux bibliotheques C++ melangees ?
@@ -2989,6 +3005,82 @@ class Builder(abc.ABC):
             self.state.MarkProjectCompiled(project.name, success=True)
             logger.PrintResultBox(True)
             return True
+
+    # ------------------------------------------------------------------
+    # (2.10.0) Objets orphelins : le menage apres une construction reussie
+    # ------------------------------------------------------------------
+    #
+    # Une source retiree ou renommee laissait son objet (et ses fichiers .d et .jenga_sig) dans le dossier
+    # des objets, pour toujours : de la place perdue a chaque renommage, et une cible qui passait pour a jour.
+    # Un fichier n'est ORPHELIN que s'il remplit TOUT :
+    #   - il est au premier niveau du dossier des objets DE CE PROJET, avec l'extension objet du builder ;
+    #   - Jenga l'a compile (son .jenga_sig existe) : un fichier pose par l'utilisateur n'est jamais touche ;
+    #   - il n'est pas dans la liste des objets de cette construction ;
+    #   - son nom ne commence pas par « __jenga » (objets internes, PCH de MSVC) ;
+    #   - et le dossier n'est pas PARTAGE : un objdir() propre au projet doit nommer le projet
+    #     (%{prj.name}...), et aucun autre projet du workspace ne doit tomber sur le meme dossier. Au moindre
+    #     doute, rien n'est retire.
+
+    def _DossierObjetsPartage(self, project: Project, obj_dir: Path) -> bool:
+        brut = str(project.objDir or "")
+        if brut and not any(m in brut for m in ("%{prj.name}", "%{project.name}", "%{prj.Name}", project.name)):
+            return True
+        try:
+            cle = os.path.normcase(str(Path(obj_dir).resolve()))
+            for autre in self.workspace.projects.values():
+                if autre is project or autre.name == project.name:
+                    continue
+                if os.path.normcase(str(self.GetObjectDir(autre))) == cle:
+                    return True
+            return False
+        except Exception:
+            return True
+        finally:
+            try:
+                self.GetObjectDir(project)  # rend au developpeur de variables le projet en cours
+            except Exception:
+                pass
+
+    def _ObjetsOrphelins(self, project: Project, obj_dir: Path, object_files: List[str]) -> List[Path]:
+        try:
+            dossier = Path(obj_dir)
+            if not dossier.is_dir():
+                return []
+            ext = (self.GetObjectExtension() or "").lower()
+            if not ext:
+                return []
+            gardes = {os.path.normcase(str(Path(o).resolve())) for o in object_files}
+            candidats = []
+            for f in dossier.iterdir():
+                if not f.is_file() or f.suffix.lower() != ext or f.name.startswith("__jenga"):
+                    continue
+                if os.path.normcase(str(f.resolve())) in gardes:
+                    continue
+                if not self._GetCompileSignaturePath(str(f)).is_file():
+                    continue
+                candidats.append(f)
+            if candidats and self._DossierObjetsPartage(project, dossier):
+                return []
+            return candidats
+        except OSError:
+            return []
+
+    def _RetirerObjetsOrphelins(self, project: Project, orphelins: List[Path]) -> int:
+        retires = 0
+        for f in orphelins:
+            for g in (f, Path(str(f) + ".d"), self._GetCompileSignaturePath(str(f))):
+                try:
+                    g.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    continue
+            retires += 1
+        if retires:
+            Colored.PrintInfo(f"{project.name} : {retires} objet(s) orphelin(s) retire(s) "
+                              f"(source(s) retiree(s) ou renommee(s)) : " + ", ".join(sorted(p.name for p in orphelins)[:5])
+                              + (" ..." if retires > 5 else ""))
+        return retires
 
     @staticmethod
     def GetSourceFileExtensions(language: Api.Language) -> List[str]:

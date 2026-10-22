@@ -10,6 +10,69 @@ c'est le journal ci-dessous qui les dit. Quand `x` ou `y` augmente, les nombres 
 zéro. (La règle du 08/10/2026 faisait avancer `z` d'autant de pas que de corrections ; elle a été
 abandonnée le 12/10 : un numéro qui saute de cinq inquiète sans rien apprendre.)
 
+## v2.10.0 (2026-10-22)
+
+`y` avance (règle du 12/10) : `jenga clean --taille` est une fonction nouvelle ; le reste corrige. Rien
+ne casse l'existant.
+
+### `--toolchain host-gcc` donnait à gcc les drapeaux de clang
+
+Essai du flux de publication des kits (runner Ubuntu, clang ET gcc installés) : avec `--toolchain
+host-gcc`, chaque fichier tombait sur « `<command-line>: fatal error: -pch: No such file or directory` ».
+gcc recevait `-include-pch`, drapeau de clang, qu'il lit comme `-include` du fichier `-pch`.
+
+- **La cause** : les builders Linux, macOS et Windows figeaient la famille du compilateur (`is_gcc`,
+  `is_clang`, `is_apple_clang`, `is_msvc`, `is_mingw`, `is_clang_cl`) dans leur `__init__`, avec la chaîne
+  choisie AUTOMATIQUEMENT (host-clang passe avant host-gcc sous Linux). `Build.py` applique `--toolchain`
+  APRÈS `__init__`, et `BuildProject` change la chaîne d'un projet qui a la sienne : la famille ne suivait
+  ni l'un ni l'autre.
+- **Corrigé** : ces noms sont des propriétés, lues sur la chaîne COURANTE à chaque usage.
+- Banc `tests/test_famille_compilateur.py` ; banc réel sous WSL (NKPlatform, clang et gcc présents) :
+  2.9.0 échoue sur 7 fichiers, 2.10.0 construit avec gcc 13.3 sans `-include-pch`.
+
+### `jenga run` : un argument du programme pris pour un nom de projet
+
+Rodolf a tapé `jenga run --target Context vulkan` : « vulkan » voulait être un argument du programme.
+Le refus dit maintenant : « Pour passer des arguments au programme : jenga run --target Context --args
+vulkan ».
+
+### Les objets orphelins
+
+Une source retirée ou renommée laissait son objet (et ses `.d`, `.jenga_sig`) dans le dossier des objets,
+pour toujours. Pire : la cible, plus récente que les objets restants, passait pour à jour et gardait le code
+retiré, et une archive statique gardait le membre retiré (`ar rcs` remplace et ajoute, ne retire jamais).
+
+- **Après un lien réussi, les objets orphelins sont retirés**, avec leurs compagnons. Un fichier n'est
+  orphelin que si Jenga l'a compilé (son `.jenga_sig` existe), s'il n'est pas dans la liste des objets de la
+  construction, si son nom ne commence pas par `__jenga`, et si le dossier est PROPRE au projet (le dossier
+  par défaut, ou un `objdir()` qui nomme le projet et qu'aucun autre projet ne partage). Au moindre doute,
+  rien n'est retiré. Rien n'est recompilé.
+- **Tant qu'il reste un orphelin, la cible n'est plus « à jour »** : elle se relie, sans rien recompiler.
+- **Une archive statique se refait de zéro** à chaque nouveau lien.
+- Banc `tests/test_objets_orphelins.py`, dont une vraie construction : renommer une source, en retirer une,
+  puis ne rien changer.
+
+### `jenga clean --taille` : où part la place
+
+Rodolf : « Jenga nécessite énormément d'espace disque : comment y remédier sans perdre l'efficacité ? ».
+D'abord savoir où elle part.
+
+- **`jenga clean --taille`** (ou `--size`) dit la place prise par `Build/`, une ligne par
+  configuration-plateforme (`Debug-Windows`, `Release-Linux-xlib`...), une colonne par dossier (`Obj`,
+  `Lib`, `Bin`...), puis ce qui n'est rattaché à aucune configuration. **Rien n'est supprimé.**
+  `--config` et `--platform` filtrent ; `--detail` nomme les plus gros projets de chaque ligne.
+- Un fichier lié plusieurs fois (lien physique) ne compte qu'une fois.
+- Sur le workspace Nkentseu (22/10) : 6,3 Go, dont 3,1 Go pour `Debug-Windows` (1,7 Go d'exécutables liés
+  en statique avec leurs symboles) et 2,5 Go hors configuration (`Build/Demo`).
+
+### Examiné, écarté : le lien physique à la place de la copie
+
+Les seuls fichiers que Jenga pose à côté d'un programme sur ordinateur sont les bibliothèques dynamiques de
+ses dépendances. Un lien physique les partagerait avec leur original : sous Windows, une DLL chargée par un
+programme en cours verrouille alors AUSSI l'original, et la reconstruire échoue tant que le programme
+tourne ; une modification de l'une serait une modification de l'autre. Et le gain serait nul pour un
+workspace lié en statique (Nkentseu). La copie reste.
+
 ## v2.9.0 (2026-10-14)
 
 ### Un kit se charge où qu'il soit sur la machine

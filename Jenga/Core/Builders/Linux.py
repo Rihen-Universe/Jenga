@@ -22,8 +22,21 @@ class LinuxBuilder(Builder):
 
     def __init__(self, workspace, config, platform, targetOs, targetArch, targetEnv=None, verbose=False):
         super().__init__(workspace, config, platform, targetOs, targetArch, targetEnv, verbose)
-        self.is_gcc = self.toolchain.compilerFamily == CompilerFamily.GCC
-        self.is_clang = self.toolchain.compilerFamily in (CompilerFamily.CLANG, CompilerFamily.APPLE_CLANG)
+
+    # (2.10.0) La famille du compilateur se LIT sur la chaine courante, a chaque usage. Elle etait figee ici,
+    # dans __init__, avec la chaine choisie AUTOMATIQUEMENT ; or Build.py re-choisit la chaine apres __init__
+    # quand `--toolchain` est donne, et BuildProject la change pour un projet qui a la sienne. Sur une machine
+    # qui a clang ET gcc, `--toolchain host-gcc` envoyait donc a gcc les drapeaux de clang (`-include-pch`,
+    # lu par gcc comme « -include » du fichier « -pch » : « fatal error: -pch: No such file or directory »).
+    @property
+    def is_gcc(self) -> bool:
+        tc = self.toolchain
+        return bool(tc) and tc.compilerFamily == CompilerFamily.GCC
+
+    @property
+    def is_clang(self) -> bool:
+        tc = self.toolchain
+        return bool(tc) and tc.compilerFamily in (CompilerFamily.CLANG, CompilerFamily.APPLE_CLANG)
 
     @staticmethod
     def _EnumValue(v):

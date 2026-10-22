@@ -1463,7 +1463,10 @@ class TestFlagsDeProjetPosix:
         b.verbose, b.action, b.options, b.toolchain = False, "build", [], tc
         b.jobs, b._expander, b._lastResult = 1, None, None
         for attr in ("is_apple_clang", "is_clang", "is_gcc"):
-            setattr(b, attr, fam != CompilerFamily.GCC)
+            # (2.10.0) Linux, macOS et Windows LISENT la famille sur b.toolchain (des proprietes) : on ne pose
+            # que celles qui ne le sont pas, comme le faisait __init__.
+            if not isinstance(getattr(type(b), attr, None), property):
+                setattr(b, attr, fam != CompilerFamily.GCC)
         return b
 
     @pytest.mark.parametrize("cas", CAS, ids=[c[1] for c in CAS])

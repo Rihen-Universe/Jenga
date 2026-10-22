@@ -6,6 +6,7 @@ Ne supprime que les fichiers appartenant au projet (pas les répertoires partag�
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -19,7 +20,101 @@ from ..Utils import FileSystem, Colored
 
 
 class CleanCommand:
-    """jenga clean [--config NAME] [--platform NAME] [--project NAME] [--all] [--no-daemon]"""
+    """jenga clean [--config NAME] [--platform NAME] [--project NAME] [--all] [--no-daemon] [--taille [--detail]]"""
+
+    @staticmethod
+    def _Octets(n: int) -> str:
+        """Une taille lisible, a la francaise (virgule decimale)."""
+        for unite, pas in (("Go", 1024 ** 3), ("Mo", 1024 ** 2), ("Ko", 1024)):
+            if n >= pas:
+                return ("%.1f %s" % (n / pas, unite)).replace(".", ",")
+        return "%d o" % n
+
+    @staticmethod
+    def _Taille(workspace_root: Path, entry_file: Path, config: Optional[str], platform: Optional[str], detail: bool) -> int:
+        """(2.10.0) La place prise par Build/, sans rien supprimer.
+
+        Lignes : les dossiers <configuration>-<plateforme>[...] (Debug-Windows, Release-Linux-xlib...) sous chaque
+        dossier de Build/ (Obj, Lib, Bin...) ; colonnes : ces dossiers. Le reste (Demo, Tests, Kit...) est dit a
+        part. Un fichier lie plusieurs fois (lien physique) ne compte qu'une fois."""
+        build = workspace_root / "Build"
+        if not build.is_dir():
+            print(f"Aucun dossier Build/ dans {workspace_root} : rien n'est construit.")
+            return 0
+        configs = []
+        try:
+            loader = Loader(verbose=False)
+            ws = Cache(workspace_root).LoadWorkspace(entry_file, loader) or loader.LoadWorkspace(str(entry_file))
+            configs = list(getattr(ws, "configurations", None) or [])
+        except Exception:
+            configs = []
+        if not configs:
+            configs = ["Debug", "Release", "Dist", "Profile", "RelWithDebInfo", "MinSizeRel"]
+        bas = {c.lower() for c in configs}
+
+        vus = set()
+
+        def taille_de(dossier: Path) -> int:
+            total = 0
+            for racine, _dirs, fichiers in os.walk(dossier):
+                for nom in fichiers:
+                    try:
+                        st = os.stat(os.path.join(racine, nom))
+                    except OSError:
+                        continue
+                    cle = (st.st_dev, st.st_ino)
+                    if st.st_ino and cle in vus:
+                        continue
+                    vus.add(cle)
+                    total += st.st_size
+            return total
+
+        lignes = {}    # nom de ligne -> {categorie: octets}
+        autres = {}    # categorie -> octets (ce qui n'est pas <configuration>-...)
+        gros = {}      # nom de ligne -> [(octets, categorie/projet)]
+        categories = sorted(p for p in build.iterdir() if p.is_dir())
+        for cat in categories:
+            for sous in sorted(cat.iterdir()):
+                premier = sous.name.split("-")[0].lower()
+                if not sous.is_dir() or premier not in bas:
+                    autres[cat.name] = autres.get(cat.name, 0) + (taille_de(sous) if sous.is_dir() else
+                                                                  (sous.stat().st_size if sous.is_file() else 0))
+                    continue
+                if config and premier != config.lower():
+                    continue
+                if platform and platform.lower() not in sous.name.lower():
+                    continue
+                n = 0
+                for proj in sorted(sous.iterdir()):
+                    t = taille_de(proj) if proj.is_dir() else (proj.stat().st_size if proj.is_file() else 0)
+                    n += t
+                    if detail and proj.is_dir():
+                        gros.setdefault(sous.name, []).append((t, f"{cat.name}/{proj.name}"))
+                lignes.setdefault(sous.name, {})[cat.name] = n
+        fichiers_racine = sum(f.stat().st_size for f in build.iterdir() if f.is_file())
+
+        cols = [c.name for c in categories if any(c.name in v for v in lignes.values())]
+        total_general = sum(sum(v.values()) for v in lignes.values()) + sum(autres.values()) + fichiers_racine
+        print(f"Place prise par {build} : {CleanCommand._Octets(total_general)}"
+              + (" (filtre : %s)" % " ".join(x for x in (config, platform) if x) if (config or platform) else ""))
+        if lignes:
+            largeur = max(len("configuration-plateforme"), max(len(k) for k in lignes))
+            print("  " + "configuration-plateforme".ljust(largeur) + "".join(c.rjust(11) for c in cols) + "total".rjust(11))
+            for nom in sorted(lignes, key=lambda k: -sum(lignes[k].values())):
+                v = lignes[nom]
+                print("  " + nom.ljust(largeur) + "".join(CleanCommand._Octets(v.get(c, 0)).rjust(11) for c in cols)
+                      + CleanCommand._Octets(sum(v.values())).rjust(11))
+                for t, qui in sorted(gros.get(nom, []), reverse=True)[:5]:
+                    print("  " + " " * largeur + f"   {CleanCommand._Octets(t).rjust(9)}  {qui}")
+        autres = {k: v for k, v in autres.items() if v}
+        if autres:
+            print("  Hors configuration : " + " ; ".join(f"{k} {CleanCommand._Octets(v)}" for k, v in
+                                                     sorted(autres.items(), key=lambda kv: -kv[1])))
+        if fichiers_racine:
+            print(f"  Fichiers a la racine de Build/ : {CleanCommand._Octets(fichiers_racine)}")
+        print("Pour liberer : jenga clean --config <Configuration> [--platform <Plateforme>] (objets et binaires), "
+              "jenga clean --all (tout Build/). Rien n'a ete supprime.")
+        return 0
 
     @staticmethod
     def Execute(args: List[str]) -> int:
@@ -32,6 +127,10 @@ class CleanCommand:
         parser.add_argument("--jenga-file", help="Path to the workspace .jenga file (default: auto-detected)")
         parser.add_argument("--toolchain", default=None,
                             help="Accepted so that one command line serves build, run, test and clean; clean removes the outputs of every toolchain.")
+        # (2.10.0) « Jenga nécessite énormément d'espace disque » (Rodolf, 22/10) : d'abord SAVOIR où il part.
+        parser.add_argument("--taille", "--size", dest="taille", action="store_true",
+                            help="Dire la place prise par Build/, par configuration et plateforme, sans rien supprimer")
+        parser.add_argument("--detail", action="store_true", help="Avec --taille : les plus gros projets de chaque ligne")
         parsed = parser.parse_args(args)
 
         # Déterminer le répertoire de travail (workspace root)
@@ -47,6 +146,10 @@ class CleanCommand:
                 Colored.PrintError("No .jenga workspace file found.")
                 return 1
         workspace_root = entry_file.parent
+
+        # (2.10.0) --taille : un releve, AVANT le demon (qui, lui, nettoierait) ; rien n'est supprime.
+        if parsed.taille:
+            return CleanCommand._Taille(workspace_root, entry_file, parsed.config, parsed.platform, parsed.detail)
 
         # Utiliser le daemon si disponible
         if not parsed.no_daemon:

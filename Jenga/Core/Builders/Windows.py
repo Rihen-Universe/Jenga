@@ -129,12 +129,30 @@ class WindowsBuilder(Builder):
 
     def __init__(self, workspace, config, platform, targetOs, targetArch, targetEnv=None, verbose=False):
         super().__init__(workspace, config, platform, targetOs, targetArch, targetEnv, verbose)
-        self.is_msvc = self.toolchain.compilerFamily == CompilerFamily.MSVC
-        self.is_clang = self.toolchain.compilerFamily == CompilerFamily.CLANG
-        self.is_mingw = (self.toolchain.compilerFamily == CompilerFamily.GCC and self.toolchain.targetOs == TargetOS.WINDOWS) or \
-                        (self.toolchain.compilerFamily == CompilerFamily.CLANG and self.toolchain.targetEnv == TargetEnv.MINGW)
-        self.is_clang_cl = self.is_clang and "clang-cl" in str(self.toolchain.ccPath).lower()
         self._validate_compiler_paths()
+
+    # (2.10.0) La famille du compilateur se LIT sur la chaine COURANTE, a chaque usage (voir
+    # LinuxBuilder.is_gcc) : figee dans __init__ avec la chaine automatique, elle ignorait `--toolchain` (que
+    # Build.py applique apres __init__) et la chaine propre a un projet.
+    @property
+    def is_msvc(self) -> bool:
+        tc = self.toolchain
+        return bool(tc) and tc.compilerFamily == CompilerFamily.MSVC
+
+    @property
+    def is_clang(self) -> bool:
+        tc = self.toolchain
+        return bool(tc) and tc.compilerFamily == CompilerFamily.CLANG
+
+    @property
+    def is_mingw(self) -> bool:
+        tc = self.toolchain
+        return bool(tc) and ((tc.compilerFamily == CompilerFamily.GCC and tc.targetOs == TargetOS.WINDOWS) or
+                             (tc.compilerFamily == CompilerFamily.CLANG and tc.targetEnv == TargetEnv.MINGW))
+
+    @property
+    def is_clang_cl(self) -> bool:
+        return self.is_clang and "clang-cl" in str(self.toolchain.ccPath).lower()
 
     def _validate_compiler_paths(self):
         if self.is_msvc or self.is_clang_cl:

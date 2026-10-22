@@ -31,9 +31,14 @@ class MacOSBuilder(AppleUniversalMixin, Builder):
 
     def __init__(self, workspace, config, platform, targetOs, targetArch, targetEnv=None, verbose=False):
         super().__init__(workspace, config, platform, targetOs, targetArch, targetEnv, verbose)
-        # Apple Clang ou Clang standard
-        self.is_apple_clang = self.toolchain.compilerFamily == CompilerFamily.APPLE_CLANG
         self._objcxxProbeCache = {}
+
+    # (2.10.0) Apple Clang ou Clang standard : lu sur la chaine COURANTE (voir LinuxBuilder.is_gcc) ; fige
+    # dans __init__, il ignorait `--toolchain` et la chaine propre a un projet.
+    @property
+    def is_apple_clang(self) -> bool:
+        tc = self.toolchain
+        return bool(tc) and tc.compilerFamily == CompilerFamily.APPLE_CLANG
 
     # -------------------------------------------------------------------------
     #  Binaire universel
