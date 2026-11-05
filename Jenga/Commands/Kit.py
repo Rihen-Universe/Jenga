@@ -203,8 +203,13 @@ class KitCommand:
             return 0
 
         # ---- construire d'abord, si on le demande ---------------------
-        if parsed.build:
-            ok = KitCommand._BuildTargets(targets, configs, platforms, parsed.verbose, entry_file)
+        # (05/11, lot multi-ABI) Une plateforme qui porte son architecture (« Android-arm64 ») se construit JUSTE AVANT d'etre
+        # recoltee (plus bas) : le dossier de sortie d'un projet ne distingue pas les architectures d'un meme systeme
+        # (Build/Lib/Release-Android/...), la construction suivante ecrase la precedente. Construire d'abord toutes les
+        # ABI puis recolter donnait la DERNIERE ABI sous chaque nom.
+        platforms_nues = [pf for pf in platforms if "-" not in pf]
+        if parsed.build and platforms_nues:
+            ok = KitCommand._BuildTargets(targets, configs, platforms_nues, parsed.verbose, entry_file)
             # Chaque `jenga build` recharge le workspace et remet a zero l'etat
             # global du DSL : il faut relire le notre avant de recolter.
             workspace = Loader(verbose=parsed.verbose).LoadWorkspace(str(entry_file))
@@ -231,14 +236,38 @@ class KitCommand:
 
         libs: Dict[Tuple[str, str], Dict[str, str]] = {}
         missing: List[str] = []
+        vues_arch: Dict[Tuple[str, str, str], str] = {}  # (config, systeme, fichier) -> plateforme qui l'a deja recolte
         for config in configs:
             for platform in platforms:
+                if parsed.build and "-" in platform:
+                    KitCommand._BuildTargets(targets, [config], [platform], parsed.verbose, entry_file)
+                    workspace = Loader(verbose=parsed.verbose).LoadWorkspace(str(entry_file))
+                    if workspace is None:
+                        Colored.PrintError("Rechargement du workspace impossible apres construction.")
+                        return 1
+                if "-" in platform and not parsed.build:
+                    # La meme archive pour deux architectures : un kit qui mentirait. On refuse, et on dit quoi faire.
+                    for name in modules:
+                        projet = workspace.projects.get(name)
+                        if projet is None:
+                            continue
+                        source = str(KitCommand._LibraryFile(workspace, projet, config, platform))
+                        cle = (config, KitCommand._OsOf(platform), source)
+                        autre = vues_arch.get(cle)
+                        if autre is not None and autre != platform and Path(source).is_file():
+                            Colored.PrintError(
+                                f"{platform} et {autre} recoltent la MEME archive ({source}) : le dossier de sortie du projet "
+                                f"ne distingue pas les architectures. Relancez avec --build (chaque ABI est construite puis "
+                                f"recoltee a son tour), ou donnez au projet un targetdir qui contient %{{cfg.architecture}}.")
+                            shutil.rmtree(kit_root, ignore_errors=True)
+                            return 1
+                        vues_arch[cle] = platform
                 found, absent = KitCommand._HarvestLibraries(
                     workspace, modules, kit_root, config, platform, parsed.verbose)
                 if absent:
                     missing.extend(f"{m} ({config}-{platform})" for m in absent)
                 if found:
-                    libs[(config, KitCommand._OsOf(platform))] = found
+                    libs[(config, KitCommand._KeyOf(platform))] = found
 
         if missing and not parsed.allow_missing:
             print()
@@ -264,9 +293,9 @@ class KitCommand:
         extdirs: Dict[Tuple[str, str], List[str]] = {}
         for (config, os_name) in libs:
             syslibs[(config, os_name)] = KitCommand._SystemLinks(
-                workspace, modules, config, os_name)
+                workspace, modules, config, KitCommand._OsOf(os_name))
             extdirs[(config, os_name)] = KitCommand._ExternalLibDirs(
-                workspace, modules, config, os_name)
+                workspace, modules, config, KitCommand._OsOf(os_name))
 
         # (2.8.17) la bibliotheque C++ de chaque cible, lue dans ses archives
         stdlibs: Dict[Tuple[str, str], str] = {}
@@ -485,7 +514,9 @@ class KitCommand:
                 Colored.PrintError(f"Plateforme non declaree par le workspace : {a}")
                 Colored.PrintInfo(f"Declarees : {', '.join(declared)}")
                 return []
-            entry = match if "-" not in a else a
+            # (05/11, lot multi-ABI) « android-arm64 » : le systeme garde la casse declaree par le workspace (« Android »), et
+            # l'architecture est CONSERVEE : elle fait la difference entre deux dossiers de bibliotheques.
+            entry = match if "-" not in a else f"{match}-{a.split('-', 1)[1].lower()}"
             if entry not in resolved:
                 resolved.append(entry)
         return resolved
@@ -493,6 +524,19 @@ class KitCommand:
     @staticmethod
     def _OsOf(platform: str) -> str:
         return platform.split("-")[0]
+
+    @staticmethod
+    def _KeyOf(platform: str) -> str:
+        """(05/11, lot multi-ABI) LA CLE D'UNE CIBLE DU KIT : le systeme (« Android »), ou le systeme ET l'architecture
+        (« Android-arm64 ») quand la plateforme demandee la porte. Avant, TOUT s'ecrasait dans lib/<config>-<systeme> :
+        deux ABI d'Android (arm64-v8a, x86_64), ou les deux architectures de macOS, se remplacaient l'une l'autre, et le
+        kit livrait la derniere sans le dire."""
+        return platform
+
+    @staticmethod
+    def _ArchOfKey(key: str) -> str:
+        """L'architecture portee par une cle (« Android-arm64 » -> « arm64 »), ou « » si elle n'en porte pas."""
+        return key.split("-", 1)[1] if "-" in key else ""
 
     @staticmethod
     def _ArchOf(workspace, platform: str) -> str:
@@ -631,7 +675,7 @@ class KitCommand:
                           verbose: bool) -> Tuple[Dict[str, str], List[str]]:
         """Copie les archives d'une cible. Retourne (module -> nom de fichier,
         modules absents)."""
-        os_name = KitCommand._OsOf(platform)
+        os_name = KitCommand._KeyOf(platform)  # (05/11) « Android-arm64 » : un dossier par architecture
         dest = kit_root / "lib" / f"{config}-{os_name}"
         found: Dict[str, str] = {}
         absent: List[str] = []
@@ -993,16 +1037,17 @@ class KitCommand:
         add("# Bibliotheque C++ contre laquelle les archives ont ete compilees (lue dans")
         add("# les archives). Le consommateur doit lier avec la meme.")
         add("KIT_STDLIB = {")
-        for os_name in sorted({o for (_c, o) in libs}):
-            valeurs = sorted({(stdlibs or {}).get((c, o), "") for (c, o) in libs if o == os_name} - {""})
+        for os_name in sorted({KitCommand._OsOf(o) for (_c, o) in libs}):
+            valeurs = sorted({(stdlibs or {}).get((c, o), "") for (c, o) in libs if KitCommand._OsOf(o) == os_name} - {""})
             accord = valeurs[0] if (len(valeurs) == 1 and valeurs[0] != "mixte") else ""
             add(f'    "{os_name}": "{accord}",')
         add("}")
         add("# Famille du compilateur qui a produit les archives (clang ou gcc). Sous MinGW,")
         add("# les objets de l'un ne se lient pas toujours avec ceux de l'autre.")
         add("KIT_COMPILER = {")
-        for os_name in sorted({o for (_c, o) in libs}):
-            add(f'    "{os_name}": "{(familles or {}).get(os_name, "")}",')
+        for os_name in sorted({KitCommand._OsOf(o) for (_c, o) in libs}):
+            vues = sorted({(familles or {}).get(o, "") for (_c, o) in libs if KitCommand._OsOf(o) == os_name})
+            add(f'    "{os_name}": "{vues[0] if len(vues) == 1 else ""}",')
         add("}")
         add("")
         add("")
@@ -1056,6 +1101,7 @@ class KitCommand:
         add("        _configs = []")
         add("    for _os in sorted({_o for (_c, _o) in KIT_TARGETS}):")
         add("        _servies = sorted(_c for (_c, _o) in KIT_TARGETS if _o == _os)")
+        add("        _filtre_os = \"system:%s\" % _os.split(\"-\")[0] + ((\" && architecture:%s\" % _os.split(\"-\", 1)[1]) if \"-\" in _os else \"\")")
         add("        for _cfg in _configs:")
         add("            if (_cfg, _os) in KIT_TARGETS:")
         add("                continue")
@@ -1064,7 +1110,7 @@ class KitCommand:
         add("                    \"(jenga kit ... --config %s).\"")
         add("                    % (KIT_NAME, _cfg, _os, \", \".join(_servies), \" ou \".join(_servies), _cfg))")
         add("            if _refuser:")
-        add("                with filter(\"system:%s && configurations:%s\" % (_os, _cfg)):")
+        add("                with filter(\"%s && configurations:%s\" % (_filtre_os, _cfg)):")
         add("                    _refuser(_msg)")
         add("            else:")
         add("                print(\"[kit %s] ATTENTION : %s\" % (KIT_NAME, _msg))")
@@ -1075,7 +1121,9 @@ class KitCommand:
         for (config, os_name) in sorted(libs):
             files = libs[(config, os_name)]
             ordered = [n for n in link_order if n in files]
-            add(f'    with filter("system:{os_name} && configurations:{config}"):')
+            _os_pur, _arch = KitCommand._OsOf(os_name), KitCommand._ArchOfKey(os_name)
+            _atome_arch = f" && architecture:{_arch}" if _arch else ""
+            add(f'    with filter("system:{_os_pur}{_atome_arch} && configurations:{config}"):')
             external = extdirs.get((config, os_name)) or []
             if external:
                 add("        # Dossiers de SDK exterieurs au kit : ils doivent exister")

@@ -66,9 +66,16 @@ class PackageCommand:
         # serait absurde que `package` refuse la meme valeur dans la meme ligne de
         # commande. On normalise AVANT la verification des choix, sinon argparse
         # rejette « Linux » avec un message qui liste « linux » : deroutant.
+        # (05/11, lot multi-ABI) `build` accepte « os[-arch[-env]] » (« android-arm64 ») ; `package` refusait tout ce qui
+        # n'etait pas un nom de systeme nu, et choisissait ALORS l'architecture de l'hote (x86_64) SANS LE DIRE. Les
+        # choix se verifient maintenant sur le SYSTEME seul ; l'architecture est transmise, et DITE.
         parser.add_argument("--platform", required=True, type=str.lower,
-                            choices=list(PackageCommand.SUPPORTED_PLATFORMS.keys()),
-                            help="Target platform (insensible a la casse)")
+                            help="Target platform, case-insensitive: " + ", ".join(PackageCommand.SUPPORTED_PLATFORMS.keys()) +
+                                 " - optionally with the architecture, as in `build` (android-arm64, android-x86_64)")
+        parser.add_argument("--abi", default=None,
+                            help="Android/HarmonyOS ABI to package: arm64-v8a (arm64), armeabi-v7a (arm), x86_64, x86; "
+                                 "a comma list or 'all' packages ONE universal (fat) package. Same as --platform android-<arch> "
+                                 "for one ABI.")
         parser.add_argument("--ios-builder", choices=["direct", "xcode", "xbuilder"], default=None,
                             help="Apple mobile builder backend (direct or xcode/xbuilder).")
         parser.add_argument("--config", default="Release", help="Build configuration (default: Release)")
@@ -88,6 +95,14 @@ class PackageCommand:
         parser.add_argument("--options", nargs="*", default=None,
                             help="Custom workspace options (KEY=VALUE), as in `build`")
         parsed = parser.parse_args(args)
+
+        # (05/11) Le systeme (avant le premier « - »), puis l'architecture eventuelle. `parsed.platform` reste le NOM DU SYSTEME
+        # (tout le dispatch ci-dessous le compare) ; `platformComplete` est ce qu'on donne au constructeur.
+        osNom, platformComplete, erreurPlatform = PackageCommand.SplitPlatform(parsed.platform, parsed.abi)
+        if erreurPlatform:
+            Colored.PrintError(erreurPlatform)
+            return 1
+        parsed.platform = osNom
 
         # Déterminer le répertoire de travail (workspace root)
         workspace_root = Path.cwd()
@@ -127,7 +142,7 @@ class PackageCommand:
                 Colored.PrintInfo("Using build daemon...")
                 try:
                     response = client.SendCommand('package', {
-                        'platform': parsed.platform,
+                        'platform': platformComplete,
                         'config': parsed.config,
                         'output': parsed.output,
                         'project': parsed.project,
@@ -173,11 +188,11 @@ class PackageCommand:
         try:
             from ..Commands.Build import BuildCommand
             builder = PackageCommand._CreateBuilder(
-                workspace, parsed.config, parsed.platform, project_name, parsed.verbose,
+                workspace, parsed.config, platformComplete, project_name, parsed.verbose,
                 action="package",
                 options=BuildCommand.CollectFilterOptions(
                     config=parsed.config,
-                    platform=parsed.platform,
+                    platform=platformComplete,
                     target=project_name,
                     verbose=parsed.verbose,
                     no_cache=False,
@@ -199,6 +214,10 @@ class PackageCommand:
 
         output_dir = Path(parsed.output).resolve()
         FileSystem.MakeDirectory(output_dir)
+
+        # (05/11) L'ARCHITECTURE CHOISIE SE DIT (avant : x86_64 en silence sur un poste x86_64, alors que presque tout
+        # telephone est en arm64-v8a), et un projet console n'a pas de paquet Android : on le dit aussi.
+        PackageCommand.DireAbi(parsed.platform, platformComplete, builder, project)
 
         # Type 'jng' : installateur self-extracting maison (multi-plateforme,
         # sans dependance externe). Commun a toutes les plateformes desktop.
@@ -223,6 +242,73 @@ class PackageCommand:
         else:
             Colored.PrintError(f"Packaging for platform '{parsed.platform}' not implemented.")
             return 1
+
+    # Les noms d'ABI Android / HarmonyOS reconnus -> le nom d'architecture de `build` (os-arch).
+    _ABI_VERS_ARCH = {
+        'arm64-v8a': 'arm64', 'arm64': 'arm64', 'aarch64': 'arm64',
+        'armeabi-v7a': 'arm', 'armv7': 'arm', 'arm': 'arm',
+        'x86_64': 'x86_64', 'x64': 'x86_64', 'amd64': 'x86_64',
+        'x86': 'x86', 'i686': 'x86', 'i386': 'x86',
+    }
+
+    @staticmethod
+    def SplitPlatform(plateforme: str, abi: Optional[str] = None):
+        """(05/11) `--platform` et `--abi` -> (systeme, plateforme complete pour le constructeur, erreur ou None).
+
+        `android` seul : pas d'architecture imposee. `android-arm64` : celle-la. `--abi arm64-v8a` : la meme chose. Plusieurs
+        ABI (« arm64-v8a,x86_64 ») ou `all` : le paquet universel, l'architecture n'est pas imposee (le projet declare
+        `androidabis()`). Deux demandes contradictoires (« android-arm64 » et `--abi x86_64`) sont refusees, pas devinees."""
+        brut = (plateforme or '').strip().lower()
+        osNom = brut.split('-')[0]
+        if osNom not in PackageCommand.SUPPORTED_PLATFORMS:
+            return osNom, brut, (f"Unknown platform '{osNom}'. Choose one of: "
+                                 + ", ".join(sorted(PackageCommand.SUPPORTED_PLATFORMS.keys())) + ".")
+        archDePlateforme = brut.split('-')[1] if '-' in brut else None
+        if archDePlateforme is not None:
+            archDePlateforme = PackageCommand._ABI_VERS_ARCH.get(archDePlateforme, archDePlateforme)
+        if not abi:
+            return osNom, brut, None
+        demandes = [a.strip().lower() for a in abi.split(',') if a.strip()]
+        if not demandes:
+            return osNom, brut, None
+        if osNom not in ('android', 'harmonyos'):
+            return osNom, brut, f"--abi only applies to android and harmonyos, not '{osNom}'."
+        if 'all' in demandes or len(demandes) > 1:
+            for a in demandes:
+                if a != 'all' and a not in PackageCommand._ABI_VERS_ARCH:
+                    return osNom, brut, f"Unknown ABI '{a}'. Use arm64-v8a, armeabi-v7a, x86_64, x86 or all."
+            return osNom, osNom, None  # universel : le projet declare ses ABI (androidabis / harmonyabis)
+        a = demandes[0]
+        if a not in PackageCommand._ABI_VERS_ARCH:
+            return osNom, brut, f"Unknown ABI '{a}'. Use arm64-v8a, armeabi-v7a, x86_64, x86 or all."
+        arch = PackageCommand._ABI_VERS_ARCH[a]
+        if archDePlateforme is not None and archDePlateforme != arch:
+            return osNom, brut, (f"--platform {brut} and --abi {a} disagree ({archDePlateforme} / {arch}): "
+                                 f"give only one of them.")
+        return osNom, f"{osNom}-{arch}", None
+
+    @staticmethod
+    def DireAbi(osNom: str, platformComplete: str, builder, project) -> None:
+        """(05/11) Dit l'ABI qui sera empaquetee, et prevoit le projet console. N'echoue jamais."""
+        try:
+            if osNom not in ('android', 'harmonyos'):
+                return
+            abi = getattr(builder, 'ndk_abi', None) or getattr(builder, 'harmony_abi', None)
+            declarees = getattr(project, 'androidAbis', None) or getattr(project, 'harmonyAbis', None)
+            if declarees and len(declarees) > 1:
+                Colored.PrintInfo(f"{osNom}: universal package, ABIs {', '.join(declarees)} (declared by the project).")
+            elif abi:
+                demande = '-' in platformComplete
+                Colored.PrintInfo(f"{osNom}: ABI {abi}" + ("" if demande else
+                                  " (no architecture requested: the host's, by default - use --platform "
+                                  f"{osNom}-arm64 or --abi arm64-v8a for a phone; androidabis() in the .jenga for several)."))
+            kind = getattr(project, 'kind', None)
+            if kind is not None and getattr(kind, 'name', str(kind)) == 'CONSOLE_APP':
+                Colored.PrintWarning(f"'{project.name}' is a consoleapp(): no {osNom} package is produced for it "
+                                     f"(an APK/HAP needs a windowedapp()). Declare it with windowedapp() under "
+                                     f"filter(\"system:{'Android' if osNom == 'android' else 'HarmonyOS'}\"), or package another project (--project).")
+        except Exception:
+            pass
 
     @staticmethod
     def _CreateBuilder(workspace,
