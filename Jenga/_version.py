@@ -146,7 +146,10 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # cible ne passe plus pour a jour, une archive statique se refait de zero ; `jenga clean --taille` dit la
 # place prise par configuration et plateforme, sans rien supprimer. y et non z (regle du 12/10) :
 # `clean --taille` est une fonction nouvelle ; rien ne casse l'existant.
-__version__ = "2.10.0"
+# 2.10.1 (2026-11-05) : `jenga kit` range chaque ABI dans son dossier et `jenga package` accepte une liste
+# d'ABI pour Android et HarmonyOS ; iOS ne supprime plus le bundle .app quand il est deja la sortie ; le mot
+# de passe de signature Android peut venir d'un fichier ou d'une variable d'environnement.
+__version__ = "2.10.1"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer
