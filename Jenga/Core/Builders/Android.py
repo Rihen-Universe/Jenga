@@ -30,6 +30,10 @@ from ..IconConverter import (
 )
 
 
+# (05/11/2026) Marque lue par les fichiers de signature : ce Jenga comprend « env:NOM » et « file:chemin » (voir _SignApk).
+ANDROID_PASS_INDIRECT = True
+
+
 class AndroidBuilder(Builder):
     """
     Builder pour Android.
@@ -2109,13 +2113,15 @@ class AndroidBuilder(Builder):
             Colored.PrintError("Keystore not specified for signing")
             return False
 
+        # (05/11/2026) « env:NOM » ou « file:chemin » passent tels quels a apksigner : le mot de passe ne figure alors
+        # ni sur la ligne de commande, ni dans le cache du workspace, ni dans un fichier .jenga.
         ks_pass = project.androidKeystorePass or ""
         key_alias = project.androidKeyAlias or project.name
 
         cmd = [
             str(self.apksigner), "sign",
             "--ks", project.androidKeystore,
-            "--ks-pass", f"pass:{ks_pass}",
+            "--ks-pass", ks_pass if ks_pass.startswith(("env:", "file:")) else f"pass:{ks_pass}",
             "--ks-key-alias", key_alias,
             "--out", str(output_apk),
             str(input_apk)
@@ -2284,7 +2290,7 @@ class AndroidBuilder(Builder):
         cmd = [
             str(self.apksigner), "sign",
             "--ks", project.androidKeystore,
-            "--ks-pass", f"pass:{ks_pass}",
+            "--ks-pass", ks_pass if ks_pass.startswith(("env:", "file:")) else f"pass:{ks_pass}",
             "--ks-key-alias", key_alias,
             "--out", str(output_aab),
             str(input_aab)
