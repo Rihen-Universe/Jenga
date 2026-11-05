@@ -343,8 +343,11 @@ class DirectIOSBuilder(AppleUniversalMixin, Builder):
                 if not self._Codesign(app_bundle, project):
                     return False
 
-            # Si le fichier de sortie demandé est .app, on crée un lien symbolique ou on copie
-            if out.suffix == ".app":
+            # Si le fichier de sortie demandé est .app, on crée un lien symbolique ou on copie.
+            # (05/11/2026) Sauf si le bundle EST ce fichier : _CreateAppBundle l'écrit dans le même dossier que
+            # l'exécutable, sous le même nom. Le retirer effaçait l'application, puis le lien pointait sur lui-même
+            # (ELOOP), et la construction restait verte. Mesuré sur la CI de GClone, run 41973458518.
+            if out.suffix == ".app" and out.resolve() != Path(app_bundle).resolve():
                 FileSystem.RemoveDirectory(out, recursive=True, ignoreErrors=True)
                 try:
                     os.symlink(app_bundle, out, target_is_directory=True)
