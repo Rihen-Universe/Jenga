@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Sequence
 
+from Jenga.Utils.FastWhich import Which as _which
 from Jenga.Core.Api import (
 	androidndkpath,
 	androidsdkpath,
@@ -51,7 +52,7 @@ def _is_executable(path_or_cmd: str) -> bool:
 	if has_sep or candidate.is_absolute() or value.startswith("."):
 		return candidate.exists()
 
-	return shutil.which(value) is not None
+	return _which(value) is not None
 
 
 def _first_existing_dir(paths: Sequence[str]) -> str:
@@ -72,7 +73,7 @@ def _first_executable(*, commands: Sequence[str] = (), paths: Sequence[str] = ()
 		cmd = str(command or "").strip()
 		if not cmd:
 			continue
-		resolved = shutil.which(cmd)
+		resolved = _which(cmd)
 		if resolved:
 			return resolved
 
@@ -239,7 +240,7 @@ def _find_jdk_root(options: Dict[str, Any]) -> str:
 		if javac.exists():
 			return root
 
-	javac_from_path = shutil.which("javac")
+	javac_from_path = _which("javac")
 	if javac_from_path:
 		javac_path = Path(javac_from_path).resolve()
 		if javac_path.parent.name.lower() == "bin":

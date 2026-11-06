@@ -11,6 +11,7 @@ import os
 import signal
 import sys
 import shutil
+from .FastWhich import Which as _FastWhich
 from typing import List, Optional, Union, Dict, Any
 from pathlib import Path
 from threading import Timer
@@ -231,7 +232,7 @@ class Process:
     @staticmethod
     def Which(executable: str, path: Optional[str] = None) -> Optional[str]:
         """Find executable in PATH (or custom path)."""
-        return shutil.which(executable, path=path)
+        return _FastWhich(executable, path=path)
 
     @staticmethod
     def SetEnvironmentVariable(key: str, value: str) -> None:
