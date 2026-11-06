@@ -43,7 +43,9 @@ def main():
         return 0
 
     # Exécuter la commande
-    return execute_command(command, args)
+    # (2.10.2) JENGA_CANCEL_FILE : un hote qui nous lance en sous-processus demande l'arret en creant ce fichier (Core/Cancel.py)
+    from Jenga.Core import Cancel
+    return Cancel.RunWithFlagFile(lambda: execute_command(command, args))
 
 
 def print_global_help():

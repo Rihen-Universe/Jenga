@@ -201,6 +201,10 @@ class Daemon:
                         self.entry_file, self.loader, self.workspace
                     )
                 return {'status': 'ok', 'changed': changed, 'id': cmd_id}
+            elif cmd == 'cancel':  # (2.10.2) le client demande l'arret de la construction en cours dans CE processus
+                from . import Cancel
+                Cancel.Request()
+                return {'status': 'ok', 'message': 'cancel requested', 'id': cmd_id}
             elif cmd == 'watch_start':
                 return {**self._StartWatcher(args), 'id': cmd_id}
             elif cmd == 'watch_stop':
@@ -229,6 +233,17 @@ class Daemon:
     # -----------------------------------------------------------------------
 
     def _Build(self, args: Dict) -> Dict:
+        """Exécute un build (annulable : commande « cancel », voir Core/Cancel.py)."""
+        from . import Cancel
+        Cancel.Clear()
+        try:
+            return self._BuildImpl(args)
+        except Cancel.BuildCancelled:
+            return {'status': 'cancelled', 'cancelled': True, 'return_code': Cancel.CANCEL_EXIT_CODE}
+        finally:
+            Cancel.Clear()
+
+    def _BuildImpl(self, args: Dict) -> Dict:
         """Exécute un build."""
         config = args.get('config', 'Debug')
         platform = args.get('platform', 'Windows')

@@ -25,6 +25,7 @@ from Jenga.Core import Api
 from Jenga.Core.Api import Workspace, Project, Toolchain, ProjectKind, TargetOS, TargetArch, TargetEnv, CompilerFamily
 from ..Utils import FileSystem, Process, Colored, Reporter, BuildLogger, ProcessResult
 from .State import BuildState
+from . import Cancel as _Cancel  # (2.10.2) annulation cooperative (voir Core/Cancel.py)
 from .DependencyResolver import DependencyResolver
 from .Toolchains import ToolchainManager
 from .Platform import Platform
@@ -1968,6 +1969,33 @@ class Builder(abc.ABC):
 
         return False
 
+    def _RetirerSortiesPartielles(self, sortie: str) -> None:
+        """(2.10.2) Retire une sortie que l'annulation a pu laisser A MOITIE ECRITE, avec son .d et sa signature :
+        sans cela, un objet plus recent que sa source et dont la signature n'a pas change passerait pour a jour."""
+        if not sortie:
+            return
+        candidats = [Path(sortie), Path(f"{sortie}.jenga_sig")]
+        try:
+            candidats.append(self.GetDependencyFilePath(sortie))
+        except Exception:  # noqa: BLE001
+            pass
+        for c in candidats:
+            try:
+                if c.exists():
+                    c.unlink()
+            except OSError:
+                pass
+
+    def _CompileGuarded(self, project: Project, sourceFile: str, objectFile: str) -> ProcessResult:
+        """(2.10.2) Compile() sous annulation : rien de lance si c'est deja annule, et l'objet que l'annulation
+        interrompt est retire (il serait sinon pris pour bon)."""
+        _Cancel.Check()
+        try:
+            return self.Compile(project, sourceFile, objectFile)
+        except _Cancel.BuildCancelled:
+            self._RetirerSortiesPartielles(objectFile)
+            raise
+
     def _GetCompileSignaturePath(self, objectFile: str) -> Path:
         """Sidecar file storing the compile signature for an object file."""
         return Path(f"{objectFile}.jenga_sig")
@@ -2698,7 +2726,13 @@ class Builder(abc.ABC):
                                         targetArch=self.targetArch.value if self.targetArch else "")
             logger.PrintResultBox(False)
             return False
-        if not self.PreparePCH(project, obj_dir):
+        try:
+            pch_ok = self.PreparePCH(project, obj_dir)
+        except _Cancel.BuildCancelled:
+            # (2.10.2) annule en plein en-tete precompile : le .pch (et son .d) a moitie ecrit serait pris pour frais
+            self._RetirerSortiesPartielles(getattr(project, "_jengaPchFile", ""))
+            raise
+        if not pch_ok:
             self.state.MarkProjectCompiled(project.name, success=False, platform=self.platform,
                                         targetArch=self.targetArch.value if self.targetArch else "")
             return False
@@ -2756,6 +2790,7 @@ class Builder(abc.ABC):
         if num_jobs == 1:
             # Sequential compilation
             for src in regular_files:
+                _Cancel.Check()  # (2.10.2) entre deux unites de compilation
                 src_path = Path(src)
                 obj_name = self.GetObjectName(project, src_path)
                 obj_path = obj_dir / obj_name
@@ -2769,7 +2804,7 @@ class Builder(abc.ABC):
                 # (2.8.19) Une exception (compilateur introuvable, delai depasse) est un ECHEC DIT de ce
                 # fichier, pas une trace Python qui coupe la construction.
                 try:
-                    result = self.Compile(project, str(src_path), str(obj_path))
+                    result = self._CompileGuarded(project, str(src_path), str(obj_path))
                 except Exception as exc:
                     result = self._EchecDepuisException(exc)
                 if result.returnCode == 0:
@@ -2789,6 +2824,7 @@ class Builder(abc.ABC):
                 cached_files = []
 
                 for src in regular_files:
+                    _Cancel.Check()  # (2.10.2) entre deux unites de compilation
                     src_path = Path(src)
                     obj_name = self.GetObjectName(project, src_path)
                     obj_path = obj_dir / obj_name
@@ -2797,7 +2833,7 @@ class Builder(abc.ABC):
                         cached_files.append((str(src_path), str(obj_path)))
                         continue
 
-                    future = executor.submit(self.Compile, project, str(src_path), str(obj_path))
+                    future = executor.submit(self._CompileGuarded, project, str(src_path), str(obj_path))
                     future_to_paths[future] = (str(src_path), str(obj_path))
 
                 # Log cached files immediately
@@ -2827,6 +2863,8 @@ class Builder(abc.ABC):
                         # Le fichier est maintenant compte comme un echec, l'exception est son message.
                         logger.LogCompile(src_path, self._EchecDepuisException(exc))
                         success = False
+
+        _Cancel.Check()  # (2.10.2) annulee pendant la derniere unite : on ne lie pas
 
         if not success:
             self.state.MarkProjectCompiled(project.name, success=False, platform=self.platform,
@@ -2981,7 +3019,12 @@ class Builder(abc.ABC):
                     pass
 
             # Link - capture ProcessResult pour afficher les erreurs
-            link_ok = self.Link(project, object_files, str(target_path))
+            try:
+                link_ok = self.Link(project, object_files, str(target_path))
+            except _Cancel.BuildCancelled:
+                # (2.10.2) annule en plein lien : la cible a moitie ecrite serait prise pour a jour a la construction suivante
+                self._RetirerSortiesPartielles(str(target_path))
+                raise
             if link_ok and orphelins:
                 self._RetirerObjetsOrphelins(project, orphelins)
             logger.LogLink(str(target_path), self._lastResult)  # Affiche les erreurs de linking si le linking échoue
@@ -3353,6 +3396,7 @@ class Builder(abc.ABC):
         dans_le_lot = set(order)
 
         for proj_name in order:
+            _Cancel.Check()  # (2.10.2) entre deux projets
             proj = self.workspace.projects.get(proj_name)
             if not proj:
                 continue

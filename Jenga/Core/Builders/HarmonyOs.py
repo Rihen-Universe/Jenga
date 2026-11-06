@@ -2058,6 +2058,24 @@ class HarmonyOsBuilder(Builder):
             self._PrepareToolchain()
             self.workspace._cache_status = original_cache_status
 
+    def InferUniversalTarget(self):
+        """(05/11, 2.10.2) (application a empaqueter, message d'erreur) quand `build` n'a pas recu --target.
+
+        La cible de demarrage du workspace si c'est une application graphique ; sinon l'unique application graphique ; sinon
+        (plusieurs, dont au moins une declare plusieurs ABI) une erreur qui dit de choisir (--target / startproject).
+        Aucune application, ou aucune a plusieurs ABI : (None, None), le comportement d'avant."""
+        apps = {n: p for n, p in self.workspace.projects.items() if p.kind == ProjectKind.WINDOWED_APP}
+        multi = [n for n, p in apps.items() if len(list(getattr(p, "harmonyAbis", []) or [])) > 1]
+        if not multi:
+            return None, None
+        depart = getattr(self.workspace, "startProject", None)
+        if depart in apps:
+            return depart, None
+        if len(apps) == 1:
+            return next(iter(apps)), None
+        return None, (f"Several applications ({', '.join(sorted(apps))}) and no start project: "
+                      f"a universal HAP needs one. Use --target <application> or startproject().")
+
     def Build(self, targetProject: Optional[str] = None) -> int:
         """
         Build principal : compile puis package en .hap si WINDOWED_APP.
@@ -2076,8 +2094,17 @@ class HarmonyOsBuilder(Builder):
         """
         # Multi-ABI demande (harmonyabis) : chemin dedie, qui compile lui-meme
         # une fois par ABI. On ne passe donc PAS par la compilation simple.
-        if targetProject:
-            proj = self.workspace.projects.get(targetProject)
+        # (05/11, 2.10.2) SANS --target, la cible est INFEREE : la cible de demarrage du workspace si c'est une application
+        # graphique, sinon l'UNIQUE application graphique ; avant, sans --target le HAP universel n'etait jamais construit
+        # (un seul HAP, celui de l'ABI de l'hote). Plusieurs applications multi-ABI sans cible de demarrage : message clair.
+        cible = targetProject
+        if not cible:
+            cible, erreur = self.InferUniversalTarget()
+            if erreur:
+                Reporter.Error(erreur)
+                return 1
+        if cible:
+            proj = self.workspace.projects.get(cible)
             abis = list(getattr(proj, "harmonyAbis", []) or []) if proj else []
             if proj and proj.kind == ProjectKind.WINDOWED_APP and len(abis) > 1:
                 return 0 if self._BuildUniversalHAP(proj, abis) else 1

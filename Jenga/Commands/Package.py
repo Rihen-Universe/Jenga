@@ -184,6 +184,12 @@ class PackageCommand:
 
         project = workspace.projects[project_name]
 
+        # (05/11, 2.10.2) `--abi arm64-v8a,x86_64` DONNE la liste des ABI du paquet universel. Avant, SplitPlatform la
+        # reconnaissait puis la jetait : seule androidabis() du .jenga comptait, et _PackageAndroid ne construisait qu'une ABI.
+        demandees = PackageCommand.AbisDemandees(parsed.abi)
+        if len(demandees) > 1 and osNom in ('android', 'harmonyos'):
+            setattr(project, 'androidAbis' if osNom == 'android' else 'harmonyAbis', demandees)
+
         # Créer le builder pour ce projet (nécessaire pour connaître les chemins de sortie)
         try:
             from ..Commands.Build import BuildCommand
@@ -250,6 +256,27 @@ class PackageCommand:
         'x86_64': 'x86_64', 'x64': 'x86_64', 'amd64': 'x86_64',
         'x86': 'x86', 'i686': 'x86', 'i386': 'x86',
     }
+
+    # Le nom d'ABI NDK (celui d'androidabis()) de chaque architecture reconnue.
+    _ABI_NDK = {'arm64': 'arm64-v8a', 'arm': 'armeabi-v7a', 'x86_64': 'x86_64', 'x86': 'x86'}
+
+    @staticmethod
+    def AbisDemandees(abi: Optional[str]) -> List[str]:
+        """(05/11, 2.10.2) La liste d'ABI de `--abi a,b` en noms NDK (arm64-v8a, x86_64...), sans doublon, dans l'ordre donne.
+        `all` ou rien : liste vide (le projet declare alors lui-meme ses ABI)."""
+        if not abi:
+            return []
+        liste: List[str] = []
+        for a in (x.strip().lower() for x in abi.split(',')):
+            if not a or a == 'all':
+                return []
+            arch = PackageCommand._ABI_VERS_ARCH.get(a)
+            if arch is None:
+                continue
+            ndk = PackageCommand._ABI_NDK[arch]
+            if ndk not in liste:
+                liste.append(ndk)
+        return liste
 
     @staticmethod
     def SplitPlatform(plateforme: str, abi: Optional[str] = None):
@@ -337,6 +364,25 @@ class PackageCommand:
             Colored.PrintError("AndroidBuilder not available.")
             return 1
 
+        # (05/11, 2.10.2) PLUSIEURS ABI (androidabis() ou `--abi a,b`) : le paquet universel. Build() sait le faire (une
+        # construction par ABI, libc++_shared.so de chaque ABI, un seul APK) ; avant, ce chemin construisait UNE ABI (celle de
+        # l'hote) et empaquetait l'APK d'une seule, sans le dire.
+        abis = list(getattr(project, 'androidAbis', None) or [])
+        if len(abis) > 1:
+            if pkg_type != 'apk':
+                Colored.PrintError("A universal Android package is an APK: use a single ABI for an AAB.")
+                return 1
+            if builder.Build(project.name) != 0:
+                Colored.PrintError("Build failed, cannot package.")
+                return 1
+            apk_path = builder.GetTargetDir(project) / f"{project.targetName or project.name}.apk"
+            if not apk_path.exists():
+                Colored.PrintError(f"Universal APK not found: {apk_path}")
+                return 1
+            shutil.copy2(apk_path, output_dir / apk_path.name)
+            Colored.PrintSuccess(f"APK packaged (universal, {', '.join(abis)}): {output_dir / apk_path.name}")
+            return 0
+
         # Construire les bibliothèques natives si nécessaire
         # Note: On suppose que le build a déjà été fait. Si ce n'est pas le cas, on peut appeler builder.BuildProject(project)
         if not builder.BuildProject(project):
@@ -351,6 +397,11 @@ class PackageCommand:
 
         if not libs:
             Colored.PrintError("No native libraries found.")
+            return 1
+
+        # (05/11, 2.10.2) libc++_shared.so : Build() et deploy l'embarquent, PAS ce chemin : l'APK sortait SANS elle et
+        # mourait au lancement (`dlopen failed: library "libc++_shared.so" not found`, constate sur emulateur).
+        if hasattr(builder, '_AppendSharedStl') and not builder._AppendSharedStl(project, builder.ndk_abi, libs):
             return 1
 
         if pkg_type == 'apk':
@@ -2165,6 +2216,27 @@ Filename: "{{app}}\\{exe_path.name}"; Description: "Lancer {app_name}"; Flags: n
 
     @staticmethod
     def _PackageHarmonyOS(project, builder, pkg_type: str, output_dir: Path) -> int:
+        """(05/11, 2.10.2) Packaging HarmonyOS : le MEME chemin que `jenga build --platform harmonyos` (Build() du constructeur :
+        projet hvigor genere, une construction par ABI de `--abi` / harmonyabis(), libc++_shared.so, un seul .hap), puis copie du .hap.
+        Avant : les .so etaient copies en dur dans libs/arm64-v8a et hvigor etait lance SANS projet (« Hvigor config file
+        ...\\hvigor\\hvigor-config.json5 does not exist »). L'ancien corps est garde ci-dessous (_PackageHarmonyOSAncien)."""
+        if pkg_type != 'hap':
+            Colored.PrintError(f"Unsupported package type '{pkg_type}' for HarmonyOS (only 'hap').")
+            return 1
+        if builder.Build(project.name) != 0:
+            Colored.PrintError("Build failed, cannot package.")
+            return 1
+        hap = builder.GetTargetDir(project) / f"{project.targetName or project.name}.hap"
+        if not hap.exists():
+            Colored.PrintError(f"HAP not found: {hap}")
+            return 1
+        shutil.copy2(hap, output_dir / hap.name)
+        abis = list(getattr(project, 'harmonyAbis', None) or [])
+        Colored.PrintSuccess(f"HAP packaged{' (universal, ' + ', '.join(abis) + ')' if len(abis) > 1 else ''}: {output_dir / hap.name}")
+        return 0
+
+    @staticmethod
+    def _PackageHarmonyOSAncien(project, builder, pkg_type: str, output_dir: Path) -> int:
         """Packaging HarmonyOS : compile le .so via OHOS NDK, puis invoque hvigor."""
         import subprocess, shutil, os
 

@@ -315,9 +315,11 @@ class DeployCommand:
 
         # ── Installation ──────────────────────────────────────────────────────
         Colored.PrintInfo(f"Installing {hap_path.name}...")
+        # (06/11, 2.10.2) `hdc install` depuis LE DOSSIER du .hap, nom relatif : hdc prefixe le dossier courant a un chemin absolu
+        # Windows (Engine/Noge/DECISIONS_RODOLF.md, la sequence qui a marche).
         result = Process.ExecuteCommand(
-            hdc_base + ["install", str(hap_path)],
-            captureOutput=False, silent=False)
+            hdc_base + ["install", hap_path.name],
+            cwd=str(hap_path.parent), captureOutput=False, silent=False)
 
         if result.returnCode != 0:
             Colored.PrintError(
@@ -341,15 +343,21 @@ class DeployCommand:
 
             ability_name = ability if ability else "EntryAbility"
             Colored.PrintInfo(f"Launching {bundle_name}/{ability_name}...")
+            # (06/11, 2.10.2) `-m entry` (le module du HAP genere par Jenga) comme dans la sequence qui a marche, et le RESULTAT de
+            # `aa start` se lit : hdc rend 0 meme quand l'ability ne demarre pas (« error: ... »).
             result = Process.ExecuteCommand(
                 hdc_base + [
                     "shell", "aa", "start",
                     "-a", ability_name,
                     "-b", bundle_name,
+                    "-m", "entry",
                 ],
-                captureOutput=False, silent=False)
+                captureOutput=True, silent=True)
+            sortie_aa = ((result.stdout or "") + (result.stderr or "")).strip()
+            if sortie_aa:
+                print(sortie_aa)
 
-            if result.returnCode == 0:
+            if result.returnCode == 0 and "error" not in sortie_aa.lower():
                 Colored.PrintSuccess(f"App launched: {bundle_name}")
             else:
                 Colored.PrintError(f"Launch failed for {bundle_name}/{ability_name}.")
@@ -451,12 +459,29 @@ class DeployCommand:
                 "hdc not found. Vérifiez l'installation des HarmonyOS Command Line Tools.")
             return 1
 
+        # (06/11, 2.10.2) hdc ne voit l'emulateur HarmonyOS qu'apres `hdc tconn <adresse>` : « sans ca, list targets rend [Empty] ».
+        if parsed.target and ":" in parsed.target:
+            Process.ExecuteCommand([str(hdc), "tconn", parsed.target], captureOutput=True, silent=True)
+
+        # (06/11, 2.10.2) L'ABI se CHOISIT d'apres l'appareil (avant : `harmonyos-arm64` en dur, alors que l'emulateur HarmonyOS-NEXT
+        # du PC est en x86_64 : « install parse native so failed »).
+        plateforme = "harmonyos-arm64"
+        if parsed.target:
+            appareil = DeployCommand.DeviceAbisHarmony(hdc, parsed.target)
+            plateforme, abi, erreur = DeployCommand.ChooseHarmonyAbi(
+                list(getattr(project, 'harmonyAbis', None) or []), appareil)
+            if erreur:
+                Colored.PrintError(erreur)
+                return 1
+            if abi:
+                Colored.PrintInfo(f"Device {parsed.target} accepts {', '.join(appareil)} ; building for {abi}.")
+
         # ── Étape 1 : Build ───────────────────────────────────────────────────
         from .Build import BuildCommand
         build_args = [
             "--config",   parsed.config,
             "--action",   "deploy",
-            "--platform", "harmonyos-arm64",
+            "--platform", plateforme,
             "--target",   project.name,
         ]
         if parsed.jenga_file:
@@ -467,12 +492,12 @@ class DeployCommand:
 
         # ── Étape 2 : Localiser le .hap ──────────────────────────────────────
         builder = BuildCommand.CreateBuilder(
-            workspace, parsed.config, "harmonyos-arm64",
+            workspace, parsed.config, plateforme,
             project.name, parsed.verbose,
             action="deploy",
             options=BuildCommand.CollectFilterOptions(
                 config      = parsed.config,
-                platform    = "harmonyos-arm64",
+                platform    = plateforme,
                 target      = project.name,
                 verbose     = parsed.verbose,
                 no_cache    = False,
@@ -619,6 +644,66 @@ class DeployCommand:
 
         return 0
 
+    _ABI_ARCH = {'arm64-v8a': 'arm64', 'x86_64': 'x86_64', 'armeabi-v7a': 'arm', 'x86': 'x86'}
+
+    @staticmethod
+    def DeviceAbisHarmony(hdc: Path, target: str) -> List[str]:
+        """(06/11, 2.10.2) Les ABI que l'appareil HarmonyOS accepte (`param get const.product.cpu.abilist`). Vide : illisible."""
+        r = Process.ExecuteCommand([str(hdc), "-t", target, "shell", "param", "get", "const.product.cpu.abilist"],
+                                   captureOutput=True, silent=True)
+        if r.returnCode != 0:
+            return []
+        return [a.strip() for a in (r.stdout or "").strip().split(",")
+                if a.strip() and a.strip() in DeployCommand._ABI_ARCH]
+
+    @staticmethod
+    def ChooseHarmonyAbi(declarees: List[str], appareil: List[str]):
+        """(06/11, 2.10.2) (plateforme a construire, ABI choisie ou None, message d'erreur ou None). Meme regle qu'Android :
+        appareil illisible : `harmonyos-arm64` (comme avant) ; rien de declare : arm64 si l'appareil l'accepte, sinon sa premiere ABI
+        (l'emulateur HarmonyOS-NEXT du PC est en x86_64) ; plusieurs declarees : universel ; une seule : celle-la, ou une erreur
+        qui nomme les deux listes (un HAP arm64 ne s'installe pas sur l'emulateur x86_64 : pas de traduction)."""
+        if not appareil:
+            return "harmonyos-arm64", None, None
+        if not declarees:
+            abi = 'arm64-v8a' if 'arm64-v8a' in appareil else appareil[0]
+            return f"harmonyos-{DeployCommand._ABI_ARCH[abi]}", abi, None
+        communes = [a for a in appareil if a in declarees]
+        if not communes:
+            return "harmonyos-arm64", None, (
+                f"No ABI in common: the device accepts {', '.join(appareil)}, the project provides {', '.join(declarees)}. "
+                f"Add one of the device ABIs to harmonyabis() (and build or install a kit for it), or use another device.")
+        if len(declarees) > 1:
+            return "harmonyos", communes[0], None
+        return f"harmonyos-{DeployCommand._ABI_ARCH[communes[0]]}", communes[0], None
+
+    @staticmethod
+    def DeviceAbis(adb: Path, target: str) -> List[str]:
+        """(05/11, 2.10.2) Les ABI que l'appareil accepte, par ordre de preference (`ro.product.cpu.abilist`). Vide : illisible."""
+        r = Process.ExecuteCommand([str(adb), "-s", target, "shell", "getprop", "ro.product.cpu.abilist"],
+                                   captureOutput=True, silent=True)
+        if r.returnCode != 0:
+            return []
+        return [a.strip() for a in (r.stdout or "").strip().split(",") if a.strip()]
+
+    @staticmethod
+    def ChooseAndroidAbi(declarees: List[str], appareil: List[str]):
+        """(05/11, 2.10.2) (plateforme a construire, ABI choisie ou None, message d'erreur ou None).
+
+        - appareil illisible, ou projet qui ne declare rien : comportement d'avant (`Android`, l'hote) ;
+        - plusieurs ABI declarees (paquet universel) : on garde `Android` si l'appareil en accepte au moins une ;
+        - une seule ABI declaree : on construit CELLE-LA si l'appareil l'accepte, sinon on s'arrete en la nommant."""
+        if not appareil or not declarees:
+            return "Android", None, None
+        communes = [a for a in appareil if a in declarees]
+        if not communes:
+            return "Android", None, (
+                f"No ABI in common: the device accepts {', '.join(appareil)}, the project provides {', '.join(declarees)}. "
+                f"Add one of the device ABIs to androidabis() (and build or install a kit for it), or use another device.")
+        if len(declarees) > 1:
+            return "Android", communes[0], None
+        arch = DeployCommand._ABI_ARCH.get(communes[0])
+        return (f"Android-{arch}" if arch else "Android"), communes[0], None
+
     @staticmethod
     def _DeployAndroid(workspace, project, parsed) -> int:
         """Déploiement Android depuis workspace (build + adb install)."""
@@ -627,10 +712,25 @@ class DeployCommand:
             Colored.PrintError("adb not found.")
             return 1
 
+        # (05/11, 2.10.2) L'ABI se CHOISIT d'apres l'appareil : avant, `--platform Android` sans architecture construisait pour celle de
+        # l'HOTE (x86_64), donc pour un projet qui ne fournit que arm64-v8a (le cas du kit publie) l'edition de liens echouait
+        # (« is incompatible with elf_x86_64 ») sur l'emulateur x86_64, qui sait pourtant executer l'arm64 (traduction).
+        plateforme = "Android"
+        if parsed.target:
+            appareil = DeployCommand.DeviceAbis(adb, parsed.target)
+            plateforme, abi, erreur = DeployCommand.ChooseAndroidAbi(
+                list(getattr(project, 'androidAbis', None) or []), appareil)
+            if erreur:
+                Colored.PrintError(erreur)
+                return 1
+            if abi:
+                Colored.PrintInfo(f"Device {parsed.target} accepts {', '.join(appareil)} ; "
+                                  f"'{project.name}' provides {abi} : building for {abi}.")
+
         from .Build import BuildCommand
         build_args = [
             "--config", parsed.config, "--action", "deploy",
-            "--platform", "Android", "--target", project.name,
+            "--platform", plateforme, "--target", project.name,
         ]
         if parsed.jenga_file:
             build_args += ["--jenga-file", parsed.jenga_file]
@@ -638,10 +738,10 @@ class DeployCommand:
             return 1
 
         builder = BuildCommand.CreateBuilder(
-            workspace, parsed.config, "Android", project.name, parsed.verbose,
+            workspace, parsed.config, plateforme, project.name, parsed.verbose,
             action="deploy",
             options=BuildCommand.CollectFilterOptions(
-                config=parsed.config, platform="Android", target=project.name,
+                config=parsed.config, platform=plateforme, target=project.name,
                 verbose=parsed.verbose, no_cache=False, no_daemon=parsed.no_daemon,
                 extra=["action:deploy", "deploy:android"]))
 
@@ -653,6 +753,23 @@ class DeployCommand:
         if DeployCommand._AndroidInstall(adb, apk_path, parsed.target) != 0:
             return 1
         Colored.PrintSuccess("APK installed successfully.")
+
+        # (05/11, 2.10.2) `--run` : lancer l'application. Ce chemin (workspace) installait puis rendait 0 SANS la lancer : seul le
+        # mode `--apk` lisait parsed.run (constate sur emulateur : « APK installed successfully. », activite du lanceur au premier plan).
+        if parsed.run:
+            pkg_id = parsed.bundle or DeployCommand._GetApkPackageId(adb, apk_path)
+            if not pkg_id:
+                Colored.PrintError("Cannot launch: the package name of the APK could not be read (use --bundle).")
+                return 1
+            adb_base = [str(adb)] + (["-s", parsed.target] if parsed.target else [])
+            Colored.PrintInfo(f"Launching {pkg_id}...")
+            launch = Process.ExecuteCommand(
+                adb_base + ["shell", "monkey", "-p", pkg_id, "-c", "android.intent.category.LAUNCHER", "1"],
+                captureOutput=True, silent=True)
+            if launch.returnCode != 0:
+                Colored.PrintError(f"Launch failed for {pkg_id}.")
+                return 1
+            Colored.PrintSuccess(f"App launched: {pkg_id}")
         return 0
 
     # -----------------------------------------------------------------------

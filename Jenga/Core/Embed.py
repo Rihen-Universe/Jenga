@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from . import Api
+from . import Cancel
 from .Loader import Loader, GetLoadedFiles
 # NB : `from ..Utils import Reporter` donnerait la CLASSE Reporter (re-exportee
 # par Utils/__init__), pas le module — importer le MODULE explicitement.
@@ -58,6 +59,44 @@ class BuildResult:
     hadLinkFailure: bool = False
     hadWarnings: bool = False
     errorMessage: str = ""  # erreur FATALE (chargement workspace...), vide sinon
+    # (2.10.2) Construction ARRETEE a la demande de l'hote (Embed.RequestCancel / SetCancelProbe) : exitCode vaut
+    # alors CANCEL_EXIT_CODE (130), distinct de l'echec (1), et `cancelled` est vrai. Aucun compte d'erreur.
+    cancelled: bool = False
+
+
+CANCEL_EXIT_CODE = Cancel.CANCEL_EXIT_CODE
+_cancelProbe = None  # la sonde de l'hote (fonction sans argument -> bool), lue par un fil toutes les 100 ms
+
+
+def SetCancelProbe(probe) -> None:
+    """(2.10.2) L'hote donne une fonction qui rend vrai quand il demande l'arret de la construction. Elle est
+    lue par un petit fil PENDANT chaque action (build, rebuild, clean, test, commande). Sans GIL cote hote :
+    l'hote lit un drapeau natif, il n'appelle jamais Python depuis un autre fil. None : plus de sonde."""
+    global _cancelProbe
+    _cancelProbe = probe
+
+
+def RequestCancel() -> None:
+    """(2.10.2) Demande l'arret de la construction en cours (depuis un fil Python : le fil de la sonde, un test)."""
+    Cancel.Request()
+
+
+def _DebutAction() -> None:
+    Cancel.Clear()
+    Cancel.StartWatcher(_cancelProbe)
+
+
+def _FinAction() -> None:
+    Cancel.StopWatcher()
+
+
+def _Arretee(res, collector=None) -> None:
+    """Le compte-rendu d'une construction arretee : le message, le code distinct, aucun echec compte."""
+    res.cancelled = True
+    res.exitCode = CANCEL_EXIT_CODE
+    res.errorMessage = ""
+    if collector is not None:
+        collector.OnLogLine("Construction arretee")
 
 
 @dataclass
@@ -302,6 +341,7 @@ def _RunBuilderAction(jenga_file: Optional[str], target: Optional[str], config: 
     ResetState()
     SetBuildSink(collector)
     sys.stdout, sys.stderr = tee, tee
+    _DebutAction()
     try:
         entry = _ResolveEntry(jenga_file)
         if not entry:
@@ -330,6 +370,9 @@ def _RunBuilderAction(jenga_file: Optional[str], target: Optional[str], config: 
                 res.exitCode = int(builder.Clean(target) or 0) if hasattr(builder, "Clean") else 1
             else:
                 res.exitCode = int(builder.Build(target))
+        except Cancel.BuildCancelled:
+            _Arretee(res, collector)  # (2.10.2) arretee a la demande de l'hote : pas un echec
+            return res
         except Exception as e:  # noqa: BLE001
             res.errorMessage = f"{action}: {e}"
             res.exitCode = 1
@@ -359,6 +402,7 @@ def _RunBuilderAction(jenga_file: Optional[str], target: Optional[str], config: 
                 pass  # simple optimisation : son echec ne doit jamais casser un build
         return res
     finally:
+        _FinAction()
         tee.flush()
         sys.stdout, sys.stderr = old_out, old_err
         SetBuildSink(None)
@@ -435,8 +479,11 @@ def RunCommand(argv: List[str], sink=None) -> BuildResult:
     sys.stdout = sys.stderr = tee
     SetBuildSink(collector)
     ResetState()
+    _DebutAction()
     try:
         res.exitCode = int(execute_command(name, args) or 0)
+    except Cancel.BuildCancelled:
+        _Arretee(res, collector)  # (2.10.2) arretee a la demande de l'hote : pas un echec
     except SystemExit as e:  # une commande peut appeler sys.exit()
         code = e.code
         res.exitCode = int(code) if isinstance(code, int) else (0 if code is None else 1)
@@ -444,6 +491,7 @@ def RunCommand(argv: List[str], sink=None) -> BuildResult:
         res.errorMessage = f"{name}: {e}"
         res.exitCode = 1
     finally:
+        _FinAction()
         tee.flush()
         sys.stdout, sys.stderr = old_out, old_err
         SetBuildSink(None)

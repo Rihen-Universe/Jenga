@@ -647,6 +647,9 @@ class BuildCommand:
             client = DaemonClient(workspace_root)
             if client.IsAvailable():
                 Colored.PrintInfo("Using build daemon...")
+                from ..Core import Cancel as _Cancel
+                # (2.10.2) la construction se fait DANS le demon : une annulation demandee ici lui est transmise
+                _Cancel.SetForward(lambda: client.SendCommand('cancel', {}, timeout=5.0))
                 try:
                     response = client.SendCommand('build', {
                         'config': parsed.config,
@@ -663,11 +666,16 @@ class BuildCommand:
                     })
                     if response.get('status') == 'ok':
                         return response.get('return_code', 0)
+                    elif response.get('cancelled'):
+                        print("Construction arretee")
+                        return _Cancel.CANCEL_EXIT_CODE
                     else:
                         Colored.PrintError(f"Daemon build failed: {response.get('message')}")
                         return 1
                 except Exception as e:
                     Colored.PrintWarning(f"Daemon communication failed: {e}. Falling back to direct build.")
+                finally:
+                    _Cancel.SetForward(None)
 
         # Direct build (sans daemon)
         # 1. Charger le workspace (avec cache si non --no-cache)

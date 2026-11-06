@@ -15,6 +15,9 @@ from typing import List, Optional, Union, Dict, Any
 from pathlib import Path
 from threading import Timer
 
+# (2.10.2) L'annulation cooperative d'une construction : chaque enfant est ENREGISTRE (jamais un autre processus).
+from ..Core import Cancel as _Cancel
+
 # ---------------------------------------------------------------------------
 # Private helpers (module level) – _PascalCase
 # ---------------------------------------------------------------------------
@@ -85,6 +88,7 @@ class Process:
         - silent: if captureOutput=False, suppress output to parent streams.
         """
         cmd_str = _FormatCommand(args)
+        _Cancel.Check()  # (2.10.2) construction annulee : on ne lance plus rien
 
         # Windows : un .cmd/.bat n'est PAS un exécutable natif — CreateProcess ne sait
         # pas le lancer directement (subprocess sans shell échoue). On le route via
@@ -142,6 +146,7 @@ class Process:
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Command not found: {cmd_str}") from e
 
+        _Cancel.Register(proc)  # (2.10.2) Request() termine cet enfant et ses descendants
         timer = None
         if timeout is not None:
             timer = Timer(timeout, _KillProcess, [proc])
@@ -157,6 +162,11 @@ class Process:
         finally:
             if timer is not None:
                 timer.cancel()
+            _Cancel.Unregister(proc)
+
+        # (2.10.2) Un processus termine PAR l'annulation rend un code d'echec : ce n'est pas une erreur de compilation.
+        if proc.returncode != 0 and _Cancel.IsRequested():
+            raise _Cancel.BuildCancelled()
 
         result = ProcessResult(proc.returncode, stdout_data or "", stderr_data or "", cmd_str)
 
