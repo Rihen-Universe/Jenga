@@ -153,7 +153,10 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # `jenga deploy --run` lance vraiment l'application, choisit une ABI que l'appareil accepte et le dit ;
 # HarmonyOS : `jenga package` passe par la construction, HAP universel sans --target, deploy sur l'emulateur
 # (hdc tconn, ABI lue, aa start) ; une construction s'arrete proprement (Core/Cancel.py, code 130).
-__version__ = "2.10.2"
+# 2.10.3 (2026-11-07) : Android et HarmonyOS, chaque architecture hors arm64 a son dossier de sortie
+# (Release-Android-x86_64 : x86_64 n'ecrase plus arm64), et `jenga kit` suit la meme regle ; `harmonykeypwd`
+# accepte `env:` et `file:` ; la detection des toolchains indexe le PATH (FastWhich), deux fois plus rapide.
+__version__ = "2.10.3"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

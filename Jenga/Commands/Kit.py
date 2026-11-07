@@ -578,6 +578,15 @@ class KitCommand:
         target_dir = Path(expander.Expand(target_dir, recursive=True))
         if not target_dir.is_absolute():
             target_dir = Path(workspace.location) / target_dir
+        # (07/11, 2.10.3) la MEME regle que Builder._DirArchitecture : Android et HarmonyOS hors arm64 ecrivent dans <config>-<systeme>-<arch>
+        # (le dossier d'arm64 ne bouge pas : les kits publies en dependent). Sans cela le kit x86_64 recolterait la bibliotheque arm64.
+        arch = platform.split("-", 1)[1] if "-" in platform else ""
+        if arch and arch != "arm64" and KitCommand._OsOf(platform) in ("Android", "HarmonyOS"):
+            for niveau, reste in ((target_dir, None), (target_dir.parent, target_dir.name)):
+                if niveau.name.endswith("-Android") or niveau.name.endswith("-HarmonyOS"):
+                    neuf = niveau.with_name(niveau.name + "-" + arch)
+                    target_dir = neuf if reste is None else neuf / reste
+                    break
 
         name = project.targetName or project.name
         os_name = KitCommand._OsOf(platform)

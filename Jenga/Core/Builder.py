@@ -1110,14 +1110,35 @@ class Builder(abc.ABC):
             flat = f"{digest}_{flat[-80:]}"
         return f"{flat}{ext}"
 
+    # (07/11, 2.10.3) Android et HarmonyOS : un dossier de sortie qui s'ecrit <config>-<systeme> (le cas de tous les modules de Nkentseu :
+    # targetdir("%{wks.location}/Build/Lib/%{cfg.buildcfg}-%{cfg.system}")) recevait TOUTES les architectures : la construction x86_64
+    # ecrasait les .a arm64 (constate le 05/11). Hors arm64 (l'architecture par defaut, dont le dossier ne bouge pas : les kits
+    # publies et `jenga kit` en dependent), l'architecture s'ajoute au nom du dossier : Release-Android-x86_64.
+    def _SuffixeArchitecture(self) -> str:
+        systeme = (self.platform or "").lower().split("-")[0]
+        if systeme not in ("android", "harmonyos"):
+            return ""
+        arch = getattr(self.targetArch, "value", "")
+        return "" if arch in ("", "arm64") else "-" + arch
+
+    def _DirArchitecture(self, chemin: Path) -> Path:
+        suffixe = self._SuffixeArchitecture()
+        if not suffixe:
+            return chemin
+        for niveau, reste in ((chemin, None), (chemin.parent, chemin.name)):
+            if niveau.name.endswith("-Android") or niveau.name.endswith("-HarmonyOS"):
+                neuf = niveau.with_name(niveau.name + suffixe)
+                return neuf if reste is None else neuf / reste
+        return chemin
+
     def GetObjectDir(self, project: Project) -> Path:
         if project.objDir:
             if self._expander:
                 self._expander.SetProject(project)
                 expanded = self._expander.Expand(project.objDir, recursive=True)
-                return Path(expanded).resolve()
+                return self._DirArchitecture(Path(expanded).resolve())
             else:
-                return Path(project.objDir).resolve()
+                return self._DirArchitecture(Path(project.objDir).resolve())
         else:
             base = Path(self.workspace.location) / "Build" / "Obj" / self.config
             if self.platform:
@@ -1129,9 +1150,9 @@ class Builder(abc.ABC):
             if self._expander:
                 self._expander.SetProject(project)
                 expanded = self._expander.Expand(project.targetDir, recursive=True)
-                return Path(expanded).resolve()
+                return self._DirArchitecture(Path(expanded).resolve())
             else:
-                return Path(project.targetDir).resolve()
+                return self._DirArchitecture(Path(project.targetDir).resolve())
         else:
             base = Path(self.workspace.location) / "Build"
             if project.kind in (ProjectKind.STATIC_LIB, ProjectKind.SHARED_LIB):

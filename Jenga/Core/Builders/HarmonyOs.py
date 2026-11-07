@@ -1869,6 +1869,11 @@ class HarmonyOsBuilder(Builder):
         keystore  = getattr(project, 'harmonyKeystore', '') or ''
         key_alias = getattr(project, 'harmonyKeyAlias', '') or 'harmony'
         key_pwd   = getattr(project, 'harmonyKeyPwd',   '') or ''
+        # (07/11/2026, 2.10.3) « env:NOM » et « file:chemin » comme pour Android (_SignApk) : le mot de passe ne figure alors ni dans le .jenga
+        # ni dans le depot. hap-sign-tool n'accepte que le mot de passe en clair sur sa ligne : il est lu ICI, a l'instant de signer.
+        key_pwd = self._ResolveSecret(key_pwd)
+        if key_pwd is None:
+            return False
 
         if not cert_file or not profile or not keystore:
             Colored.PrintError(
@@ -1904,6 +1909,30 @@ class HarmonyOsBuilder(Builder):
         else:
             Colored.PrintError(f"[HarmonyOS] Signature echouee :\n{result.stderr}")
             return False
+
+    @staticmethod
+    def _ResolveSecret(value: str) -> Optional[str]:
+        """« env:NOM » -> la variable d'environnement ; « file:chemin » -> la premiere ligne du fichier ; sinon la valeur telle quelle.
+        Rend None (et dit pourquoi) si la variable ou le fichier manque : jamais de signature avec un mot de passe vide par erreur."""
+        if value.startswith("env:"):
+            nom = value[4:].strip()
+            v = os.environ.get(nom)
+            if not v:
+                Colored.PrintError(f"[HarmonyOS] harmonykeypwd : la variable d'environnement {nom} n'est pas definie.")
+                return None
+            return v
+        if value.startswith("file:"):
+            chemin = Path(value[5:].strip()).expanduser()
+            try:
+                lignes = chemin.read_text(encoding="utf-8").splitlines()
+            except OSError as e:
+                Colored.PrintError(f"[HarmonyOS] harmonykeypwd : fichier illisible ({chemin}) : {e}")
+                return None
+            if not lignes or not lignes[0].strip():
+                Colored.PrintError(f"[HarmonyOS] harmonykeypwd : fichier vide ({chemin})")
+                return None
+            return lignes[0].strip()
+        return value
 
     def _FindHapSignTool(self) -> Optional[Path]:
         """
