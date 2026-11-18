@@ -598,6 +598,10 @@ class Workspace:
     projects: Dict[str, Project] = field(default_factory=dict)
     toolchains: Dict[str, Toolchain] = field(default_factory=dict)
     defaultToolchain: Optional[str] = None
+    # (2.11.0) Famille de compilateur PREFEREE (prefercompiler) : "gcc", "clang", "msvc", "zig", ou ""
+    # (automatique). Plus faible qu'usetoolchain et que --toolchain : elle ne fait que passer en tete,
+    # pour chaque cible, les chaines detectees de cette famille ; aucune -> ordre automatique.
+    preferredCompiler: str = ""
 
     # Unitest configuration (optional)
     unitestConfig: Optional[UnitestConfig] = None
@@ -1176,7 +1180,11 @@ class include:
 
             # Mark as external
             proj._external = True
-            proj._externalFile = str(self._jengaPath)
+            # (2.11.0) Le fichier qui DECLARE le projet : sur des include imbriques, l'include
+            # exterieur repasse le meme projet ; il ne doit pas ecraser le fichier le plus profond
+            # (jenga file y cherche le bloc `with project(...)` a modifier).
+            if not proj._externalFile:
+                proj._externalFile = str(self._jengaPath)
             proj._externalDir = str(self._externalDir)
 
             self._parentWorkspace.projects[projName] = proj
@@ -2190,6 +2198,24 @@ def usetoolchain(name: str) -> None:
                 proj.toolchain = name
     else:
         raise RuntimeError("usetoolchain must be inside workspace or project")
+
+# (2.11.0) Familles acceptees par prefercompiler (ce que propose `jenga workspace -i`).
+COMPILATEURS_PREFERABLES = ("gcc", "clang", "msvc", "zig")
+
+def prefercompiler(family: str) -> None:
+    """Famille de compilateur preferee du workspace : "gcc", "clang", "msvc" ou "zig".
+
+    Une PREFERENCE, pas un choix force : pour chaque cible, les chaines detectees de cette famille
+    passent en tete de l'ordre automatique ; s'il n'y en a aucune (Android, Web, compilateur absent),
+    l'ordre automatique s'applique. usetoolchain() et `--toolchain` l'emportent toujours.
+    """
+    if _currentProject is not None or _currentWorkspace is None:
+        raise RuntimeError("prefercompiler must be inside a workspace (not inside a project)")
+    nom = str(family or "").strip().lower()
+    if nom not in COMPILATEURS_PREFERABLES:
+        raise ValueError(f"prefercompiler: famille '{family}' inconnue "
+                         f"(attendu : {', '.join(COMPILATEURS_PREFERABLES)})")
+    _currentWorkspace.preferredCompiler = nom
 
 # --- Android specific ---
 def androidsdkpath(path: str) -> None:
@@ -4725,7 +4751,7 @@ __all__ = [
     'defines', 'removedefines', 'undefines', 'optimize', 'symbols', 'warnings', 'runtime', 'staticruntime',
     'pchheader', 'pchsource',
     'prebuild', 'postbuild', 'prelink', 'postlink',
-    'usetoolchain',
+    'usetoolchain', 'prefercompiler',
     'androidsdkpath', 'androidndkpath', 'javajdkpath', 'macossdkpath', 'iossdkpath', 'tvossdkpath', 'watchossdkpath',
     'androidapplicationid', 'androidversioncode', 'androidversionname',
     'androidminsdk', 'androidtargetsdk', 'androidcompilesdk',

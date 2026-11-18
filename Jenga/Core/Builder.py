@@ -464,6 +464,7 @@ class Builder(abc.ABC):
             prefer = ['emscripten', 'zig-web-wasm32']
         elif self.targetOs == TargetOS.HARMONYOS:
             prefer = ['ohos-ndk']
+        prefer = self._OrdreSelonPreference(prefer)
         tc_name = self.toolchainManager.ResolveForTarget(self.targetOs, self.targetArch, self.targetEnv, prefer=prefer)
         # Apple mobile targets (iOS/tvOS/watchOS) are compiled with host Apple Clang.
         # Detected host toolchain is usually tagged as macOS; fallback to macOS lookup.
@@ -482,6 +483,33 @@ class Builder(abc.ABC):
 
         # Auto-detect and enable ccache/sccache for faster builds
         self._DetectCompilerCache()
+
+    # (2.11.0) prefercompiler(...) : famille -> CompilerFamily des chaines qui la portent. Zig se
+    # reconnait a son nom (ses chaines sont de famille CLANG) ; « clang » ne retient donc pas zig.
+    _FAMILLES_PREFERABLES = {
+        "gcc": (CompilerFamily.GCC,),
+        "clang": (CompilerFamily.CLANG, CompilerFamily.APPLE_CLANG),
+        "msvc": (CompilerFamily.MSVC,),
+    }
+
+    def _OrdreSelonPreference(self, prefer: List[str]) -> List[str]:
+        """L'ordre automatique `prefer`, les chaines DETECTEES de la famille preferee du workspace
+        (prefercompiler) en tete. Sans preference, ou sans chaine de cette famille pour la cible,
+        l'ordre ne change pas : ResolveForTarget ne retient que les chaines de la cible."""
+        voulu = str(getattr(self.workspace, "preferredCompiler", "") or "").strip().lower()
+        if not voulu:
+            return prefer
+        detectees = getattr(self.toolchainManager, "_detected", None) or {}
+
+        def convient(nom, tc) -> bool:
+            zig = str(nom).lower().startswith("zig")
+            if voulu == "zig":
+                return zig
+            return (not zig) and getattr(tc, "compilerFamily", None) in self._FAMILLES_PREFERABLES.get(voulu, ())
+
+        en_tete = [n for n in prefer if n in detectees and convient(n, detectees[n])]
+        en_tete += [n for n, tc in detectees.items() if n not in en_tete and convient(n, tc)]
+        return en_tete + [n for n in prefer if n not in en_tete]
 
     def _DetectCompilerCache(self) -> None:
         """

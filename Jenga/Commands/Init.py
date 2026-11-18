@@ -91,6 +91,8 @@ class InitCommand:
             configs=args.configs.split(','),
             oses=args.oses.split(','),
             archs=args.archs.split(','),
+            compiler=getattr(args, "compiler", ""),
+            unitest=getattr(args, "unitest", False),
         )
         FileSystem.WriteFile(entry_file, content)
 
@@ -272,6 +274,9 @@ __pycache__/
             configs=','.join(configs),
             oses=','.join(oses),
             archs=','.join(archs),
+            # (2.11.0) Ces deux reponses etaient demandees puis perdues : rien ne les transmettait.
+            compiler=compiler,
+            unitest=use_tests,
         )
         result = InitCommand._RunDirect(parsed)
         if result != 0:
@@ -296,8 +301,31 @@ __pycache__/
         return 0
 
     @staticmethod
-    def _GenerateWorkspaceContent(name: str, configs: List[str], oses: List[str], archs: List[str]) -> str:
-        """Génère le contenu du fichier .jenga."""
+    def _GenerateWorkspaceContent(name: str, configs: List[str], oses: List[str], archs: List[str],
+                                  compiler: str = "", unitest: bool = False) -> str:
+        """Génère le contenu du fichier .jenga.
+
+        (2.11.0) `compiler` : la reponse « Preferred compiler » (GCC, Clang, MSVC, Zig ; vide ou
+        Auto-detect = rien) devient prefercompiler("<famille>"). `unitest` : la reponse oui a
+        « Enable unit testing » ecrit le bloc unitest ACTIF, en mode Compile (le mode Precompiled
+        attend une bibliotheque Unitest/libs/Unitest.lib que le paquet ne fournit pas)."""
+        famille = str(compiler or "").strip().lower()
+        if famille in ("", "auto-detect", "auto"):
+            toolchain_block = '''    # Default toolchain (auto-detected)
+    # usetoolchain("host-gcc")'''
+        else:
+            toolchain_block = f'''    # Preferred compiler: its toolchains come first when Jenga picks one for a target
+    # (automatic choice if none is found; usetoolchain() or --toolchain always win)
+    prefercompiler("{famille}")'''
+        if unitest:
+            unitest_block = '''    # Unitest testing framework (compiled from its sources).
+    # In a project: with test(): testfiles(["tests/**.cpp"])
+    with unitest() as u:
+        u.Compile()'''
+        else:
+            unitest_block = '''    # Uncomment to use Unitest testing framework
+    # with unitest() as u:
+    #     u.Compile()'''
         # Convertir les noms d'OS en énumérations TargetOS
         os_mapping = {
             'Windows': 'TargetOS.WINDOWS',
@@ -334,14 +362,11 @@ with workspace("{name}"):
     configurations({configs!r})
     targetoses([{', '.join(os_list)}])
     targetarchs([{', '.join(arch_list)}])
-    
-    # Default toolchain (auto-detected)
-    # usetoolchain("host-gcc")
-    
-    # Uncomment to use Unitest testing framework
-    # with unitest() as u:
-    #     u.Precompiled()
-    
+
+{toolchain_block}
+
+{unitest_block}
+
     # Add your projects here
     # with project("MyApp"):
     #     consoleapp()

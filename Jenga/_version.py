@@ -156,7 +156,12 @@ tôt et par n'importe quel sous-module sans risque d'import circulaire.
 # 2.10.3 (2026-11-07) : Android et HarmonyOS, chaque architecture hors arm64 a son dossier de sortie
 # (Release-Android-x86_64 : x86_64 n'ecrase plus arm64), et `jenga kit` suit la meme regle ; `harmonykeypwd`
 # accepte `env:` et `file:` ; la detection des toolchains indexe le PATH (FastWhich), deux fois plus rapide.
-__version__ = "2.10.3"
+# 2.11.0 (2026-11-18) : le mode interactif ecrit ce qu'on lui repond. `jenga file -i` (et `--src/--def...`)
+# modifie le fichier qui DECLARE le projet (un projet `--separate` vit dans son .jenga, plus « Project block
+# not found ») ; `jenga workspace -i` ecrit le compilateur prefere (mot nouveau prefercompiler, lu au choix
+# de la chaine) et active Unitest quand on repond oui ; `jenga project -i` respecte « Create starter files? »
+# non. y et non z (regle du 12/10) : prefercompiler est une fonction nouvelle ; rien ne casse l'existant.
+__version__ = "2.11.0"
 
 # Éditeur / entreprise. Rihen édite Jenga. Utilisé comme valeur par défaut
 # du publisher des installeurs (Manufacturer MSI, AppPublisher Inno, Maintainer

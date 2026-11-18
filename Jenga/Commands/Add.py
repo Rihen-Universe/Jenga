@@ -129,7 +129,8 @@ class AddCommand:
             return 0
 
         # Modifier le fichier .jenga
-        success = AddCommand._AppendToProjectBlock(entry_file, project.name, lines_to_add)
+        success = AddCommand._AppendToProjectBlock(
+            AddCommand._ProjectFile(project, entry_file), project.name, lines_to_add)
         if not success:
             Colored.PrintError("Failed to update .jenga file.")
             return 1
@@ -154,18 +155,45 @@ class AddCommand:
         return 0
 
     @staticmethod
+    def _DeclRegex(project_name: str):
+        return re.compile(
+            rf'^(?P<indent>[ \t]*)with\s+project\s*\(\s*["\']{re.escape(project_name)}["\']\s*\)\s*:\s*$'
+        )
+
+    @staticmethod
+    def _ProjectFile(project, entry_file: Path) -> Path:
+        """(2.11.0) Le fichier .jenga qui DECLARE le projet.
+
+        Un projet range dans son propre fichier (`jenga project X --separate`, inclus par
+        `with include(...)`) n'a pas son bloc dans le fichier du workspace : 2.10.3 n'y cherchait
+        que la, d'ou « Project block for 'X' not found ». Le chargeur note ce fichier dans
+        `_externalFile` ; on le prend s'il contient bien le bloc, sinon le fichier du workspace."""
+        decl_re = AddCommand._DeclRegex(project.name)
+        candidats = []
+        externe = getattr(project, "_externalFile", "") or ""
+        if externe:
+            candidats.append(Path(externe))
+        candidats.append(Path(entry_file))
+        for f in candidats:
+            try:
+                if f.is_file() and any(decl_re.match(l) for l in FileSystem.ReadFile(f).splitlines()):
+                    return f
+            except Exception:
+                continue
+        return Path(entry_file)
+
+    @staticmethod
     def _AppendToProjectBlock(entry_file: Path, project_name: str, lines: List[str]) -> bool:
         """
         Ajoute des lignes à l'intérieur du bloc `with project("{project_name}"):`.
-        Gère l'indentation automatique.
+        Gère l'indentation automatique. `entry_file` est le fichier qui declare le projet
+        (voir _ProjectFile), pas forcement celui du workspace.
         """
         content = FileSystem.ReadFile(entry_file)
         eol = "\r\n" if "\r\n" in content else "\n"
         lines_raw = content.splitlines(keepends=True)
 
-        decl_re = re.compile(
-            rf'^(?P<indent>[ \t]*)with\s+project\s*\(\s*["\']{re.escape(project_name)}["\']\s*\)\s*:\s*$'
-        )
+        decl_re = AddCommand._DeclRegex(project_name)
 
         start_idx = -1
         decl_indent = ""
@@ -252,7 +280,8 @@ class AddCommand:
                 Colored.PrintWarning("Invalid choice.")
 
         if lines_to_add:
-            success = AddCommand._AppendToProjectBlock(entry_file, project.name, lines_to_add)
+            success = AddCommand._AppendToProjectBlock(
+                AddCommand._ProjectFile(project, entry_file), project.name, lines_to_add)
             if success:
                 cache = Cache(entry_file.parent, workspaceName=entry_file.stem)
                 cache.Invalidate()

@@ -10,6 +10,73 @@ c'est le journal ci-dessous qui les dit. Quand `x` ou `y` augmente, les nombres 
 zéro. (La règle du 08/10/2026 faisait avancer `z` d'autant de pas que de corrections ; elle a été
 abandonnée le 12/10 : un numéro qui saute de cinq inquiète sans rien apprendre.)
 
+## v2.11.0 (2026-11-18)
+
+`y` avance (règle du 12/10) : le mot `prefercompiler` est une fonction nouvelle ; le reste corrige. Rien
+ne casse l'existant. Constats du 18/11 : séances interactives réelles rejouées pour le cours Jenga.
+
+### `jenga file -i` échouait sur un projet rangé dans son propre fichier
+
+Un projet créé par `jenga project Jeu --separate` (ou `--own-file`, ou « oui » à la question du fichier
+séparé) vit dans `Jeu/Jeu.jenga`, inclus par le workspace. `jenga file Jeu -i` répondait « Project block
+for 'Jeu' not found », code 1 ; `jenga file Jeu --def X=1` aussi.
+
+- **La cause** : le bloc `with project("Jeu"):` n'était cherché que dans le fichier du workspace.
+- **Corrigé** : Jenga modifie le fichier qui DÉCLARE le projet (celui que le chargement a noté), le
+  workspace sinon. Sur des `include` imbriqués, c'est le fichier le plus profond qui est retenu.
+
+### `jenga workspace -i` : le compilateur choisi n'était écrit nulle part
+
+La réponse à « Preferred compiler » était demandée, affichée dans le résumé, puis perdue.
+
+- **Corrigé** : GCC, Clang, MSVC ou Zig s'écrit `prefercompiler("gcc")` (`"clang"`, `"msvc"`, `"zig"`)
+  dans le `.jenga` du workspace ; Auto-detect n'écrit rien.
+- **Mot nouveau `prefercompiler(famille)`** (dans le workspace) : pour chaque cible, les chaînes détectées
+  de cette famille passent en tête de l'ordre automatique. C'est une préférence : sans chaîne de cette
+  famille pour la cible (Android, Web, compilateur absent), l'ordre automatique s'applique ;
+  `usetoolchain()` et `--toolchain` l'emportent toujours. « clang » ne retient pas Zig.
+
+### `jenga workspace -i` : « oui » aux tests unitaires laissait Unitest en commentaire
+
+- **Corrigé** : le bloc `with unitest() as u: u.Compile()` est écrit actif ; le projet `__Unitest__`
+  existe au chargement. Mode `Compile` (Unitest compilé depuis ses sources) : le mode `Precompiled`,
+  proposé jusqu'ici en commentaire, attend une `Unitest/libs/Unitest.lib` que le paquet ne fournit pas.
+
+### `jenga project -i` : « non » à « Create starter files? » était ignoré
+
+Le `main.cpp` de départ était écrit quand même. Il ne l'est plus ; les dossiers `src/` et `include/`
+suivent toujours leur propre question.
+
+### Bancs
+
+`tests/test_interactif_reponses.py` (23 cas) : les séances passent par les vraies commandes, `input()`
+nourri réponse par réponse. Sur le code 2.10.3 : 15 cas tombent, les 8 témoins passent. Chaque correctif
+retiré seul fait tomber au moins un cas. Suite complète : 366 réussis, 3 ignorés (2.10.3 : 343 et 3).
+
+### In English
+
+The minor number moves (rule of 12/10): the `prefercompiler` word is a new feature; everything else is a
+fix. Nothing existing breaks. Found on 18/11 by replaying real interactive sessions for the Jenga course.
+
+- **`jenga file -i` failed on a project kept in its own file.** A project created with `jenga project Jeu
+  --separate` (or `--own-file`) lives in `Jeu/Jeu.jenga`, included by the workspace; `jenga file Jeu -i`
+  (and `--def`, `--src`...) said "Project block for 'Jeu' not found", exit code 1. The block was only
+  searched in the workspace file. Jenga now edits the file that DECLARES the project (the innermost one
+  with nested includes), the workspace file otherwise.
+- **`jenga workspace -i` lost the preferred compiler.** GCC, Clang, MSVC or Zig is now written as
+  `prefercompiler("gcc")` (`"clang"`, `"msvc"`, `"zig"`); Auto-detect writes nothing. **New word
+  `prefercompiler(family)`** (workspace level): for each target, detected toolchains of that family come
+  first in the automatic order. It is a preference: with no toolchain of that family for the target, the
+  automatic order applies; `usetoolchain()` and `--toolchain` always win. "clang" does not pick Zig.
+- **`jenga workspace -i`: answering yes to unit tests left Unitest commented out.** The `with unitest() as
+  u: u.Compile()` block is now written active and `__Unitest__` exists on load. `Compile` mode, because
+  `Precompiled` expects a `Unitest/libs/Unitest.lib` the package does not ship.
+- **`jenga project -i` ignored "no" to "Create starter files?"**: the starter `main.cpp` is no longer
+  written; `src/` and `include/` still follow their own question.
+- Tests: `tests/test_interactif_reponses.py` (23 cases) drive the real commands with `input()` fed answer
+  by answer. On 2.10.3 code, 15 cases fail and the 8 controls pass; removing any single fix makes at least
+  one case fail. Full suite: 366 passed, 3 skipped (2.10.3: 343 and 3).
+
 ## v2.10.0 (2026-10-22)
 
 `y` avance (règle du 12/10) : `jenga clean --taille` est une fonction nouvelle ; le reste corrige. Rien

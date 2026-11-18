@@ -172,8 +172,9 @@ class CreateCommand:
                 entry_file, args.name, kind_enum, lang_enum, relative_location, dialect=dialect
             )
 
-        # Créer des fichiers source par défaut
-        if args.kind in ('console', 'windowed', 'test'):
+        # Créer des fichiers source par défaut. (2.11.0) Sauf si `jenga project -i` a recu « non » a
+        # « Create starter files? » : la reponse etait demandee puis ignoree (main.cpp ecrit quand meme).
+        if getattr(args, 'starter', True) and args.kind in ('console', 'windowed', 'test'):
             CreateCommand._CreateDefaultSource(project_dir, args.name, args.lang)
 
         Colored.PrintSuccess(
@@ -265,6 +266,7 @@ class CreateCommand:
             location=location,
             dialect=std,
             separate=separate,
+            starter=create_files,
         )
         result = CreateCommand._CreateProjectDirect(parsed, entry_file)
         if result != 0:
